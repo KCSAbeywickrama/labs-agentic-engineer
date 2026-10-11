@@ -18,16 +18,11 @@
 
 import { describe, expect, it } from "vitest";
 import { designCatalog, registeredResourcesOf } from "./catalog";
+import { expenseTrackerDesign } from "./expenseTrackerDesign.testing";
 
-// A real design: the per-feature expense-tracker design the design eval wrote
-// (evals/spec-agents/scenarios/fixtures/expense-tracker-design), read as the
-// room holds it.
-const ROOT = "../../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/";
-const raw = import.meta.glob<string>(
-  "../../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/specs/**/*.{md,json,yaml,cell,dsl,feature}",
-  { query: "?raw", import: "default", eager: true },
-);
-const files = Object.fromEntries(Object.entries(raw).map(([path, content]) => [path.slice(ROOT.length), content]));
+// A real design: the per-feature expense-tracker design the design eval
+// wrote, read as the room holds it, with a flow.
+const files = expenseTrackerDesign;
 
 describe("the design catalog, from a design's files", () => {
   const catalog = designCatalog(files);

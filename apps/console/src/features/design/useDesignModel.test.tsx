@@ -22,16 +22,12 @@ import type { ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { expenseTrackerDesign } from "./model/expenseTrackerDesign.testing";
 // The design model on a real project: worked out from the room's design
 // files, which carry no design revisions, and the design-review turn running
 // now, read from the chat.
 
-const ROOT = "../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/";
-const raw = import.meta.glob<string>(
-  "../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/specs/**/*.{md,json,yaml,cell,dsl,feature}",
-  { query: "?raw", import: "default", eager: true },
-);
-const files = Object.fromEntries(Object.entries(raw).map(([path, content]) => [path.slice(ROOT.length), content]));
+const files = expenseTrackerDesign;
 
 vi.mock("../spec/collab/specDoc", () => ({ useSpecDoc: () => null }));
 vi.mock("../spec/collab/useRoomFiles", () => ({ useRoomFiles: () => files }));

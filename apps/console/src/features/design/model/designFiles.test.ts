@@ -20,19 +20,14 @@ import { describe, expect, it } from "vitest";
 import { prototypeHash } from "@wso2/prototype-kit/feedback";
 import { sha256Text } from "../../../lib/sha256";
 import { artifactHashes, designItems, reviewLists } from "./designFiles";
+import { expenseTrackerDesign } from "./expenseTrackerDesign.testing";
 
 // A real design (the expense-tracker design the design eval wrote, as the
-// room holds it), with what Design makes now beside it: a prototype, an
-// agent, a dependency, technical decisions.
-const ROOT = "../../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/";
-const raw = import.meta.glob<string>(
-  "../../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/specs/**/*.{md,json,yaml,cell,dsl,feature}",
-  { query: "?raw", import: "default", eager: true },
-);
-const evalFiles = Object.fromEntries(Object.entries(raw).map(([path, content]) => [path.slice(ROOT.length), content]));
+// room holds it, with a flow), with what Design makes now beside it: a
+// prototype, an agent, a dependency, technical decisions.
 const C = "specs/design/components/";
 const files: Record<string, string> = {
-  ...evalFiles,
+  ...expenseTrackerDesign,
   [`${C}expense-webapp/prototype.json`]: '{ "name": "Expense Tracker" }',
   [`${C}expense-webapp/prototype.tsx`]: "export default 1;",
   [`${C}claims-assistant/design.json`]: JSON.stringify({ name: "claims-assistant", type: "ai-agent", stories: ["F1.1"] }),
