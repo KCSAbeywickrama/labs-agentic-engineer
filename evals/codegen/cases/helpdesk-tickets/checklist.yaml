@@ -7,10 +7,9 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - The list of assignable agents comes from the API and nothing in the UI creates agents, so no item completes an assignment or reassignment (stories 7 and 11, assign-ticket and reassign-ticket flows) or uses the Assignee filter; a person could add these (including assignee shown on the ticket and Employee seeing the assignee) if agent users are known to be listed.
+#  - The list of assignable agents comes from the API and nothing in the UI creates agents, so no item completes an assignment or reassignment (stories F5.1, F5.2, assign-ticket and reassign-ticket flows) or uses the Assignee filter; a person could add these (including assignee shown on the ticket and Employee seeing the assignee) if agent users are known to be listed.
 #  - No UI way to make a ticket breach its SLA, so the SLA breach filter, the 'Breached' badge and the SLA breaches stat can only be checked for the no-breach case; a person could add a breach item if a ticket is allowed to age past its due time.
 #  - Employee is refused Ticket queue and Ticket workspace, and Support Agent and Team Lead are refused My tickets and Ticket detail; the Employee refusal for the Ticket detail screen is not written because its address is only reached through My tickets, and no other role refusal items exist since the other screens (Account, Settings) are not tied to scopes.
-#  - The prototype's Settings screen offers 'Email me a daily ticket digest' although the PRD puts notifications out of scope; the item only checks the screen loads and Save returns to the landing screen.
 #  - The PRD says Support Agent comments and Team Lead views comments; the prototype shows no comment form for Team Lead, so no Team Lead comment item is written.
 #  - The prototype draws the Account and Settings screens for all roles, but only the Employee walk is written for them.
 #  - Whether the SLA due time shown after triage is earlier or later depends on the API's targets (open question 1), so the triage item expects only that it is recomputed.
@@ -72,12 +71,12 @@ items:
     steps: Open the user menu and choose Account.
     expect: The Account screen shows Name, Email and Role 'Employee'.
     weight: 1
-  - id: employee-saves-settings
+  - id: employee-opens-settings
     role: Employee
-    screen: My tickets
+    screen: Settings
     flow: Settings
-    steps: Open the user menu and choose Settings. Press 'Save settings'.
-    expect: The Settings screen shows, and after saving you arrive back on My tickets.
+    steps: Open the user menu and choose Settings.
+    expect: The Settings screen says 'Nothing to set up' and that the app sends no email or notifications; it offers no email or digest option.
     weight: 1
   - id: agent-lands-on-queue
     role: Support Agent

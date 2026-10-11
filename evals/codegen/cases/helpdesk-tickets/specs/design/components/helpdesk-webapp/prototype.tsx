@@ -20,7 +20,7 @@ import { useState, type ReactNode } from "react";
 import {
   Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Filters, Form,
   Heading, Screen, Section, Stat, StatGroup, Table, Timeline, ValidationSummary,
-  defineApp, useCollection, useDisplayState, useNav, useParams, useRole, useToday,
+  defineApp, useCollection, useDisplayState, useParams, useRole, useToday,
 } from "@wso2/prototype-kit";
 
 interface Ticket {
@@ -458,18 +458,14 @@ function Account() {
 }
 
 function Settings() {
-  const navigate = useNav();
-  const role = useRole();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go(role === "Employee" ? "screen.my-tickets" : "screen.queue")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.digest" name="digest" label="Email me a daily ticket digest" type="switch" defaultValue="on" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="The help desk sends no email or notifications: open a ticket to see its status and comments."
+      />
     </Shell>
   );
 }

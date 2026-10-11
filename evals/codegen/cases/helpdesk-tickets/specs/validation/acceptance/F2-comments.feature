@@ -1,6 +1,6 @@
 Feature: Ticket comments
 
-  @story-3
+  @story-F2.1
   Rule: An employee can comment on their own ticket
 
     Scenario: Employee adds a comment
@@ -14,7 +14,7 @@ Feature: Ticket comments
       When Lee the employee tries to comment "Me too" on it
       Then the ticket's thread has no comments
 
-  @story-9
+  @story-F2.2
   Rule: A support agent can comment on any ticket and the requester sees it
 
     Scenario: Agent replies

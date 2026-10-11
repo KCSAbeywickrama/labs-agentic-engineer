@@ -1,6 +1,6 @@
 Feature: Ticket assignment
 
-  @story-7
+  @story-F5.1
   Rule: A support agent can assign a ticket to themselves or another agent
 
     Scenario: Assigning to oneself
@@ -13,7 +13,7 @@ Feature: Ticket assignment
       When Sam the support agent assigns it to Priya the support agent
       Then the ticket's assignee is Priya
 
-  @story-11
+  @story-F5.2
   Rule: A team lead can assign and reassign tickets
 
     Scenario: Reassigning a ticket
@@ -21,7 +21,7 @@ Feature: Ticket assignment
       When Tara the team lead reassigns it to Sam the support agent
       Then the ticket's assignee is Sam
 
-  @story-7 @story-11
+  @story-F5.1 @story-F5.2
   Rule: Employees cannot assign tickets
 
     @negative

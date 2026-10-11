@@ -1,6 +1,6 @@
 Feature: Raising and following tickets
 
-  @story-1
+  @story-F1.1
   Rule: An employee can raise a ticket with a title, description and priority
 
     Scenario: Raising a ticket
@@ -14,7 +14,7 @@ Feature: Raising and following tickets
       When Ana tries to raise a ticket with an empty title
       Then Ana's ticket list is empty
 
-  @story-2
+  @story-F1.2
   Rule: An employee sees only their own tickets
 
     @negative
@@ -29,7 +29,7 @@ Feature: Raising and following tickets
       When Ana opens her ticket list
       Then "Replace keyboard" is shown with status "open"
 
-  @story-12
+  @story-F1.3
   Rule: A ticket shows an SLA due time that depends on its priority
 
     Scenario: A critical ticket is due before a low one

@@ -1,6 +1,6 @@
 Feature: Ticket lifecycle
 
-  @story-6
+  @story-F3.2
   Rule: A support agent can triage a ticket and set its priority
 
     Scenario: Triage moves an open ticket to triaged
@@ -19,7 +19,7 @@ Feature: Ticket lifecycle
       When Ana tries to triage it
       Then the ticket status is still "open"
 
-  @story-8
+  @story-F3.3
   Rule: A support agent moves a ticket through in progress to resolved
 
     Scenario: Working a ticket to resolution
@@ -33,7 +33,7 @@ Feature: Ticket lifecycle
       When Sam the support agent tries to resolve it
       Then the ticket status is still "open"
 
-  @story-4
+  @story-F3.1
   Rule: Only the employee who raised a ticket may reopen it, and only once resolved
 
     Scenario: Reopening a resolved ticket

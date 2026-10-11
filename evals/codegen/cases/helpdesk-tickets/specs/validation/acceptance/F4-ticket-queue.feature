@@ -1,6 +1,6 @@
 Feature: Ticket queue
 
-  @story-5
+  @story-F4.1
   Rule: A support agent can filter the queue by status, priority, assignee and SLA breach
 
     Scenario: Filtering by priority
@@ -18,7 +18,7 @@ Feature: Ticket queue
       When Sam filters the queue to SLA breaches among this run's tickets
       Then only the ticket past its SLA due time is listed
 
-  @story-5 @story-10
+  @story-F4.1 @story-F4.2
   Rule: Only support agents and team leads see the whole queue
 
     @negative
@@ -27,7 +27,7 @@ Feature: Ticket queue
       When Ana tries to open the whole queue
       Then no tickets raised by other employees are shown to her
 
-  @story-10
+  @story-F4.2
   Rule: A team lead sees the whole queue with SLA breaches highlighted
 
     Scenario: Breach highlighted
