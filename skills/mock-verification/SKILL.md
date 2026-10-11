@@ -38,7 +38,7 @@ edit in:
   `useNav().go(…)`, where each one leads.
 
 Walk every flow under its role (`?role=<roleId>`) by clicking from its entry
-screen. Reach a screen in no flow (the account and settings screens) the way
+screen. Reach a screen in no flow (the account screen, a settings screen) the way
 a user does, from the user menu or the navigation. The signed-out screen is
 not a screen of the app: it is the Session item below. **The prototype is your
 only map**: you open the app's source to repair, never to learn a route. The

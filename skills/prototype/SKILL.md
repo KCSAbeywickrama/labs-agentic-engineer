@@ -100,7 +100,6 @@ refused.
     { "id": "screen.queue", "name": "Approval queue", "roleIds": ["Approver"] },
     { "id": "screen.detail", "name": "Expense detail", "roleIds": ["Approver"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Approver"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Approver"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Approver"] }
   ],
   "flows": [
@@ -116,8 +115,13 @@ refused.
 - A screen's `roleIds` are the roles that reach it. A flow is one role's walk
   through screens that role reaches, in order, for one story. Give each story
   that has a view a flow, named for what the actor does ("Submit a claim").
-- The app shell's screens, an account screen, a settings screen and a
-  signed-out screen, go to **every** role: every user has them.
+- The app shell's screens, an account screen and a signed-out screen, go to
+  **every** role: every user has them.
+- A settings screen exists only for the settings that the requirements name
+  (a notification choice, a default that a user picks). It goes to the roles
+  that set them, and it holds those settings and nothing else. When the
+  requirements name no setting, write no settings screen. Never invent a
+  preference (a digest email, a Slack alert, a compact view) to fill one.
 - `states` always starts with a default state (`state.default`); add one per
   presentation a reviewer must see:
   - `state.empty` wherever a list can be empty.
@@ -159,7 +163,6 @@ function Shell({ children }: { children: ReactNode }) {
       user={user}
       nav={[{ id: "nav.queue", label: "Approval queue", to: "screen.queue" }]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -252,22 +255,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const navigate = useNav();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.queue")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.digest" label="Email me a daily digest" type="switch" defaultValue="on" />
-      </Form>
-    </Shell>
-  );
-}
-
 function SignedOut() {
   return (
     <Screen>
@@ -282,7 +269,6 @@ export default defineApp({
     "screen.queue": Queue,
     "screen.detail": ExpenseDetail,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { expenses },
@@ -294,13 +280,14 @@ export default defineApp({
 - **Every screen sits in the app shell.** Write one `<AppShell>` in a small
   local component (`Shell` above) and make it every screen's root: it draws
   the product's header, the signed-in user and the user menu (Account,
-  Settings, Sign out) and the side navigation. Its `account`, `settings` and
-  `signOut` are screens you write: an account screen with the user's details,
-  a settings screen with the preferences the application offers, and a
+  Settings, Sign out) and the side navigation. Its `account` and `signOut`
+  are screens you write: an account screen with the user's details, and a
   signed-out screen. Only that signed-out screen, outside the product, has a
-  bare `<Screen>` as its root, with a way to sign back in.
+  bare `<Screen>` as its root, with a way to sign back in. Give `settings`
+  only when the prototype has a settings screen (see the manifest rules):
+  without it, the user menu has no Settings entry.
   The shell's `menu` adds the application's own user-menu entries (a profile,
-  billing) between Settings and Sign out. A reviewer points at an entry by
+  billing) before Sign out. A reviewer points at an entry by
   opening the menu in Preview, then switching to Annotate.
 - **One shell serves every role.** A navigation entry is drawn only for the
   roles that reach its screen. Give `user` the person each role signs in as
@@ -343,8 +330,8 @@ component, and a component takes no `className` or `style`.
 The review renderer draws only what the screen component renders: kit
 components, inside the chrome its `<AppShell>` draws (the header with the
 product's name and the signed-in user, the user menu with Account, Settings
-and Sign out, the side navigation). A bare `<Screen>` is drawn with no chrome
-at all.
+when the shell names a settings screen, and Sign out, the side navigation).
+A bare `<Screen>` is drawn with no chrome at all.
 
 Nothing else is drawn automatically: no notification bell, search, theme
 toggle, help menu or footer, whatever the built application's shell will
@@ -482,14 +469,14 @@ The fixed date every prototype treats as today (ISO `YYYY-MM-DD`).
 
 The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out).
 
-- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`.
+- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` (with `settings`) and `<id>.sign-out`.
 - `product?: string` — The product's name in the header; prototype.json's `name` by default.
 - `user: AppShellUser` — The signed-in user the header shows.
 - `nav: NavigationItem[]` — The side navigation's entries.
 - `account: string` — The screen the user menu's Account entry opens.
-- `settings: string` — The screen the user menu's Settings entry opens.
+- `settings?: string` — The screen the user menu's Settings entry opens. Leave it out when the application has nothing to set: the menu then has no Settings entry.
 - `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
-- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account (and Settings) and before Sign out.
 - `children?: ReactNode` — The screen's content.
 
 #### `AppShellUser`

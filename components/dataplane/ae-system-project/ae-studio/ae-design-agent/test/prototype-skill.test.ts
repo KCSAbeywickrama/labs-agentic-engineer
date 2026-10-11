@@ -92,20 +92,24 @@ test("the skill groups stats, gives sections their actions, and puts status and 
 // nothing more.
 test("the skill says the review renderer draws only the screen's components and its app shell", () => {
   assert.match(PROSE, /renderer draws only/i);
-  assert.match(PROSE, /user menu with Account, Settings and Sign out/);
+  assert.match(PROSE, /user menu with Account, Settings\s+when the shell names a settings screen, and Sign out/);
   assert.match(PROSE, /no notification bell/i);
   assert.match(PROSE, /model it in the kit/i);
   assert.match(PROSE, /outside the kit/i);
 });
 
-test("the skill puts every screen in the app shell, with Account, Settings and signed-out screens for every role", () => {
+test("the skill puts every screen in the app shell, with account and signed-out screens for every role, and settings only as the requirements name them", () => {
   assert.match(PROSE, /Every screen sits in the app shell/);
-  assert.match(PROSE, /an account screen with the user's details, a settings screen/);
+  assert.match(PROSE, /an account screen with the user's details, and a\s+signed-out screen/);
+  assert.match(PROSE, /A settings screen exists only for the settings that the requirements name/);
+  assert.match(PROSE, /Never invent a\s+preference/);
   assert.match(PROSE, /Only that signed-out screen, outside the product, has a bare `<Screen>`/);
   assert.match(PROSE, /go to \*\*every\*\* role/);
   const source = /```tsx\n([\s\S]*?)\n```/.exec(SKILL)?.[1] ?? "";
   assert.match(source, /<AppShell/);
   assert.match(source, /account="screen\.account"/);
+  // The example names no setting, so it has no settings screen to copy.
+  assert.doesNotMatch(source, /settings=|screen\.settings/);
 });
 
 test("the skill explains the screens: one per manifest screen, shared navigation, hooks, overlays, data", () => {
