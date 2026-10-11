@@ -120,6 +120,15 @@ flushed before every turn, so the agent reads them. If the turn doesn't
 start, the comments go back as they were. While it runs the card says so,
 and a prototype it may rewrite shows its last revision until the run ends.
 
+**After a run.** What a run's record decides reaches the spec state after
+the run's end: the design agent ends the turn's stream, then its usage outbox
+posts the record (with the run's `endRef` and `changedPaths`) to aep-api. So
+when a turn completes the console reads the spec state again, backing off for
+about 15 s, until `designedFrom` or `artifactRevisions` changes
+(`agent-chat/turnRecord.ts`); read only at the end, a run read as leaving its
+own design out of date, and the title line kept the old revision, until a
+reload.
+
 ## The chat
 
 The chat reports and the card acts (D07 rule 2, L26). A design run's closing
