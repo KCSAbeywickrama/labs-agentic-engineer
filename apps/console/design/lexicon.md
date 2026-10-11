@@ -38,7 +38,7 @@ for console turns, and a disagreement is settled here.
 
 | Say | Means | Not |
 |---|---|---|
-| **Prototype** | the clickable mock of one web application, made by the agent | wireframe (the sketch in Design), mockup, demo |
+| **Prototype** | the clickable mock of one web application, made by the agent | wireframe (the older sketch that only projects designed before the prototype show), mockup, demo |
 | **Make prototype** / **Update prototype** | the action; Update once one exists | generate, build |
 | **Review** | open a prototype full screen | open, view |
 | **Preview** | the review mode where the prototype acts | run, play |

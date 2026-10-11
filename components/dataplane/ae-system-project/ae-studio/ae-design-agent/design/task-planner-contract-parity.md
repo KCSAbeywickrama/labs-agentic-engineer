@@ -11,34 +11,53 @@ socket. The turn's lifecycle and the lock it shares with chat are in
 | Piece | Where |
 |---|---|
 | Turn socket contract and golden streams | `packages/contracts/sockets/ae-studio/turn/` |
-| Plan tools and their inputs | `src/agents/main/tools/task-plan.ts` (`planTask`, `updateTask`), schemas in `@aep/agent-stream` (`task-tools-schema.ts`) |
-| Per-turn accumulator, the self-correctable errors | `src/agents/main/task-plan-accumulator.ts` |
+| The plan tool and its input | `src/agents/main/tools/task-plan.ts` (`planBuild`), schema in `@aep/agent-stream` (`task-tools-schema.ts`) |
+| Per-turn accumulator, the self-correctable errors | `src/agents/main/task-plan-accumulator.ts` (`BuildPlan`) |
 | The stream's `task-op` lines | `src/edge/turn-socket.ts` (`taskOpOf`) |
-| The consumer that writes the issues | `services/aep-api/internal/delivery/task/plan_tap.go` |
+| The consumer that writes the issue | `services/aep-api/internal/delivery/task/plan_tap.go` |
 
-The planner's tools validate and accumulate; they never write. Each ok
-`planTask` / `updateTask` result becomes a `task-op` line, and `aep-api`'s
-plan tap mints and edits the Task issues from those lines. A failed call
-(`UNKNOWN_COMPONENT`, `UNKNOWN_REF`, `DUPLICATE_TITLE`, `DEPENDENCY_CYCLE`) returns to the model as a tool result, which corrects
-itself in the same turn.
+The planner's tool validates and accumulates; it never writes. Each ok
+`planBuild` result becomes a `task-op` line with `op: build`, and `aep-api`'s
+plan tap writes the version's one build issue from the last of them when the
+turn completes. A refused call (`UNKNOWN_COMPONENT`, `UNKNOWN_ITEM`,
+`MISSING_ITEM`, `DUPLICATE_ITEM`, `ITEM_ORDER`) returns to the model as a tool
+result, which corrects itself in the same turn.
 
 ## What the planner owns and what the platform owns
 
-`dependsOn` on a planned Task lists design **component names**, never issue
-numbers. `aep-api` resolves each to an issue number when it renders the
-Task body, because the issue a dependency will get may not exist yet when
-the dependent is planned; an unresolved name is still written by component.
+The plan scope names what the version carries: its features with the carried
+features each is built after, its product-wide items and its held-back stories.
+The planner orders those items (Foundation, when it has one, first; a feature
+after the ones it needs), names the components each touches, and writes a
+short note per item. It cannot add or drop a feature.
 
 The planner has no say over:
 
 - the build's gate tasks and the validation task, which the platform mints
-  elsewhere, so the planner never emits config-collection or resource
-  provisioning tasks;
-- the Task's labels and milestone, set by the plan tap;
-- the stories stamp, derived from the design's citations.
+  elsewhere;
+- the issue's title, labels, milestone and the lines that state the version's
+  facts (version, product-wide items, held-back stories), set by the plan tap.
 
-So the planner expresses dependency awareness only as build order (a
-consumer's Task lists its providers in `dependsOn`) and as the rationale text.
+## The plan turn's prompt
+
+`src/prompts/turn.ts` composes the turn from facts aep-api sends
+(ADR-0003):
+
+- `PLAN_INSTRUCTION` points at the `task-planning` skill and the spec paths,
+  and asks for the checklist through `planBuild` from the Version scope.
+- `scopeBlock` renders the scope as a `## Version scope (spec <tag>)` section:
+  each carried feature with what it needs, the product-wide items the
+  Foundation item builds, and the held-back stories. A scope with no features
+  renders `WHOLE_SPEC_SCOPE`, whose one item is `spec`.
+- The scope carries no stories and no coverage, and the turn gets no
+  existing-Tasks section: a version has one build issue, and a same-tag
+  rebuild does not plan.
+- `taskPlanInstructions` (`src/agents/main/prompt.ts`) is the plan toolset's
+  system prompt: what an item is, the `planBuild` input, and how to act on
+  each refusal code.
+
+`BuildPlan` is built from the snapshot's component directories and the same
+scope, so the tool refuses what the prompt says the version does not carry.
 
 ## Who may start a Plan
 

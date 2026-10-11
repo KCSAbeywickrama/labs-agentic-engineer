@@ -82,7 +82,7 @@ is already in `openapi.yaml`. Nothing about screens is authored anywhere.**
    compare, one scope per operation, reach is the path, 401 for everything and
    the browser's rule for it, screen gates derive from loads, refresh narrows,
    no groups claim — each with its measured reason and its ADR.
-   `security-design`, `openapi-conventions`, `wireframes`, `react-webapp` and
+   `security-design`, `openapi-conventions`, `react-webapp` and
    `thunder-authentication` point at it and say only what is theirs.
 8. **`architecture` pins the auth skills.** A component that declares the auth
    dependency carries `thunder-authentication` in `skillsPinned`, and a service
@@ -139,3 +139,33 @@ that is the type check's to catch: `gen` runs before `tsc` in `build`, the
 union changes, and the stale `loads` is a compile error. A stale committed
 `operations.gen.ts` is the same hazard the previous generator had and the same
 cure: `gen` before `tsc`, always.
+
+## Amendment 2026-10-11 — the screens come from the prototype
+
+The prototype replaced `wireframes.dsl` as a web-application's UI contract
+([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+The decision stands: a screen's gate is the scope of the operation it loads,
+and nothing about screens is authored in `security.json`. Where this ADR says
+the wireframe declares the screens, read the prototype:
+
+- **The screen set is `prototype.json` `screens[]`.** Each screen's `roleIds`
+  names the roles that reach it in the review, and `flows[]` names the walk
+  of each role. `roleIds` is not an authorization statement (the third
+  alternative above stands): the gate is still the operation.
+- **The coding agent writes `src/authz/screens.ts` from it** (point 2): one
+  entry per manifest screen, the shell screens included. It reads `loads`
+  from what `prototype.tsx` draws and the `openapi.yaml` behind it
+  (`skills/prototype/references/implementing.md`).
+- **A public screen** (point 4) is, in the coding run, a screen drawn on a bare
+  `<Screen>` root with no app shell (Signed out, a landing page). It is routed
+  above the sign-in guard.
+- **`security-design` writes grants without screens.** `/prototype` runs after
+  `/design`, so at design time no screens exist. Before it writes a role's
+  `grants`, the skill walks that role's flows in `specs/design/flows/*.md` and
+  the stories of the role's actor in the feature files, and grants the
+  operation each step loads.
+- **The mock walk** (point 6) opens each prototype flow's first screen as its
+  role.
+- **The build gate** refuses a prototype that offers a role `security.json`
+  does not declare, so the roles a reviewer saw are the roles the platform
+  provisions.

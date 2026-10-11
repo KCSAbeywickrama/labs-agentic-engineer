@@ -14,7 +14,7 @@ Terms: `CONTEXT.md` § Requirements model.
 | Interview a feature | `interview` (`/interview F<n>`) | that feature's file |
 | Any later change | `refine` (`/feature`, `/actor`, `/amend`, `/settle`) | wherever the change belongs |
 | Design | `design` (`/design F1 F2`) | the design, acceptance per feature |
-| Plan a build | `task-planning` | one Task per feature per component, plus foundation Tasks |
+| Plan a build | `task-planning` | one build issue: Foundation, then one item per feature, in build order |
 | Validate | `validation-task` | the report, for the version's built scope |
 
 `prd-contract` defines every file and line; `grilling` owns the questions.
