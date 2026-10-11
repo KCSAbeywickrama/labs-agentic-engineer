@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "name": "Conference Planner",
+  "entryScreen": "screen.events",
+  "roles": [
+    { "id": "Organizer", "name": "Organizer" },
+    { "id": "Speaker", "name": "Speaker" },
+    { "id": "Reviewer", "name": "Reviewer" },
+    { "id": "Attendee", "name": "Attendee" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Feed unavailable" }
+  ],
+  "screens": [
+    { "id": "screen.events", "name": "Events", "roleIds": ["Organizer", "Attendee"] },
+    { "id": "screen.event-detail", "name": "Event detail", "roleIds": ["Organizer", "Attendee"] },
+    { "id": "screen.session-detail", "name": "Session detail", "roleIds": ["Organizer", "Attendee"] },
+    { "id": "screen.proposals", "name": "My proposals", "roleIds": ["Speaker"] },
+    { "id": "screen.review-queue", "name": "Review queue", "roleIds": ["Reviewer"] },
+    { "id": "screen.decisions", "name": "Proposal decisions", "roleIds": ["Organizer"] },
+    { "id": "screen.my-registrations", "name": "My registrations", "roleIds": ["Attendee"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] }
+  ],
+  "flows": [
+    { "id": "flow.create-event", "name": "Create an event with rooms and sessions", "roleId": "Organizer",
+      "screenIds": ["screen.events", "screen.event-detail"] },
+    { "id": "flow.decide-proposals", "name": "Decide on scored proposals", "roleId": "Organizer",
+      "screenIds": ["screen.decisions"] },
+    { "id": "flow.session-oversight", "name": "Watch registrations and waitlist per session", "roleId": "Organizer",
+      "screenIds": ["screen.session-detail"] },
+    { "id": "flow.submit-proposal", "name": "Submit a talk proposal and track it", "roleId": "Speaker",
+      "screenIds": ["screen.proposals"] },
+    { "id": "flow.score-proposal", "name": "Score a proposal", "roleId": "Reviewer",
+      "screenIds": ["screen.review-queue"] },
+    { "id": "flow.browse-and-register", "name": "Browse events and register for a session", "roleId": "Attendee",
+      "screenIds": ["screen.events", "screen.event-detail", "screen.session-detail"] },
+    { "id": "flow.manage-registrations", "name": "Review and cancel my registrations", "roleId": "Attendee",
+      "screenIds": ["screen.my-registrations"] }
+  ]
+}

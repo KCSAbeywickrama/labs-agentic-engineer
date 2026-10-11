@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "name": "Procurement and Stock",
+  "entryScreen": "screen.catalogue",
+  "roles": [
+    { "id": "Requester", "name": "Requester" },
+    { "id": "Approver", "name": "Approver" },
+    { "id": "Warehouse Clerk", "name": "Warehouse Clerk" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.refused", "name": "Action refused" },
+    { "id": "state.failed", "name": "Stock feed failed" }
+  ],
+  "screens": [
+    { "id": "screen.catalogue", "name": "Catalogue", "roleIds": ["Requester"] },
+    { "id": "screen.new-request", "name": "Raise a request", "roleIds": ["Requester"] },
+    { "id": "screen.my-requests", "name": "My requests", "roleIds": ["Requester"] },
+    { "id": "screen.request-detail", "name": "Request detail", "roleIds": ["Requester"] },
+    { "id": "screen.approval-queue", "name": "Approval queue", "roleIds": ["Approver"] },
+    { "id": "screen.approval-detail", "name": "Approval detail", "roleIds": ["Approver"] },
+    { "id": "screen.orders", "name": "Orders to receive", "roleIds": ["Warehouse Clerk"] },
+    { "id": "screen.receive", "name": "Receive goods", "roleIds": ["Warehouse Clerk"] },
+    { "id": "screen.stock", "name": "Stock", "roleIds": ["Warehouse Clerk"] },
+    { "id": "screen.item-ledger", "name": "Item ledger", "roleIds": ["Warehouse Clerk"] },
+    { "id": "screen.catalogue-manage", "name": "Manage catalogue", "roleIds": ["Warehouse Clerk"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Requester", "Approver", "Warehouse Clerk"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Requester", "Approver", "Warehouse Clerk"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Requester", "Approver", "Warehouse Clerk"] }
+  ],
+  "flows": [
+    { "id": "flow.browse-catalogue", "name": "Browse the catalogue", "roleId": "Requester", "screenIds": ["screen.catalogue"] },
+    { "id": "flow.raise-request", "name": "Raise a purchase request", "roleId": "Requester", "screenIds": ["screen.catalogue", "screen.new-request", "screen.my-requests"] },
+    { "id": "flow.track-requests", "name": "Follow my requests", "roleId": "Requester", "screenIds": ["screen.my-requests", "screen.request-detail"] },
+    { "id": "flow.review-queue", "name": "Review pending requests", "roleId": "Approver", "screenIds": ["screen.approval-queue"] },
+    { "id": "flow.decide-request", "name": "Approve or reject a request", "roleId": "Approver", "screenIds": ["screen.approval-queue", "screen.approval-detail"] },
+    { "id": "flow.receive-goods", "name": "Receive goods against an order", "roleId": "Warehouse Clerk", "screenIds": ["screen.orders", "screen.receive"] },
+    { "id": "flow.trace-ledger", "name": "View an item's ledger", "roleId": "Warehouse Clerk", "screenIds": ["screen.stock", "screen.item-ledger"] },
+    { "id": "flow.view-low-stock", "name": "View the low-stock view", "roleId": "Warehouse Clerk", "screenIds": ["screen.stock"] },
+    { "id": "flow.add-item", "name": "Add a catalogue item", "roleId": "Warehouse Clerk", "screenIds": ["screen.catalogue-manage"] },
+    { "id": "flow.edit-item", "name": "Edit a catalogue item", "roleId": "Warehouse Clerk", "screenIds": ["screen.catalogue-manage"] }
+  ]
+}

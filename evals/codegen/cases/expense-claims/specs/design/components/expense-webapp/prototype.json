@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 3,
+  "name": "Expense Claims",
+  "entryScreen": "screen.my-claims",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Manager", "name": "Manager" },
+    { "id": "FinanceReviewer", "name": "Finance" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Claims feed failed" }
+  ],
+  "screens": [
+    { "id": "screen.my-claims", "name": "My claims", "roleIds": ["Employee"] },
+    { "id": "screen.claim-detail", "name": "Claim detail", "roleIds": ["Employee"] },
+    { "id": "screen.claim-form", "name": "Submit / edit claim", "roleIds": ["Employee"] },
+    { "id": "screen.approval-queue", "name": "Approval queue", "roleIds": ["Manager"] },
+    { "id": "screen.claim-review", "name": "Review claim", "roleIds": ["Manager"] },
+    { "id": "screen.approved-claims", "name": "Approved claims", "roleIds": ["FinanceReviewer"] },
+    { "id": "screen.export-history", "name": "Export history", "roleIds": ["FinanceReviewer"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Manager", "FinanceReviewer"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Manager", "FinanceReviewer"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Manager", "FinanceReviewer"] }
+  ],
+  "flows": [
+    { "id": "flow.submit-claim", "name": "Submit an expense claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.claim-form"] },
+    { "id": "flow.track-claims", "name": "Track the status of my claims", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.claim-detail"] },
+    { "id": "flow.edit-withdraw-claim", "name": "Edit or withdraw a pending claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.claim-detail", "screen.claim-form"] },
+    { "id": "flow.review-queue", "name": "See claims pending my approval", "roleId": "Manager",
+      "screenIds": ["screen.approval-queue"] },
+    { "id": "flow.approve-claim", "name": "Approve a claim", "roleId": "Manager",
+      "screenIds": ["screen.approval-queue", "screen.claim-review"] },
+    { "id": "flow.reject-claim", "name": "Reject a claim with a reason", "roleId": "Manager",
+      "screenIds": ["screen.approval-queue", "screen.claim-review"] },
+    { "id": "flow.view-approved", "name": "View all approved claims", "roleId": "FinanceReviewer",
+      "screenIds": ["screen.approved-claims"] },
+    { "id": "flow.export-payroll", "name": "Export approved claims to payroll", "roleId": "FinanceReviewer",
+      "screenIds": ["screen.approved-claims", "screen.export-history"] }
+  ]
+}

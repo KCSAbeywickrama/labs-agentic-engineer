@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 3,
+  "name": "Onboarding Tracker",
+  "entryScreen": "screen.dashboard",
+  "roles": [
+    { "id": "HRCoordinator", "name": "HR Coordinator" },
+    { "id": "ITStaff", "name": "IT Staff" },
+    { "id": "FacilitiesStaff", "name": "Facilities Staff" },
+    { "id": "Admin", "name": "Admin" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Action failed" }
+  ],
+  "screens": [
+    { "id": "screen.dashboard", "name": "Dashboard", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.new-onboarding", "name": "New onboarding", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.onboarding-detail", "name": "Onboarding detail", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.it-queue", "name": "IT task queue", "roleIds": ["ITStaff"] },
+    { "id": "screen.facilities-queue", "name": "Facilities task queue", "roleIds": ["FacilitiesStaff"] },
+    { "id": "screen.templates", "name": "Task templates", "roleIds": ["Admin"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] }
+  ],
+  "flows": [
+    {
+      "id": "flow.create-onboarding",
+      "name": "Start a new hire's onboarding",
+      "roleId": "HRCoordinator",
+      "screenIds": ["screen.dashboard", "screen.new-onboarding", "screen.onboarding-detail"]
+    },
+    {
+      "id": "flow.manage-exceptions",
+      "name": "Add, edit or remove a task",
+      "roleId": "HRCoordinator",
+      "screenIds": ["screen.onboarding-detail"]
+    },
+    {
+      "id": "flow.monitor-dashboard",
+      "name": "Monitor onboarding progress across departments",
+      "roleId": "HRCoordinator",
+      "screenIds": ["screen.dashboard"]
+    },
+    {
+      "id": "flow.complete-onboarding",
+      "name": "Mark onboarding complete",
+      "roleId": "HRCoordinator",
+      "screenIds": ["screen.onboarding-detail"]
+    },
+    {
+      "id": "flow.it-tasks",
+      "name": "Work the IT task queue",
+      "roleId": "ITStaff",
+      "screenIds": ["screen.it-queue"]
+    },
+    {
+      "id": "flow.facilities-tasks",
+      "name": "Work the Facilities task queue",
+      "roleId": "FacilitiesStaff",
+      "screenIds": ["screen.facilities-queue"]
+    },
+    {
+      "id": "flow.manage-templates",
+      "name": "Maintain standard task templates",
+      "roleId": "Admin",
+      "screenIds": ["screen.templates"]
+    }
+  ]
+}

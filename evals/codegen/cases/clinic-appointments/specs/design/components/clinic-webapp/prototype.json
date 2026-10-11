@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 3,
+  "name": "Clinic Appointments",
+  "entryScreen": "screen.slots",
+  "roles": [
+    { "id": "Patient", "name": "Patient" },
+    { "id": "Doctor", "name": "Doctor" },
+    { "id": "Receptionist", "name": "Receptionist" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.conflict", "name": "Rule refused the action" },
+    { "id": "state.validation-error", "name": "Validation errors" }
+  ],
+  "screens": [
+    { "id": "screen.slots", "name": "Browse slots", "roleIds": ["Patient"] },
+    { "id": "screen.appointments", "name": "My appointments", "roleIds": ["Patient"] },
+    { "id": "screen.appointment-detail", "name": "Appointment detail", "roleIds": ["Patient"] },
+    { "id": "screen.my-slots", "name": "My availability", "roleIds": ["Doctor"] },
+    { "id": "screen.schedule", "name": "My day", "roleIds": ["Doctor"] },
+    { "id": "screen.visit-note", "name": "Visit note", "roleIds": ["Doctor"] },
+    { "id": "screen.front-desk", "name": "Front desk", "roleIds": ["Receptionist"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Patient", "Doctor", "Receptionist"] }
+  ],
+  "flows": [
+    { "id": "flow.publish-slots", "name": "Publish availability", "roleId": "Doctor", "screenIds": ["screen.my-slots"] },
+    { "id": "flow.remove-slot", "name": "Remove an unbooked slot", "roleId": "Doctor", "screenIds": ["screen.my-slots"] },
+    { "id": "flow.browse-and-book", "name": "Browse and book a slot", "roleId": "Patient", "screenIds": ["screen.slots"] },
+    { "id": "flow.manage-appointments", "name": "Reschedule or cancel an appointment", "roleId": "Patient", "screenIds": ["screen.appointments", "screen.appointment-detail"] },
+    { "id": "flow.front-desk-booking", "name": "Book, reschedule or cancel for a patient", "roleId": "Receptionist", "screenIds": ["screen.front-desk"] },
+    { "id": "flow.check-in", "name": "Check in a patient", "roleId": "Receptionist", "screenIds": ["screen.front-desk"] },
+    { "id": "flow.doctor-day", "name": "See today's schedule", "roleId": "Doctor", "screenIds": ["screen.schedule"] },
+    { "id": "flow.write-visit-note", "name": "Write a visit note", "roleId": "Doctor", "screenIds": ["screen.schedule", "screen.visit-note"] }
+  ]
+}

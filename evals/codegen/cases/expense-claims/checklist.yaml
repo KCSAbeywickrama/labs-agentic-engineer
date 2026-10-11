@@ -6,117 +6,177 @@
 # weight: default 1. extras.mustCover items are walked and scored like items;
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
-# Planner gaps — what the walk cannot cover, and where the PRD and the wireframes disagree:
-#  - No UI anywhere lets anyone set an employee's manager (the EMPLOYEE.managerId self-reference), so a Manager's Approval Queue can never list a claim and Manager can never approve or reject one through the app; if a person assigns test-employee's manager to test-manager directly, add items for manager-reviews-claim, manager-approves-claim and manager-rejects-claim.
-#  - Because no claim can ever reach 'approved' status through the UI (see the manager-assignment gap above), Finance's Approved Claims list and the 'Export to Payroll' action can never be exercised with real data, and Export History can never show a nonzero batch; the same manual manager assignment would unblock finance-exports-claims and a finance-views-nonempty-history item.
-#  - The Claim Detail screen draws Amount, Date and Category as read-only text and only Description as an editable textarea, though PRD story 3 and the update-claim API imply all four fields are editable; this checklist follows the DSL and edits Description only, leaving the Amount/Date/Category edit case untested.
-#  - The API describes a 'no approved, not-yet-exported claims' case for exporting with zero approved claims, but no wireframe or product decision describes what the UI shows for that case, so no item exercises clicking 'Export to Payroll' while the approved list is empty.
+# Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
+#  - The UI has no way to assign employees to a manager, so no item can show a claim in the Approval queue, open Review claim, approve a claim, or reject a claim with a reason (stories 4, 5, 6 and flows review-queue, approve-claim, reject-claim). Items a person could add by hand if the assignment exists: open a pending claim from the queue, Approve, check the status as Employee; Reject with reason 'Not a reimbursable business expense' and check the reason on the Claim detail.
+#  - Approved claims depend on manager approval, which cannot be set up from an empty database, so Finance items needing approved claims are not written: viewing approved rows and the Approved/Not yet exported counts, Export to payroll, the CSV download, claims marked Exported (batch id), the Export button disabled afterwards so no claim is exported twice, a new row in Export history, and an Employee seeing Approved or Rejected status with a rejection reason (stories 2, 7, 8, 9, flow export-payroll).
+#  - Role reach: only a few refusal items are written (Employee on the Approval queue, Manager on My claims, Finance on the Approval queue). Other pairs (for example Employee on Approved claims or Export history, Manager on Approved claims, Finance on My claims) are refused on the same grounds and could be added the same way. Account, Settings and Signed out load no data operation and are reachable by all roles.
+#  - The prototype's Settings screen has a switch 'Email me a daily digest', which conflicts with the PRD decision that the product sends no email or notifications. The walk only checks that the screen loads and saves.
+#  - The PRD says the Manager sees only claims from employees assigned to them, but nothing in the UI sets that assignment (domain-model managerId has no screen).
+#  - The PRD story 3 (edit/withdraw while pending) is marked assumed, and the prototype draws the claim's fields on Claim detail as read-only Detail; editing is done only through the form reached by the Edit button.
+#  - The prototype's Signed out screen has a Sign in button, but WIRED-MODE AUTH says there is no sign-in page; the sign-out item follows the wired-mode behaviour instead.
+#  - The spec does not say what message the validation errors show for an empty claim form beyond the prototype's validation state, so only the blocked save is checked.
 
 items:
-  - id: employee-lands-on-claims
+  - id: employee-lands-on-my-claims
     role: Employee
-    screen: EmployeeClaims
-    flow: My Claims
-    steps: Land on the screen the Employee role opens to (no navigation needed).
-    expect: The navbar reads 'Expense Claims', the heading reads 'My Claims', a 'New Claim' button is visible, and the claims table shows no rows (the database starts empty).
+    screen: My claims
+    flow: Track claims (story 2)
+    steps: Look at the screen the app opens on. Nothing has been submitted yet.
+    expect: The My claims screen is shown with a New claim button, an Awaiting review count of 0, an Approved count of 0, and an empty state 'No claims yet' with a New claim button.
+    weight: 1
+  - id: employee-submit-validation
+    role: Employee
+    screen: Submit / edit claim
+    flow: Submit a claim (story 1)
+    steps: Click 'New claim'. On the claim form leave Amount, Date, Category and Description empty and click 'Save claim'.
+    expect: "The form is not accepted: the tester stays on the claim form with the empty required fields flagged, and no claim is added. Going back to My claims through the 'My claims' breadcrumb still shows 'No claims yet'."
     weight: 1
   - id: employee-submits-claim
     role: Employee
-    screen: EmployeeClaims
-    flow: My Claims
-    steps: From My Claims, click 'New Claim' to open New Claim. Enter Amount 120.00, Date 2024-03-01, select Category 'Travel', enter Description 'Taxi to client'. Click 'Submit'.
-    expect: The app returns to My Claims and a new row '2024-03-01 | Travel | 120.00 | Pending' appears in the table.
-    weight: 2
-  - id: employee-views-claim-detail
-    role: Employee
-    screen: ClaimDetail
-    flow: My Claims
-    steps: From My Claims, click the row for the claim created in employee-submits-claim.
-    expect: "Claim Detail opens showing badge 'Pending', 'Amount: 120.00', 'Date: 2024-03-01', 'Category: Travel', and a Description textarea containing 'Taxi to client'."
-    weight: 1
-  - id: employee-edits-pending-claim
-    role: Employee
-    screen: EmployeeClaims
-    flow: My Claims
-    steps: On Claim Detail for the claim from employee-submits-claim, change the Description textarea to 'Taxi to client meeting', then click 'Save Changes'. Back on My Claims, click that claim's row again.
-    expect: The app returns to My Claims with the row still reading '2024-03-01 | Travel | 120.00 | Pending'; reopening the claim shows the Description textarea containing 'Taxi to client meeting' (the edit persisted, not just the request succeeded).
+    screen: My claims
+    flow: Submit a claim (story 1)
+    steps: From My claims click 'New claim'. Enter Amount 148.20, Date 2026-01-10, Category Travel, Description 'Taxi to client site'. Click 'Save claim'.
+    expect: The app returns to My claims. A new row with Category Travel, Amount $148.20 and status Pending is listed, the Claims count is 1, and Awaiting review shows 1.
     weight: 2
   - id: employee-submits-second-claim
     role: Employee
-    screen: EmployeeClaims
-    flow: My Claims
-    steps: From My Claims, click 'New Claim'. Enter Amount 42.50, Date 2024-03-05, select Category 'Meals', enter Description 'Team lunch'. Click 'Submit'.
-    expect: The app returns to My Claims and a new row '2024-03-05 | Meals | 42.50 | Pending' appears alongside the earlier claim.
+    screen: My claims
+    flow: Submit a claim (story 1)
+    steps: Click 'New claim'. Enter Amount 62.00, Date 2026-01-05, Category Meals, Description 'Client lunch'. Click 'Save claim'.
+    expect: "My claims lists two rows: Travel $148.20 and Meals $62.00, both Pending, and Awaiting review shows 2."
     weight: 1
-  - id: employee-withdraws-claim
+  - id: employee-views-claim-detail
     role: Employee
-    screen: EmployeeClaims
-    flow: My Claims
-    steps: From My Claims, click the row for the claim created in employee-submits-second-claim to open its Claim Detail, then click 'Withdraw'.
-    expect: The app returns to My Claims; that claim's row now shows status 'Withdrawn'.
+    screen: Claim detail
+    flow: Track claims (story 2)
+    steps: On My claims click the Travel $148.20 row.
+    expect: The Claim detail screen shows Category Travel, Amount $148.20, Date 2026-01-10, Description 'Taxi to client site' and Status Pending, with Edit and Withdraw buttons and a breadcrumb back to My claims.
     weight: 2
+  - id: employee-edits-pending-claim
+    role: Employee
+    screen: My claims
+    flow: Edit or withdraw a pending claim (story 3)
+    steps: On the detail of the Travel $148.20 claim click 'Edit'. Check the form is pre-filled with the claim's values. Change Amount to 150.00 and Description to 'Taxi to client site (return trip)'. Click 'Save claim'. Then open that claim's row again.
+    expect: The edit form was pre-filled with 148.20, 2026-01-10, Travel and the original description. After saving, My claims shows the Travel row with $150.00 and status Pending, and the detail shows the new amount and description.
+    weight: 2
+  - id: employee-withdraws-pending-claim
+    role: Employee
+    screen: My claims
+    flow: Edit or withdraw a pending claim (story 3)
+    steps: On My claims open the Meals $62.00 claim and click 'Withdraw'.
+    expect: The app returns to My claims. The Meals $62.00 row now shows status Withdrawn and Awaiting review shows 1.
+    weight: 2
+  - id: employee-withdrawn-claim-not-editable
+    role: Employee
+    screen: Claim detail
+    flow: Edit or withdraw a pending claim (story 3)
+    steps: On My claims open the Withdrawn Meals $62.00 claim.
+    expect: The detail shows Status Withdrawn and offers no Edit or Withdraw button.
+    weight: 1
+  - id: employee-opens-account
+    role: Employee
+    screen: Account
+    flow: Account
+    steps: Open the user menu and choose the account entry.
+    expect: The Account screen shows Name, Email and Role, with Role Employee.
+    weight: 1
+  - id: employee-opens-settings
+    role: Employee
+    screen: My claims
+    flow: Settings
+    steps: Open the user menu and choose settings. Click 'Save settings'.
+    expect: The Settings screen shows a switch 'Email me a daily digest'. After clicking Save settings the app arrives on My claims.
+    weight: 1
   - id: manager-lands-on-queue
     role: Manager
-    screen: ManagerQueue
-    flow: Approvals
-    steps: Land on the screen the Manager role opens to (no navigation needed).
-    expect: The navbar reads 'Expense Claims', the heading reads 'Approval Queue', and the table lists no claims (no employee is assigned to this manager, so neither claim from the My Claims flow appears).
+    screen: Approval queue
+    flow: See claims pending my approval (story 4)
+    steps: Look at the screen the app opens on.
+    expect: The Approval queue screen is shown with an 'Awaiting you' count, a Pending claims section, and either rows or the empty state 'Nothing to review'. No crash or blank page.
     weight: 1
-  - id: manager-refused-employee-screen
+  - id: manager-queue-empty-state
     role: Manager
-    screen: EmployeeClaims
-    flow: Role reach
-    steps: Open the address the My Claims screen had in employee-lands-on-claims.
-    expect: "The Manager is refused: the Employee's My Claims screen and its claim rows do not appear; no crash or blank page."
+    screen: Approval queue
+    flow: See claims pending my approval (story 4)
+    steps: On the Approval queue read the list.
+    expect: Without any employee assigned to this manager, the Pending claims list is empty with the message 'Nothing to review' and Awaiting you reads 0. Claims from the Employee's submissions are not required to appear.
     weight: 1
-  - id: finance-lands-on-approved
+  - id: manager-opens-account
+    role: Manager
+    screen: Account
+    flow: Account
+    steps: Open the user menu and choose the account entry.
+    expect: The Account screen shows Name, Email and Role, with Role Manager.
+    weight: 1
+  - id: finance-lands-on-approved-claims
     role: FinanceReviewer
-    screen: FinanceApproved
-    flow: Payroll Export
-    steps: Land on the screen the FinanceReviewer role opens to (no navigation needed).
-    expect: The heading reads 'Approved Claims', an 'Export to Payroll' button is visible, and the table lists no claims (no claim has ever been approved).
+    screen: Approved claims
+    flow: View all approved claims (story 7)
+    steps: Look at the screen the app opens on.
+    expect: The Approved claims screen is shown with an Approved count, a 'Not yet exported' count and an 'Export to payroll' button.
     weight: 1
-  - id: finance-views-export-history
+  - id: finance-approved-empty-state
     role: FinanceReviewer
-    screen: ExportHistory
-    flow: Payroll Export
-    steps: From Approved Claims, click 'Export History' in the sidebar.
-    expect: Export History opens with heading 'Export History' and the table lists no export batches.
+    screen: Approved claims
+    flow: View all approved claims (story 7)
+    steps: On Approved claims read the list and try to click 'Export to payroll'.
+    expect: No approved claims exist, so the list shows 'No approved claims', both counts read 0, and no export can be made.
     weight: 1
-  - id: finance-refused-manager-screen
+  - id: finance-export-history-empty
     role: FinanceReviewer
-    screen: ManagerQueue
-    flow: Role reach
-    steps: Open the address the Approval Queue screen had in manager-lands-on-queue.
-    expect: "The FinanceReviewer is refused: the Approval Queue screen and its contents do not appear; no crash or blank page."
+    screen: Export history
+    flow: Export approved claims to payroll (stories 8, 9)
+    steps: Use the navigation to open 'Export history'.
+    expect: The Export history screen shows a Past exports section with the empty state 'No exports yet'.
     weight: 1
-  - id: employee-refused-finance-screen
+  - id: finance-opens-account
+    role: FinanceReviewer
+    screen: Account
+    flow: Account
+    steps: Open the user menu and choose the account entry.
+    expect: The Account screen shows Name, Email and Role, with Role FinanceReviewer.
+    weight: 1
+  - id: employee-refused-approval-queue
     role: Employee
-    screen: FinanceApproved
+    screen: My claims
     flow: Role reach
-    steps: Open the address the Approved Claims screen had in finance-lands-on-approved.
-    expect: "The Employee is refused: the Approved Claims screen and its contents do not appear; no crash or blank page."
+    steps: Open the address the Approval queue had in manager-lands-on-queue.
+    expect: The Approval queue and its data are not shown to the Employee; the app shows an access refusal or no-access state, not the queue.
+    weight: 1
+  - id: manager-refused-my-claims
+    role: Manager
+    screen: Approval queue
+    flow: Role reach
+    steps: Open the address My claims had in employee-lands-on-my-claims.
+    expect: The Employee's claims are not shown to the Manager; the app shows an access refusal or no-access state, not My claims.
+    weight: 1
+  - id: finance-refused-approval-queue
+    role: FinanceReviewer
+    screen: Approved claims
+    flow: Role reach
+    steps: Open the address the Approval queue had in manager-lands-on-queue.
+    expect: The Approval queue is not shown to Finance; the app shows an access refusal or no-access state, not the queue.
+    weight: 1
+  - id: no-role-sees-no-access
+    role: no role
+    screen: Approved claims
+    flow: Role reach
+    steps: Look at what the app shows on opening.
+    expect: "A no-access page is shown instead of the app: no claims, no approval queue and no export screens."
+    weight: 1
+  - id: signed-out-returns-through-sign-in
+    role: signed out
+    screen: My claims
+    flow: Role reach
+    steps: Load the app while signed out and wait for it to settle.
+    expect: The address loses auth=out and the app reloads into a session without a blank page or crash.
     weight: 1
   - id: employee-signs-out
     role: Employee
-    screen: NoAccess
+    screen: Signed out
     flow: Sign out
-    steps: From My Claims, use the app's sign-out control.
-    expect: "The app shows its no-access state (signed in, holding no role): My Claims and its claim rows no longer appear, and no sign-in form appears."
-    weight: 1
-  - id: no-role-lands-on-no-access
-    role: no role
-    screen: NoAccess
-    flow: Role reach
-    steps: Load the app signed in holding no role.
-    expect: A no-access page is shown instead of any claims screen; no crash or blank page.
-    weight: 1
-  - id: signed-out-resumes-session
-    role: signed out
-    screen: SessionResume
-    flow: Sign-in guard
-    steps: Load the app signed out.
-    expect: "The app's sign-in guard runs automatically: the signed-out marker disappears from the address and the app reloads straight into a session, with no blank page, crash, or sign-in form at any point."
+    steps: Open the user menu and choose sign out.
+    expect: The app goes to the root and shows its no-access state. The Employee's claims and screens are gone, and no sign-in form appears.
     weight: 1
 extras:
   mustCover: []

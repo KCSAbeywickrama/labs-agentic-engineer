@@ -243,7 +243,7 @@ export function renderChecklist(checklist: Checklist, plan: Pick<Plan, "gaps">, 
     " extras.mustNot entries ({id, description}) cap the band at review when violated.",
   ];
   if (plan.gaps.length > 0) {
-    header.push("", " Planner gaps — what the walk cannot cover, and where the PRD and the wireframes disagree:");
+    header.push("", " Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:");
     for (const gap of plan.gaps) header.push(`  - ${gap}`);
   }
   doc.commentBefore = header.join("\n");

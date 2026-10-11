@@ -6,281 +6,296 @@
 # weight: default 1. extras.mustCover items are walked and scored like items;
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
-# Planner gaps — what the walk cannot cover, and where the PRD and the wireframes disagree:
-#  - Waitlist (stories 12, 13: 'Join waitlist', waitlist position, automatic promotion) needs a full session and two distinct attendees; role switching gives only one Attendee identity, so no waitlist items were written. A person could add them by hand if two attendees can be used: with the capacity-1 'Intro to APIs' session filled by attendee A, attendee B clicks 'Join waitlist' and sees Waitlisted position 1 on My registrations, the organizer sees it on the session screen, and when A cancels B becomes Confirmed.
-#  - Editing an event (story 1) is not drawn: EventForm is reached only from 'New event' and EventAdmin has no edit control, so no edit item was written.
-#  - The PRD says organizers may assign reviewers to proposals, but no screen draws assignment; reviewers see all proposals per the DSL.
-#  - The wording of the registered state on EventDetail is not specified beyond 'Not registered', so that item expects only that the badge changes.
-#  - How the attendee selects a row for 'Register for session' and 'Cancel selected' is not drawn precisely (the session table has no navigation target), so the selection step is assumed.
-#  - Whether the session form pre-fills title, room or speaker when scheduling an accepted proposal is not specified; the accept item fills any blank field.
-#  - The PRD gives no way to edit or delete rooms, sessions or events, so no such items exist.
+# Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
+#  - Waitlist stories 12 and 13 (join waitlist when full, automatic promotion on cancellation) need two different attendees, and only one Attendee identity can be used and no UI creates another. Not tested. A person could add waitlist and promotion items by hand if two attendee identities exist: fill 'Closing Keynote' with one, join the waitlist with the other, cancel the first and check promotion.
+#  - Story 1 says organizers can edit events, and sessions are editable in the contract, but the prototype has no edit control for events, rooms or sessions. No edit item was written.
+#  - The PRD says organizers may assign reviewers to proposals, but no screen draws an assignment control. The Reviewer sees all submitted proposals in the review queue instead.
+#  - Speaker and Reviewer have no navigation to Events, and the Organizer has no way to view a Speaker's identity. Events, Event detail and Session detail need no scope beyond sign-in, so no role is refused them. No refusal item was written for them.
+#  - Reviewer holds the scope that loads the Proposal decisions screen (proposals:read-all) but not the decide scope. No refusal item was written for Reviewer on that screen. Organizer and Reviewer share the same list, so Reviewer refusal depends on how actions are gated.
+#  - Organizer is not refused My proposals in a dedicated item, and Organizer, Reviewer and Speaker refusals of every other screen are only partly covered. Only a representative set of refusals was written.
+#  - No UI shows the Attendee's identity as a distinct person, so the Organizer's Registrations list cannot be checked for a specific attendee name.
+#  - The relationship between room capacity and session capacity, session time-slot conflicts, and the effect of the Settings notification switch are not specified, so no items were written.
 
 items:
-  - id: organizer-lands-manage-events
+  - id: organizer-lands-on-events
     role: Organizer
-    screen: ManageEvents
-    flow: Build the program
-    steps: Look at the landing screen and the sidebar.
-    expect: The Events management screen shows with a 'New event' button and an empty events list (no crash). The sidebar offers 'Manage events' and 'Proposals'.
+    screen: Events
+    flow: Create an event
+    steps: Look at the screen the app opens on for the Organizer. Nothing has been created yet.
+    expect: The Events screen shows with a 'New event' button and the empty state 'No events yet'.
     weight: 1
   - id: organizer-creates-event
     role: Organizer
-    screen: ManageEvents
-    flow: Create event (story 1)
-    steps: Click 'New event'. Enter Name 'DevSummit 2026', Venue 'Colombo', Start date 2026-11-12, End date 2026-11-14. Click 'Save'.
-    expect: You arrive back on the Events management screen and a row for 'DevSummit 2026' with venue Colombo and dates 12-14 Nov is listed.
+    screen: Events
+    flow: Create an event (story 1)
+    steps: Press 'New event'. Enter Name 'API Summit 2026', Venue 'Colombo', Start date 2026-11-12, End date 2026-11-14. Press 'Create event'.
+    expect: The dialog closes and a row 'API Summit 2026' with venue Colombo and dates 2026-11-12 to 2026-11-14 is listed on Events.
     weight: 2
-  - id: organizer-cancel-event-form
+  - id: organizer-opens-event-detail
     role: Organizer
-    screen: ManageEvents
-    flow: Create event (story 1)
-    steps: Click 'New event'. Enter Name 'Throwaway Event'. Click 'Cancel'.
-    expect: You arrive back on the Events management screen and no 'Throwaway Event' row is listed.
-    weight: 1
-  - id: organizer-opens-event-admin
-    role: Organizer
-    screen: EventAdmin
-    flow: Build the program
-    steps: Click the 'DevSummit 2026' row.
-    expect: The event screen for DevSummit 2026 shows with a Rooms table (empty) and a Sessions table (empty), plus 'Add room' and 'Add session' buttons.
+    screen: Event detail
+    flow: Create an event with rooms and sessions
+    steps: Click the 'API Summit 2026' row created in organizer-creates-event.
+    expect: The Event detail screen opens titled 'API Summit 2026' showing Venue Colombo and the dates, an empty Rooms list ('No rooms yet') and an empty Sessions list ('No sessions yet'). The 'New session' button cannot be used while there are no rooms.
     weight: 1
   - id: organizer-adds-room
     role: Organizer
-    screen: EventAdmin
+    screen: Event detail
     flow: Define rooms (story 2)
-    steps: Click 'Add room'. Enter Room name 'Hall A', Capacity 120. Click 'Save'.
-    expect: You arrive back on the DevSummit 2026 event screen and the Rooms table lists 'Hall A' with capacity 120.
+    steps: On 'API Summit 2026', press 'Add room'. Enter Name 'Hall A', Capacity 120. Press 'Add room' in the dialog.
+    expect: The Rooms list shows 'Hall A' with capacity 120.
     weight: 2
-  - id: organizer-adds-session
+  - id: organizer-creates-open-session
     role: Organizer
-    screen: EventAdmin
+    screen: Event detail
     flow: Create sessions (story 3)
-    steps: On the DevSummit 2026 event screen click 'Add session'. Enter Title 'Intro to APIs', choose Room 'Hall A', Start time 2026-11-12 10:00, End time 2026-11-12 11:00, Capacity 1. Click 'Save'.
-    expect: You arrive back on the event screen and the Sessions table lists 'Intro to APIs' in Hall A at 12 Nov 10:00 with capacity 1 and waitlist 0.
+    steps: Press 'New session'. Choose Room 'Hall A', Title 'Intro to APIs', Speaker 'Sam Fernando', Start time 2026-11-12T10:00, End time 2026-11-12T11:00, Capacity 50. Press 'Create session'.
+    expect: The Sessions list shows 'Intro to APIs' in Hall A, time 10:00–11:00, 50 seats remaining and an 'Open' status.
     weight: 2
-  - id: organizer-session-registrations-empty
+  - id: organizer-creates-small-session
     role: Organizer
-    screen: SessionRegistrations
-    flow: Build the program
-    steps: On the event screen click the 'Intro to APIs' row.
-    expect: The session screen for 'Intro to APIs' shows a Seats left card (1 of 1), a Waitlist card (0 waiting) and an empty attendee table.
+    screen: Event detail
+    flow: Create sessions (story 3)
+    steps: Press 'New session'. Choose Room 'Hall A', Title 'Closing Keynote', Speaker 'Priya Jayasuriya', Start time 2026-11-14T16:00, End time 2026-11-14T17:00, Capacity 1. Press 'Create session'.
+    expect: The Sessions list now also shows 'Closing Keynote' with 1 seat remaining and an 'Open' status.
     weight: 1
-  - id: speaker-lands-my-proposals
+  - id: speaker-lands-on-my-proposals
     role: Speaker
-    screen: MyProposals
-    flow: Submit a talk
-    steps: Look at the landing screen and sidebar.
-    expect: The 'My proposals' screen shows with a 'New proposal' button and an empty proposals list. The sidebar offers 'My proposals' and 'Submit proposal'.
+    screen: My proposals
+    flow: Submit a talk proposal
+    steps: Look at the screen the app opens on for the Speaker.
+    expect: The My proposals screen shows with a 'Submit proposal' button and the empty state 'No proposals yet'.
     weight: 1
   - id: speaker-submits-proposal
     role: Speaker
-    screen: MyProposals
-    flow: Submit proposal (story 4)
-    steps: Click 'New proposal'. Choose Event 'DevSummit 2026', Talk title 'Scaling Queues', Abstract 'How we scaled message queues to 1M msgs/s'. Click 'Submit'.
-    expect: You arrive on 'My proposals' and a row 'Scaling Queues' for DevSummit 2026 with a submitted status is listed.
+    screen: My proposals
+    flow: Submit a proposal (story 4)
+    steps: Press 'Submit proposal'. Choose Event 'API Summit 2026', Title 'Scaling Queues', Abstract 'How we moved a million messages a day without losing one.'. Press 'Submit'.
+    expect: The dialog closes and 'Scaling Queues' is listed with a 'Submitted' status and no score yet.
     weight: 2
   - id: speaker-submits-second-proposal
     role: Speaker
-    screen: MyProposals
-    flow: Submit proposal (story 4)
-    steps: Open 'Submit proposal' from the sidebar. Choose Event 'DevSummit 2026', Talk title 'Legacy Migration', Abstract 'Moving a monolith in small steps'. Click 'Submit'.
-    expect: You arrive on 'My proposals' and both 'Scaling Queues' and 'Legacy Migration' are listed with a submitted status.
+    screen: My proposals
+    flow: Submit a proposal (story 4)
+    steps: Press 'Submit proposal'. Choose Event 'API Summit 2026', Title 'Monitoring at Scale', Abstract 'Dashboards that tell you something before the pager does.'. Press 'Submit'.
+    expect: Both 'Scaling Queues' and 'Monitoring at Scale' are listed, each with a 'Submitted' status.
     weight: 1
-  - id: speaker-cancels-submit
-    role: Speaker
-    screen: MyProposals
-    flow: Submit proposal (story 4)
-    steps: Click 'New proposal'. Enter Talk title 'Not Sent'. Click 'Cancel'.
-    expect: You arrive on 'My proposals' and no 'Not Sent' row is listed.
-    weight: 1
-  - id: reviewer-lands-review-queue
+  - id: reviewer-lands-on-review-queue
     role: Reviewer
-    screen: ReviewQueue
-    flow: Score proposals
-    steps: Look at the landing screen and sidebar.
-    expect: The 'Review queue' screen shows with an Event selector and a proposals table. The sidebar offers 'Review queue'.
-    weight: 1
-  - id: reviewer-filters-queue-by-event
-    role: Reviewer
-    screen: ReviewQueue
-    flow: Score proposals (story 6)
-    steps: Choose Event 'DevSummit 2026' in the Event selector.
-    expect: The table lists 'Scaling Queues' and 'Legacy Migration' (speaker shown, no average score yet, 0 reviews).
-    weight: 1
-  - id: reviewer-opens-proposal
-    role: Reviewer
-    screen: ReviewProposal
-    flow: Score proposals (story 6)
-    steps: Click the 'Scaling Queues' row.
-    expect: The proposal screen shows the heading 'Scaling Queues', its abstract text, a 'Score 1 to 5' selector, and 'Back' and 'Submit score' buttons.
-    weight: 1
-  - id: reviewer-back-from-proposal
-    role: Reviewer
-    screen: ReviewQueue
-    flow: Score proposals (story 6)
-    steps: On the 'Scaling Queues' proposal screen click 'Back'.
-    expect: You arrive on the Review queue screen.
+    screen: Review queue
+    flow: Score a proposal
+    steps: Look at the screen the app opens on for the Reviewer.
+    expect: The Review queue screen shows both 'Scaling Queues' and 'Monitoring at Scale' from the Speaker's submissions, each with a Score action and no average yet.
     weight: 1
   - id: reviewer-scores-proposal
     role: Reviewer
-    screen: ReviewQueue
-    flow: Score proposals (story 6)
-    steps: Open 'Scaling Queues', choose Score 4, click 'Submit score'.
-    expect: You arrive on the Review queue and the 'Scaling Queues' row now shows an average score of 4 with 1 review.
+    screen: Review queue
+    flow: Score a proposal (story 6)
+    steps: On the row 'Scaling Queues' use 'Score'. Enter Score 4. Press 'Submit score'.
+    expect: The dialog closes and the 'Scaling Queues' row shows average 4.0 with 1 review.
     weight: 2
   - id: reviewer-scores-second-proposal
     role: Reviewer
-    screen: ReviewQueue
-    flow: Score proposals (story 6)
-    steps: Open 'Legacy Migration', choose Score 2, click 'Submit score'.
-    expect: You arrive on the Review queue and the 'Legacy Migration' row shows an average score of 2 with 1 review.
+    screen: Review queue
+    flow: Score a proposal (story 6)
+    steps: On the row 'Monitoring at Scale' use 'Score'. Enter Score 3. Press 'Submit score'.
+    expect: The 'Monitoring at Scale' row shows average 3.0 with 1 review.
     weight: 1
-  - id: reviewer-scores-twice-refused
+  - id: reviewer-score-out-of-range
     role: Reviewer
-    screen: ReviewProposal
-    flow: Score proposals (story 6)
-    steps: Open 'Scaling Queues' again, choose Score 1, click 'Submit score'.
-    expect: "The second score is refused: the average for 'Scaling Queues' stays at 4 with 1 review."
+    screen: Review queue
+    flow: Score a proposal (story 6)
+    steps: On the row 'Monitoring at Scale' use 'Score'. Enter Score 7 and try to submit.
+    expect: The score is not accepted, the message 'Score must be between 1 and 5' is shown, and the average for 'Monitoring at Scale' stays 3.0 with 1 review.
     weight: 1
-  - id: organizer-lands-proposals-list
+  - id: reviewer-cannot-score-twice
+    role: Reviewer
+    screen: Review queue
+    flow: Score once per reviewer
+    steps: On the row 'Monitoring at Scale' use 'Score' again. Enter Score 5 and submit.
+    expect: "The proposal still has average 3.0 with 1 review: the same reviewer's second score is not counted."
+    weight: 1
+  - id: organizer-opens-decisions
     role: Organizer
-    screen: OrganizerProposals
-    flow: Decide proposals
-    steps: Click 'Proposals' in the sidebar and choose Event 'DevSummit 2026'.
-    expect: The Proposals screen lists 'Scaling Queues' (average 4, Submitted) and 'Legacy Migration' (average 2, Submitted) with their speakers.
+    screen: Proposal decisions
+    flow: Decide on scored proposals (story 7)
+    steps: Use the navigation entry 'Proposal decisions'.
+    expect: Proposal decisions lists 'Scaling Queues' (average 4.0) and 'Monitoring at Scale' (average 3.0), both 'Submitted', each with Accept and Reject actions.
+    weight: 1
+  - id: organizer-accepts-proposal
+    role: Organizer
+    screen: Proposal decisions
+    flow: Decide on scored proposals (story 7)
+    steps: On the row 'Scaling Queues' use 'Accept'.
+    expect: The row 'Scaling Queues' shows status 'Accepted' and offers 'Schedule session' instead of Accept and Reject.
     weight: 2
   - id: organizer-rejects-proposal
     role: Organizer
-    screen: OrganizerProposals
-    flow: Decide proposals (story 7)
-    steps: Click the 'Legacy Migration' row. Check the abstract and the average score card. Click 'Reject'.
-    expect: The decision screen showed the abstract and the average score card; after Reject you arrive on Proposals and 'Legacy Migration' no longer shows Submitted (it shows as rejected).
+    screen: Proposal decisions
+    flow: Decide on scored proposals (story 7)
+    steps: On the row 'Monitoring at Scale' use 'Reject'.
+    expect: The row 'Monitoring at Scale' shows status 'Rejected' and offers no further actions.
     weight: 2
-  - id: organizer-accepts-and-schedules
+  - id: organizer-schedules-accepted-proposal
     role: Organizer
-    screen: EventAdmin
-    flow: Decide proposals (stories 7, 8)
-    steps: Click the 'Scaling Queues' row, click 'Accept and schedule'. In the session form choose Room 'Hall A', Start time 2026-11-12 11:00, End time 2026-11-12 12:00, Capacity 50 (if Title is blank enter 'Scaling Queues'). Click 'Save'.
-    expect: You arrive on the DevSummit 2026 event screen and the Sessions table lists a 'Scaling Queues' session in Hall A at 12 Nov 11:00 with capacity 50.
+    screen: Proposal decisions
+    flow: Turn a proposal into a session (story 8)
+    steps: On the row 'Scaling Queues' use 'Schedule session'. Choose Room 'Hall A', Start time 2026-11-12T13:00, End time 2026-11-12T14:00, Capacity 40. Press 'Schedule'. Then use the navigation entry 'Events', open 'API Summit 2026'.
+    expect: The 'Schedule session' action is gone from the 'Scaling Queues' row. The event's Sessions list includes 'Scaling Queues' in Hall A, 13:00–14:00, 40 seats remaining, 'Open'.
     weight: 2
-  - id: organizer-proposal-accepted-status
-    role: Organizer
-    screen: OrganizerProposals
-    flow: Decide proposals (story 7)
-    steps: Click 'Proposals' in the sidebar, choose Event 'DevSummit 2026'.
-    expect: "'Scaling Queues' shows an accepted status and 'Legacy Migration' shows a rejected status."
-    weight: 1
   - id: speaker-sees-outcomes
     role: Speaker
-    screen: MyProposals
-    flow: Follow outcome (story 5)
-    steps: Look at the proposals table on 'My proposals'.
-    expect: "'Scaling Queues' shows an accepted status and 'Legacy Migration' shows a rejected status."
+    screen: My proposals
+    flow: Track proposals (story 5)
+    steps: Look at the My proposals list.
+    expect: "'Scaling Queues' shows score 4.0 and status 'Accepted'; 'Monitoring at Scale' shows score 3.0 and status 'Rejected'."
     weight: 2
-  - id: attendee-lands-events
+  - id: attendee-lands-on-events
     role: Attendee
     screen: Events
-    flow: Browse and register
-    steps: Look at the landing screen and sidebar.
-    expect: The Events screen shows the table with the 'DevSummit 2026' row (Colombo, 12-14 Nov). The sidebar offers 'Events' and 'My registrations'.
+    flow: Browse events
+    steps: Look at the screen the app opens on for the Attendee.
+    expect: The Events screen lists 'API Summit 2026' with venue and dates, with no 'New event' button.
     weight: 1
-  - id: attendee-opens-event-detail
+  - id: attendee-opens-event
     role: Attendee
-    screen: EventDetail
-    flow: Browse events (story 9)
-    steps: Click the 'DevSummit 2026' row.
-    expect: The event screen shows 'DevSummit 2026', a 'Not registered' badge, a 'Register for event' button, and a sessions table listing 'Intro to APIs' (Hall A, 12 Nov 10:00, 1 seat left, waitlist 0) and 'Scaling Queues' (Hall A, 12 Nov 11:00, 50 seats left).
-    weight: 2
+    screen: Event detail
+    flow: Browse and register (story 9)
+    steps: Click the 'API Summit 2026' row.
+    expect: "Event detail shows venue, dates, 'Your registration: Not registered', a 'Register for event' button, the room 'Hall A' and the sessions 'Intro to APIs', 'Closing Keynote' and 'Scaling Queues' with seats remaining and status. There are no Add room or New session buttons."
+    weight: 1
   - id: attendee-registers-for-event
     role: Attendee
-    screen: EventDetail
-    flow: Register for event (story 10)
-    steps: Click 'Register for event'.
-    expect: The registration completes on the same screen and the 'Not registered' badge changes to show the attendee is registered.
+    screen: Event detail
+    flow: Register for an event (story 10)
+    steps: Press 'Register for event'.
+    expect: "'Your registration' shows 'Confirmed' and the 'Register for event' button is no longer offered."
     weight: 2
   - id: attendee-registers-for-session
     role: Attendee
-    screen: EventDetail
-    flow: Register for session (story 11)
-    steps: Select the 'Intro to APIs' row and click 'Register for session'.
-    expect: The registration succeeds and the Intro to APIs row shows 0 seats left.
+    screen: Session detail
+    flow: Register for a session (story 11)
+    steps: Click the row 'Intro to APIs'. Note Seats remaining 50. Press 'Register'.
+    expect: Session detail shows room Hall A, time, speaker 'Sam Fernando', capacity 50. After registering, 'Your registration' shows 'Confirmed', a 'Cancel registration' button appears, and Seats remaining is 49.
     weight: 2
-  - id: attendee-my-registrations
+  - id: attendee-fills-small-session
     role: Attendee
-    screen: MyRegistrations
-    flow: Browse and register
-    steps: Click 'My registrations' in the sidebar.
-    expect: The table lists 'DevSummit 2026' and 'Intro to APIs' with a confirmed status.
-    weight: 2
-  - id: organizer-sees-session-registrations
-    role: Organizer
-    screen: SessionRegistrations
-    flow: See registrations (story 15)
-    steps: Open 'Manage events', click 'DevSummit 2026', click the 'Intro to APIs' session row.
-    expect: The session screen shows Seats left 0 of 1, Waitlist 0 waiting, and the attendee table lists the attendee from attendee-registers-for-session as Confirmed.
-    weight: 2
-  - id: attendee-cancels-registration
-    role: Attendee
-    screen: MyRegistrations
-    flow: Cancel registration (story 14)
-    steps: On 'My registrations' select the 'Intro to APIs' row and click 'Cancel selected'.
-    expect: The 'Intro to APIs' registration no longer shows as confirmed (it is cancelled or removed from the list).
-    weight: 2
-  - id: organizer-seat-freed
-    role: Organizer
-    screen: SessionRegistrations
-    flow: See registrations (story 15)
-    steps: Open the 'Intro to APIs' session screen again via Manage events and DevSummit 2026.
-    expect: Seats left shows 1 of 1 again.
+    screen: Session detail
+    flow: Register for a session (story 11)
+    steps: Go back to the event, click the row 'Closing Keynote' (capacity 1) and press 'Register'.
+    expect: Your registration shows 'Confirmed' and Seats remaining is 0. On the event's Sessions list, 'Closing Keynote' shows 0 seats and status 'Full'.
     weight: 1
-  - id: attendee-refused-organizer-screen
+  - id: attendee-views-my-registrations
     role: Attendee
-    screen: Events
-    flow: Role reach
-    steps: Open the address the Manage events screen had in organizer-lands-manage-events.
-    expect: "The Attendee is refused: the management screen is not shown."
+    screen: My registrations
+    flow: Review registrations (story 14)
+    steps: Use the navigation entry 'My registrations'.
+    expect: "The list shows three confirmed rows for 'API Summit 2026': one event-only registration, one for 'Intro to APIs' and one for 'Closing Keynote', each with a Cancel action."
+    weight: 1
+  - id: organizer-session-oversight
+    role: Organizer
+    screen: Session detail
+    flow: Watch registrations per session (story 15)
+    steps: Use the navigation entry 'Events', open 'API Summit 2026' and click the row 'Closing Keynote'.
+    expect: Session detail shows capacity 1, Seats remaining 0, Waitlist 0, and a Registrations list with one confirmed attendee entry. There are no Register or Cancel buttons for the Organizer.
+    weight: 2
+  - id: organizer-empty-session-registrations
+    role: Organizer
+    screen: Session detail
+    flow: Watch registrations per session (story 15)
+    steps: Go back to the event and click the row 'Scaling Queues'.
+    expect: Session detail shows capacity 40, Seats remaining 40, and the empty state 'No registrations yet' in Registrations.
+    weight: 1
+  - id: attendee-cancels-from-session
+    role: Attendee
+    screen: Session detail
+    flow: Cancel a registration (story 14)
+    steps: Open 'API Summit 2026', click 'Closing Keynote' and press 'Cancel registration'.
+    expect: The 'Your registration' status is gone, a 'Register' button is offered again, and Seats remaining is back to 1.
+    weight: 2
+  - id: attendee-cancels-from-my-registrations
+    role: Attendee
+    screen: My registrations
+    flow: Cancel a registration (story 14)
+    steps: Use the navigation entry 'My registrations'. On the row for 'Intro to APIs' use 'Cancel'.
+    expect: The 'Intro to APIs' row disappears from the list. Opening that session shows Seats remaining 50.
+    weight: 2
+  - id: organizer-sees-cancellation
+    role: Organizer
+    screen: Session detail
+    flow: Watch registrations per session (story 15)
+    steps: Open 'API Summit 2026' and click 'Closing Keynote'.
+    expect: Seats remaining is 1 and the Registrations list shows the empty state 'No registrations yet'.
+    weight: 1
+  - id: organizer-views-account
+    role: Organizer
+    screen: Account
+    flow: Account
+    steps: Open the user menu and choose the account entry.
+    expect: The Account screen shows Name, Email and Role 'Organizer'.
+    weight: 1
+  - id: organizer-saves-settings
+    role: Organizer
+    screen: Account
+    flow: Settings
+    steps: Open the user menu and choose settings. Change the switch 'Notify me of schedule changes' and press 'Save settings'.
+    expect: The Settings screen loads with the switch, and after saving the app arrives on the Account screen.
     weight: 1
   - id: speaker-refused-review-queue
     role: Speaker
-    screen: MyProposals
+    screen: Review queue
     flow: Role reach
-    steps: Open the address the Review queue had in reviewer-lands-review-queue.
-    expect: "The Speaker is refused: the Review queue is not shown."
+    steps: Open the address the Review queue had in reviewer-lands-on-review-queue.
+    expect: The Speaker does not get the Review queue or its proposals; the app shows an access refusal or the Speaker's own screen instead, without crashing.
     weight: 1
-  - id: reviewer-refused-proposals-list
+  - id: attendee-refused-my-proposals
+    role: Attendee
+    screen: My proposals
+    flow: Role reach
+    steps: Open the address My proposals had in speaker-lands-on-my-proposals.
+    expect: The Attendee does not see the My proposals screen or any proposals; the app shows an access refusal or the Attendee's own screen instead, without crashing.
+    weight: 1
+  - id: speaker-refused-my-registrations
+    role: Speaker
+    screen: My registrations
+    flow: Role reach
+    steps: Open the address My registrations had in attendee-views-my-registrations.
+    expect: The Speaker does not see the My registrations screen or any registrations; the app shows an access refusal or the Speaker's own screen instead, without crashing.
+    weight: 1
+  - id: reviewer-refused-my-registrations
     role: Reviewer
-    screen: ReviewQueue
+    screen: My registrations
     flow: Role reach
-    steps: Open the address the Proposals screen had in organizer-lands-proposals-list.
-    expect: "The Reviewer is refused: the organizer Proposals screen is not shown."
+    steps: Open the address My registrations had in attendee-views-my-registrations.
+    expect: The Reviewer does not see the My registrations screen or any registrations; the app shows an access refusal or the Reviewer's own screen instead, without crashing.
     weight: 1
-  - id: organizer-refused-my-registrations
-    role: Organizer
-    screen: ManageEvents
+  - id: attendee-refused-decisions
+    role: Attendee
+    screen: Proposal decisions
     flow: Role reach
-    steps: Open the address My registrations had in attendee-my-registrations.
-    expect: "The Organizer is refused: the attendee registrations screen is not shown."
+    steps: Open the address Proposal decisions had in organizer-opens-decisions.
+    expect: The Attendee does not see proposals or Accept and Reject actions; the app shows an access refusal or the Attendee's own screen instead, without crashing.
     weight: 1
-  - id: no-role-no-access
+  - id: no-role-sees-no-access
     role: no role
-    screen: Events
-    flow: Role reach
-    steps: Look at what the app shows on load.
-    expect: A no-access page is shown instead of the app screens.
+    screen: No access
+    flow: No role
+    steps: Look at what the app shows for a user holding no role.
+    expect: "A no-access page is shown instead of the app: no Events, proposals, or registrations data."
     weight: 1
-  - id: signed-out-guard
+  - id: signed-out-returns-through-sign-in
     role: signed out
     screen: Events
-    flow: Role reach
-    steps: Load the app signed out.
-    expect: The address loses 'auth=out' and the app reloads into a session, with no blank page or crash.
+    flow: Signed out
+    steps: Load the app while nobody is signed in.
+    expect: The app's sign-in guard runs, the address loses the signed-out marker and the app reloads into a session without a blank page or crash.
     weight: 1
-  - id: sign-out
+  - id: attendee-signs-out
     role: Attendee
-    screen: Events
+    screen: No access
     flow: Sign out
-    steps: Click 'Sign out' in the navbar.
-    expect: You go to the root address; the Attendee's screens and data are gone and the no-access state shows (no sign-in form).
+    steps: Open the user menu and choose sign out.
+    expect: The Attendee's screens and data (events, My registrations) are gone and the no-access state shows; no sign-in form appears.
     weight: 1
 extras:
   mustCover: []
