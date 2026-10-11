@@ -83,12 +83,13 @@
     },
     // @aep/console: TanStack file routes are consumed only by the generated
     // route tree, which is gitignored and so invisible to knip; each route file is
-    // an entry instead. The test setup and the verbatim-served public/ files are
-    // not production source.
+    // an entry instead. The test setup, the test data that several *.test.ts
+    // files share (`*.testing.ts`, beside them) and the verbatim-served public/
+    // files are not production source.
     "apps/console": {
       "entry": ["src/main.tsx!", "src/routes/**/*.tsx!"],
       "project": ["src/**/*.{ts,tsx}!"],
-      "ignore": ["public/**", "src/test-setup.ts"]
+      "ignore": ["public/**", "src/test-setup.ts", "src/**/*.testing.ts"]
     }
   },
   // An export used within its own file is not dead — this codebase deliberately
