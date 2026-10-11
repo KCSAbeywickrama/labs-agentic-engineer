@@ -498,15 +498,14 @@ function Account() {
 }
 
 function Settings() {
-  const navigate = useNav();
-  const role = useRole();
-  const entry = role === "Doctor" ? "screen.schedule" : role === "Receptionist" ? "screen.front-desk" : "screen.slots";
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form id="form.settings" onSubmit={() => navigate.go(entry)} actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}>
-        <Field id="field.reminders" label="Email me appointment reminders" type="switch" defaultValue="on" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="Clinic Appointments sends no email or notifications: open the app to see your appointments."
+      />
     </Shell>
   );
 }

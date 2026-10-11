@@ -1,6 +1,6 @@
 Feature: Front desk
 
-  @story-8
+  @story-F3.1
   Rule: A receptionist may book, reschedule and cancel for any patient, within the same rules
 
     Scenario: Booking for a patient
@@ -20,7 +20,7 @@ Feature: Front desk
       When Rita the receptionist tries to cancel it
       Then the appointment is still booked
 
-  @story-9
+  @story-F3.2
   Rule: Only a receptionist checks patients in, and only on the day of the appointment
 
     Scenario: Checking in on the day

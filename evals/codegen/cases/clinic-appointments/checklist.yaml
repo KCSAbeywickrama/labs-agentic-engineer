@@ -7,16 +7,15 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - The prototype's Settings 'Email me appointment reminders' switch conflicts with the PRD, which puts notifications out of scope; the walk only saves the form and checks it returns to the entry screen.
-#  - The PRD says receptionists can reschedule appointments (story 8), but the Front desk screen draws only Book, Check in and Cancel, so there is no reschedule item for the receptionist.
-#  - Story 7 asks for upcoming and past appointments, but nothing in the UI can create a past appointment from an empty database, and My appointments draws no upcoming/past split, so past appointments are not checked.
+#  - The PRD says receptionists can reschedule appointments (F3.1), but the Front desk screen draws only Book, Check in and Cancel, so there is no reschedule item for the receptionist.
+#  - Story F2.5 asks for upcoming and past appointments, but nothing in the UI can create a past appointment from an empty database, and My appointments draws no upcoming/past split, so past appointments are not checked.
 #  - The 2 hour cancel/reschedule rule is only checked for the patient cancel, using a slot published about one hour from now; the receptionist's refusal and the reschedule refusal are not walked.
 #  - Check-in is only allowed on the appointment's day (assumed in the PRD); the refusal for a future-dated appointment is not an item because the PRD marks it as assumed.
 #  - Double booking and 'slot just taken' refusals need two simultaneous sessions, so they are not walked.
 #  - Doctor-only ownership (a doctor sees only their own schedule and notes, other doctor's notes are refused) needs a second doctor identity, which the role-only sign-in cannot provide, so it is not walked.
 #  - The Appointment detail and Visit note screens need an appointment id in their address; refusal items reuse the Visit note address from doctor-writes-visit-note, and no separate refusal item is written for Appointment detail.
 #  - The Receptionist holds the browse-slots grant, so Browse slots loads for it and no refusal item is written for that screen. The Doctor's Settings, Account screens are reachable by all roles.
-#  - The doctor's landing screen is taken to be My day, as the prototype's Settings and Signed out screens imply; the manifest's entry screen is Browse slots, which is the patient's.
+#  - The doctor's landing screen is taken to be My day, as the prototype's Signed out screen implies; the manifest's entry screen is Browse slots, which is the patient's.
 #  - The Publish form takes free-text start and end times; whether a window longer than 30 minutes generates several slots is stated only in the API contract (default slot length 30 minutes), so every publish item uses a single 30 minute window.
 #  - Which doctor names appear in the Browse slots Doctor filter, and the receptionist's patient names, depend on the test users' display names; the walk uses 'Sam Lee' for the receptionist's booking, whose username may not match any real patient, so the PRD's 'for any patient' booking is checked only by name.
 #  - Open question in the PRD: how accounts and roles are created is not specified, so no item covers account creation.
@@ -25,119 +24,119 @@ items:
   - id: patient-lands-browse-slots-empty
     role: Patient
     screen: Browse slots
-    flow: Sign in (story 13)
+    flow: Sign in (F5.1)
     steps: Look at the screen the app opens on. Read the slots list.
     expect: The Browse slots screen shows with the heading 'Browse available slots'. No slots exist yet, so the list shows the 'No available slots' empty state. No crash.
     weight: 1
   - id: patient-appointments-empty
     role: Patient
     screen: My appointments
-    flow: My appointments (story 7)
+    flow: My appointments (F2.5)
     steps: Open 'My appointments' from the navigation.
     expect: The My appointments screen loads and shows the 'No appointments yet' empty state.
     weight: 1
   - id: doctor-lands-my-day-empty
     role: Doctor
     screen: My day
-    flow: Sign in (story 13), See today's schedule
+    flow: Sign in (F5.1), See today's schedule
     steps: Look at the screen the app opens on.
     expect: The My day screen shows with the heading 'My day', a Today count of 0, and the 'No appointments today' empty state.
     weight: 1
   - id: doctor-availability-empty
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Open 'My availability' from the navigation.
     expect: The My availability screen loads with a 'Publish slots' button and the 'No slots published' empty state.
     weight: 1
   - id: receptionist-lands-front-desk-empty
     role: Receptionist
     screen: Front desk
-    flow: Sign in (story 13), Front desk
+    flow: Sign in (F5.1), Front desk
     steps: Look at the screen the app opens on.
     expect: The Front desk screen shows with a 'Book for patient' button and the 'No appointments' empty state.
     weight: 1
   - id: doctor-publishes-first-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Open 'My availability'. Press 'Publish slots'. Enter Start 2026-10-18T09:00:00 and End 2026-10-18T09:30:00 (use a date about one week from today if that date has passed). Press 'Publish'.
     expect: The dialog closes and the list shows a slot on that date from 09:00 to 09:30 with status Available. The empty state is gone.
     weight: 2
   - id: doctor-publishes-second-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Press 'Publish slots'. Enter Start 2026-10-18T10:00:00 and End 2026-10-18T10:30:00 (same date as the previous item). Press 'Publish'.
     expect: A slot on that date from 10:00 to 10:30 is listed as Available, alongside the 09:00 slot.
     weight: 1
   - id: doctor-publishes-front-desk-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Press 'Publish slots'. Enter Start 2026-10-18T16:00:00 and End 2026-10-18T16:30:00 (same date as before). Press 'Publish'.
     expect: A slot on that date from 16:00 to 16:30 is listed as Available.
     weight: 1
   - id: doctor-publishes-spare-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Press 'Publish slots'. Enter Start 2026-10-18T17:00:00 and End 2026-10-18T17:30:00 (same date as before). Press 'Publish'.
     expect: A slot on that date from 17:00 to 17:30 is listed as Available.
     weight: 1
   - id: doctor-publishes-today-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Press 'Publish slots'. Using today's date, enter Start <today>T23:00:00 and End <today>T23:30:00. Press 'Publish'.
     expect: A slot today from 23:00 to 23:30 is listed as Available.
     weight: 1
   - id: doctor-publishes-soon-slot
     role: Doctor
     screen: My availability
-    flow: Publish availability (story 1)
+    flow: Publish availability (F1.1)
     steps: Press 'Publish slots'. Using today's date, enter a 30 minute slot starting about one hour from the current time (e.g. Start <today>T14:00:00, End <today>T14:30:00 when it is 13:00). Press 'Publish'.
     expect: The slot is listed as Available with that start and end.
     weight: 1
   - id: doctor-removes-unbooked-slot
     role: Doctor
     screen: My availability
-    flow: Remove an unbooked slot (story 2)
+    flow: Remove an unbooked slot (F1.2)
     steps: In the list, find the 17:00 to 17:30 slot published in doctor-publishes-spare-slot. Press its 'Remove' action.
     expect: The 17:00 slot disappears from the list. The other slots remain.
     weight: 2
   - id: patient-browses-and-filters-slots
     role: Patient
     screen: Browse slots
-    flow: Browse and book a slot (story 3)
+    flow: Browse and book a slot (F2.1)
     steps: Open 'Browse slots'. Read the list. Then in the Doctor filter choose the doctor shown on those slots.
     expect: With the first filter value the list shows the Available slots published by the doctor, including the 09:00, 10:00 and 16:00 slots, and not the removed 17:00 slot. After choosing that doctor, every row listed is that doctor's.
     weight: 1
   - id: patient-books-slot
     role: Patient
     screen: My appointments
-    flow: Browse and book a slot (story 4)
+    flow: Browse and book a slot (F2.2)
     steps: On 'Browse slots', press 'Book' on the 09:00 to 09:30 slot of the date used in doctor-publishes-first-slot. Then open 'My appointments'.
     expect: My appointments lists an appointment with that doctor at that date and 09:00 to 09:30 with status Booked. Back on Browse slots, the 09:00 slot is no longer listed as available.
     weight: 2
   - id: patient-opens-appointment-detail
     role: Patient
     screen: Appointment detail
-    flow: Reschedule or cancel an appointment (story 7)
+    flow: Reschedule or cancel an appointment (F2.5)
     steps: On 'My appointments', press the appointment at 09:00 booked in patient-books-slot.
     expect: The Appointment detail screen shows the doctor, the date and time 09:00 to 09:30, and status Booked, with 'Reschedule' and 'Cancel appointment' buttons. A breadcrumb leads back to My appointments.
     weight: 1
   - id: patient-reschedules-appointment
     role: Patient
     screen: Appointment detail
-    flow: Reschedule or cancel an appointment (story 5)
+    flow: Reschedule or cancel an appointment (F2.3)
     steps: On this appointment's detail, press 'Reschedule'. In the 'New slot' choice select the 10:00 to 10:30 slot of the same date. Press 'Reschedule' in the dialog.
     expect: The dialog closes and the detail shows the new time 10:00 to 10:30, still Booked. On Browse slots the 09:00 slot is available again and the 10:00 slot is not.
     weight: 2
   - id: patient-cancels-appointment
     role: Patient
     screen: My appointments
-    flow: Reschedule or cancel an appointment (story 6)
+    flow: Reschedule or cancel an appointment (F2.4)
     steps: Open the 10:00 appointment's detail from My appointments. Press 'Cancel appointment'.
     expect: The app goes to My appointments, where the appointment shows status Cancelled. On Browse slots the 10:00 slot is available again.
     weight: 2
@@ -151,63 +150,63 @@ items:
   - id: receptionist-books-for-patient
     role: Receptionist
     screen: Front desk
-    flow: Book for a patient (story 8)
+    flow: Book for a patient (F3.1)
     steps: On 'Front desk', press 'Book for patient'. Enter Patient name 'Sam Lee'. In Slot choose the 16:00 to 16:30 slot of the date from doctor-publishes-front-desk-slot. Press 'Book'.
     expect: The dialog closes. The list shows a row for Sam Lee with that doctor, that date at 16:00 to 16:30, and status Booked. The earlier patient's appointments also appear in the list.
     weight: 2
   - id: receptionist-books-today-slot
     role: Receptionist
     screen: Front desk
-    flow: Book for a patient (story 8)
+    flow: Book for a patient (F3.1)
     steps: Press 'Book for patient'. Enter Patient name 'Sam Lee'. In Slot choose today's 23:00 to 23:30 slot. Press 'Book'.
     expect: A row for Sam Lee today at 23:00 to 23:30 with status Booked is listed.
     weight: 1
   - id: receptionist-cancels-appointment
     role: Receptionist
     screen: Front desk
-    flow: Cancel for a patient (story 8)
+    flow: Cancel for a patient (F3.1)
     steps: Find the Sam Lee row for the 16:00 slot on the future date. Press its 'Cancel' action.
     expect: The appointment is no longer shown as Booked (it is gone from the list or marked Cancelled). The row no longer offers Check in or Cancel.
     weight: 2
   - id: receptionist-checks-in-patient
     role: Receptionist
     screen: Front desk
-    flow: Check in a patient (story 9)
+    flow: Check in a patient (F3.2)
     steps: Find the Sam Lee row for today's 23:00 slot. Press its 'Check in' action.
     expect: The row's status changes to Checked in and it no longer offers Check in or Cancel.
     weight: 2
   - id: patient-sees-only-own-appointments
     role: Patient
     screen: My appointments
-    flow: My appointments (story 7)
+    flow: My appointments (F2.5)
     steps: Open 'My appointments' and read the list.
     expect: The patient's own appointments (the cancelled 10:00 one and the booked near-term one) are listed. No row for Sam Lee appears.
     weight: 1
   - id: doctor-sees-booked-slot-without-remove
     role: Doctor
     screen: My availability
-    flow: Remove an unbooked slot (story 2)
+    flow: Remove an unbooked slot (F1.2)
     steps: Open 'My availability'. Look at the row for today's 23:00 slot, which the receptionist booked.
     expect: The slot is listed with status Booked and offers no Remove action, while Available slots still do.
     weight: 1
   - id: doctor-sees-todays-schedule
     role: Doctor
     screen: My day
-    flow: See today's schedule (story 10)
+    flow: See today's schedule (F4.1)
     steps: Open 'My day' from the navigation.
     expect: "Today's appointments are listed: Sam Lee at 23:00 with status Checked in, and the patient's near-term appointment with status Booked. The Today count equals the number of rows. Appointments on other dates are not listed."
     weight: 2
   - id: doctor-writes-visit-note
     role: Doctor
     screen: Visit note
-    flow: Write a visit note (story 11)
+    flow: Write a visit note (F4.2)
     steps: On 'My day', press the Sam Lee row. In the 'Visit note' field type 'Mild cough, advised rest and fluids.' Press 'Save note'. Then use the 'My day' breadcrumb and open the same row again.
     expect: The Visit note screen shows the patient name Sam Lee and the time. After saving and reopening, the field contains 'Mild cough, advised rest and fluids.'.
     weight: 2
   - id: doctor-note-requires-text
     role: Doctor
     screen: Visit note
-    flow: Write a visit note (story 11)
+    flow: Write a visit note (F4.2)
     steps: On 'My day', open the near-term appointment that has no note. Leave the 'Visit note' field empty and press 'Save note'.
     expect: "The note is not saved: the screen stays on Visit note and the field is flagged as needing text."
     weight: 1
@@ -232,12 +231,12 @@ items:
     steps: Open the user menu and choose Account.
     expect: The Account screen shows Name, Email and Role, with Role reading Receptionist.
     weight: 1
-  - id: patient-settings-save
+  - id: patient-opens-settings
     role: Patient
-    screen: Browse slots
+    screen: Settings
     flow: Settings
-    steps: Open the user menu and choose Settings. Toggle the 'Email me appointment reminders' switch. Press 'Save settings'.
-    expect: The Settings screen shows the switch and a Save settings button. After saving, the app goes to Browse slots.
+    steps: Open the user menu and choose Settings.
+    expect: The Settings screen says 'Nothing to set up' and that the app sends no email or notifications; it offers no email, reminder or notification option.
     weight: 1
   - id: patient-refused-my-availability
     role: Patient
@@ -256,7 +255,7 @@ items:
   - id: patient-refused-visit-note
     role: Patient
     screen: Visit note
-    flow: Role reach, visit notes only for doctors (story 12)
+    flow: Role reach, visit notes only for doctors (F4.3)
     steps: Open the address the Visit note screen had in doctor-writes-visit-note.
     expect: "The patient is refused: the note text 'Mild cough, advised rest and fluids.' is not shown."
     weight: 2
@@ -291,7 +290,7 @@ items:
   - id: receptionist-refused-visit-note
     role: Receptionist
     screen: Visit note
-    flow: Role reach, visit notes only for doctors (story 12)
+    flow: Role reach, visit notes only for doctors (F4.3)
     steps: Open the address the Visit note screen had in doctor-writes-visit-note.
     expect: "The receptionist is refused: the note text 'Mild cough, advised rest and fluids.' is not shown."
     weight: 2
@@ -319,14 +318,14 @@ items:
   - id: no-role-sees-no-access
     role: no role
     screen: Signed out
-    flow: Sign in (story 13)
+    flow: Sign in (F5.1)
     steps: Look at what the app shows.
     expect: "A no-access page is shown instead of the app: no navigation to slots, appointments, availability or the front desk, and no data."
     weight: 1
   - id: signed-out-guard-signs-in
     role: signed out
     screen: Signed out
-    flow: Sign in (story 13)
+    flow: Sign in (F5.1)
     steps: Load the app with nobody signed in and wait for it to settle.
     expect: The address loses auth=out and the app reloads into a session without a blank page or crash.
     weight: 1

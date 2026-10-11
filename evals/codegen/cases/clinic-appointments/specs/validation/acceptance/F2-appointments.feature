@@ -1,6 +1,6 @@
 Feature: Appointment booking
 
-  @story-3
+  @story-F2.1
   Rule: A patient sees only available slots when browsing
 
     Scenario: Booked slots are not offered
@@ -8,7 +8,7 @@ Feature: Appointment booking
       When Pat the patient browses that doctor and date
       Then exactly one slot is listed
 
-  @story-4
+  @story-F2.2
   Rule: A slot can be booked by at most one patient
 
     Scenario: Booking an available slot
@@ -23,7 +23,7 @@ Feature: Appointment booking
       Then Sam has no appointment for that slot
       And the slot has exactly one appointment
 
-  @story-5
+  @story-F2.3
   Rule: A patient may reschedule only their own appointment, and not within 2 hours of its start
 
     Scenario: Rescheduling to another available slot
@@ -39,7 +39,7 @@ Feature: Appointment booking
       When Pat tries to reschedule it to another available slot
       Then Pat's appointment is unchanged
 
-  @story-6
+  @story-F2.4
   Rule: A patient may cancel only their own appointment, and not within 2 hours of its start
 
     Scenario: Cancelling frees the slot
@@ -60,7 +60,7 @@ Feature: Appointment booking
       When Pat the patient tries to cancel Sam's appointment
       Then Sam's appointment is still booked
 
-  @story-7
+  @story-F2.5
   Rule: A patient sees only their own appointments, upcoming and past
 
     Scenario: Listing own appointments

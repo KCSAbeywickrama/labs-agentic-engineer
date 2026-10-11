@@ -1,6 +1,6 @@
 Feature: Doctor availability
 
-  @story-1
+  @story-F1.1
   Rule: A doctor publishes availability as bookable time slots
 
     Scenario: Publishing a morning window
@@ -9,7 +9,7 @@ Feature: Doctor availability
       Then Dr. Rivera has exactly 2 slots on that date
       And both slots can be found by a patient browsing that date
 
-  @story-2
+  @story-F1.2
   Rule: A doctor may remove only unbooked slots
 
     Scenario: Removing an unbooked slot

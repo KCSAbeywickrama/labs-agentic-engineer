@@ -1,6 +1,6 @@
 Feature: Sign-in and role access
 
-  @story-13
+  @story-F5.1
   Rule: Users must sign in and see only what their role allows
 
     @negative

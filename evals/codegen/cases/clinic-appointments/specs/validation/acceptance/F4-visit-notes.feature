@@ -1,6 +1,6 @@
 Feature: Doctor's day and visit notes
 
-  @story-10
+  @story-F4.1
   Rule: A doctor sees only their own appointments for the day
 
     Scenario: Viewing the day
@@ -9,7 +9,7 @@ Feature: Doctor's day and visit notes
       Then exactly 2 appointments are listed
       And all of them are Dr. Rivera's
 
-  @story-11
+  @story-F4.2
   Rule: A doctor writes visit notes on their own appointments
 
     Scenario: Writing a note
@@ -23,7 +23,7 @@ Feature: Doctor's day and visit notes
       When Dr. Rivera tries to save a note on it
       Then that appointment has no note
 
-  @story-12
+  @story-F4.3
   Rule: Only doctors can read visit notes
 
     @negative
