@@ -33,8 +33,7 @@ import {
   dependencyDesignJsonSchema,
   securityDesignJsonSchema,
   designReviewJsonSchema,
-  planTaskJsonSchema,
-  updateTaskJsonSchema,
+  buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
@@ -42,8 +41,7 @@ import {
   DEPENDENCY_DESIGN_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_SCHEMA_ARTIFACT,
   DESIGN_REVIEW_SCHEMA_ARTIFACT,
-  PLAN_TASK_SCHEMA_ARTIFACT,
-  UPDATE_TASK_SCHEMA_ARTIFACT,
+  BUILD_PLAN_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_MESSAGES_ARTIFACT,
   OPENAPI_SECURITY_MESSAGES_ARTIFACT,
@@ -56,8 +54,7 @@ const artifacts: [string, Record<string, unknown>][] = [
   [DEPENDENCY_DESIGN_SCHEMA_ARTIFACT, dependencyDesignJsonSchema()],
   [SECURITY_DESIGN_SCHEMA_ARTIFACT, securityDesignJsonSchema()],
   [DESIGN_REVIEW_SCHEMA_ARTIFACT, designReviewJsonSchema()],
-  [PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema()],
-  [UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema()],
+  [BUILD_PLAN_SCHEMA_ARTIFACT, buildPlanJsonSchema()],
   [AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema()],
   // Not schemas, but the same anti-drift deal: one source module, one
   // committed artifact, one freshness test. Both catalogs are vendored by the

@@ -1,25 +1,24 @@
 # IT Help Desk
 
 ## Problem Statement
-Employees who need IT help have no single place to raise and track requests, so issues get lost in chat and hallway asks. Support agents cannot see what is waiting or how urgent it is, and team leads cannot tell whether response targets are being missed.
+Employees need IT support, and support agents and team leads have no single place to see who asked for what, who owns it, and whether it is late. Requests get lost and nobody sees SLA breaches coming.
 
 ## Solution
-An internal help desk web app backed by one API service. Employees raise tickets and follow them through a comment thread; support agents triage, assign and resolve them; a team lead watches the queue, filtered by status, priority, assignee and SLA breach. Priority determines an SLA due time computed by the API.
+An internal help desk: employees raise tickets and follow them, support agents triage, assign and resolve them, and a team lead watches the queue filtered by status, priority, assignee and SLA breach. One web app and one API service.
 
 ## Actors
-- Employee: raises tickets, sees their own tickets, comments on them, and reopens their own resolved tickets.
-- Support Agent: sees the whole queue, triages, assigns, works, comments on and resolves tickets.
-- Team Lead: sees the whole queue and SLA breaches, and can assign and reassign tickets.
+- Employee: raises tickets, follows their own tickets, comments on them, and reopens a resolved ticket.
+- Support agent: sees the queue, triages, assigns, works and resolves tickets, and comments.
+- Team lead: watches the whole queue and SLA breaches; can assign tickets.
 
 ## Features
-- F1 [Raising tickets](features/F1-raising-tickets.md)
-- F2 [Comments](features/F2-comments.md)
-- F3 [Ticket lifecycle](features/F3-ticket-lifecycle.md)
-- F4 [Ticket queue](features/F4-ticket-queue.md)
-- F5 [Assignment](features/F5-assignment.md)
+- F1 [Raise and track tickets](features/F1-raise-and-track-tickets.md)
+- F2 [Ticket handling](features/F2-ticket-handling.md)
+- F3 [Ticket comments](features/F3-ticket-comments.md)
+- F4 [Queue and SLA monitoring](features/F4-queue-and-sla-monitoring.md)
 
 ## Product-wide
-SLA, visibility, sign-in and delivery are on the [Product-wide](product-wide.md) page.
+See [Product-wide](product-wide.md).
 
 ## Out of Scope
 - Email or any other notifications.

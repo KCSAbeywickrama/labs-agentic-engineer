@@ -21,9 +21,10 @@ Use this procedure for steps 1 and 3 of the `writing-skills` verify loop.
   then runs as `aep`. Thus the run can write the project and run directories,
   and you own each file that it writes. This step adds about 3 s to a Claude
   Code run and about 35 s to an OpenCode run. macOS runs do not use it.
-- `code` needs `go` on the PATH. Before the agent starts, it derives each
+- `code` and `tasks` need `go` on the PATH. Both first derive each
   dependency's `wiring` and `exposesAPI.auth` with aep-api's own derivation, as
-  POST /build does (ADR-0003).
+  POST /build does before its gate (ADR-0003). `tasks` then runs
+  `go run ./cmd/build-plan` to select and render the build issue.
 - If `aep-runner:dev` or `aep-runner-opencode:dev` is missing, the next `code`
   run builds both. The first build takes several minutes. It needs a
   GitHub token with the `read:packages` scope. To add that scope to your `gh`
@@ -63,9 +64,12 @@ component directories. A fixture that has component directories and no
 
 To make a fixture, copy `specs/` and `issues/` from the nearest project to a new
 directory in `playground/.projects/`. Remove each `## Progress` and
-`## Mock verification` section from the issues. Remove each dependency that
-your skill does not need. Keep two components or more: two is the minimum that
-exercises the working-set selection and the subagent fan-out.
+`## Mock verification` section from the issues, and untick each item
+(`- [x]` to `- [ ]`) of a build issue. Remove each dependency that your skill
+does not need. Keep two components or more: two is the minimum that exercises
+the subagent fan-out of one item. To plan the fixture again instead, delete
+`issues/` and the `versions` of `.aep-playground/project.json`, then run
+`tasks`.
 
 A `web-application` adds a mock-verification round. A subagent starts the app in
 mock mode and walks each prototype flow with `agent-browser`. No fixture makes
@@ -138,8 +142,13 @@ reads.
 ### Spec-side skills
 
 The coding run does not mirror a skill whose audience is design only. Tune it
-with `requirements`, `design` or `tasks`. Load a skill that has no verb with
-`pnpm play <dir> chat "/<skill> <message>"`.
+with `requirements`, `interview`, `design`, `prototype` or `tasks`. Load a skill that has no
+verb with `pnpm play <dir> chat "/<skill> <message>"`.
+
+`prototype` writes each web-application's `prototype.json` and `prototype.tsx`.
+`prototype --preview` reviews one in the browser: each Save feedback writes the
+comments as drafts in `specs/design/review.json`. `address-comments` sends the
+drafts and runs the `/address-comments` turn (ADR-0006).
 
 A spec verb has no `--restore`. Before each run, copy the fixture to a new
 directory in `playground/.projects/`. Add `--fresh` to start a new
@@ -198,13 +207,17 @@ ae-studio-tools does in production), and the design agent puts it on the
 | spec-turn snapshots exclude `issues/` | production spec turns never see tasks (they are in GitHub) | none needed: this is parity |
 | MCP is the catalog stubs: the design tools are listed, every call answers "no platform catalog" | no cluster, no ae-studio-tools (`engine/tools-fake.ts`) | none locally; the pod's tools socket serves the org's catalog |
 | no Room: a turn's edits stream back and the playground folds them to disk | no ae-collab locally; the folder is the source of truth | the pod joins the Room (`collab/local-room.ts`) |
+| a prototype write is folded on its `tool-result`, not its `tool-call` | the render check that can refuse it runs only in the design agent | none needed: the folder gets what the agent's bundle got |
+| the prototype review page is served by `@wso2/prototype-cli` preview, not the console | no console locally; the preview uses the same kit and Oxygen theme, has no Room, and saves the comments to `<component>/.prototype/feedback.json`, which the playground folds into `specs/design/review.json` as drafts | the console's prototype review, whose queue is the drafts |
 | `/v1` admits the session's dev bearer secret (`kit/auth.ts`), on loopback | no Platform IdP locally | the pod's `idpAuthenticate` |
 | `filesChangedExternally` follows the pod's rule (the last turn's snapshot differs), so it is set after any writing turn and resets with each session | the design agent keeps the last turn's facts in memory | the pod's behaviour, per pod lifetime |
-| `code` derives `wiring` and `exposesAPI.auth` from the repo's resource-type manifests, not from the cluster's catalog | there is no cluster; the derivation code is production's (`services/aep-api/cmd/design-derive`, ADR-0003) | a cluster with other resource types derives differently |
+| `code` and `tasks` derive `wiring` and `exposesAPI.auth` from the repo's resource-type manifests, not from the cluster's catalog | there is no cluster; the derivation code is production's (`services/aep-api/cmd/design-derive`, ADR-0003) | a cluster with other resource types derives differently |
 | no CRT-annotation append, no lineage diffs in replans | platform resources and tags do not exist locally | edit by hand; replan stays file-based |
-| issue `key` lineage is the constant `"local"`; no spec or design tags | no builds or tags locally | dedupe across replans still works |
+| no spec or design tags, and an issue file has no dedupe `key` | no builds or tags locally | `tasks` plans the next version in `versions`, so it never plans one twice |
 | design and tasks gates are playground UX | production has no server gate on the spec paths | advisory only |
-| an issue file has no status | the playground has no GitHub issue state, so each run derives "done" from the App Path (ADR-0001) | none needed |
+| an issue file has no status | the playground has no GitHub issue state: a build issue's item is done when its line is ticked, a hand-written bug when its App Paths satisfy it | none needed |
+| `tasks` records each version in `.aep-playground/project.json` (`versions`) | no tags: the list stands in for their annotations, so a later `--features` skips what was built | none needed |
+| a new `tasks` waits until the earlier build issue's items are all ticked | production supersedes the earlier version's open work; locally a person decides | finish it with `code`, or delete its file |
 | the coding agent runs in a throwaway `docker run` of the runner image, not a pod | no cluster; the image and the session options are production's | mandatory undo snapshot and first-run consent; `--host` has weaker parity (see Before the first run) |
 | `wire` builds images and runs containers on your machine | no cluster, and nobody can click through an app that does not run | first-run consent per project; it never deploys (ADR-0002) |
 | the workflow skill has no GitHub steps (issue files, no branch, no PR) | no remote | the `local.md` overlay, as in the fidelity contract |

@@ -1,29 +1,33 @@
 # Procurement and Stock
 
 ## Problem Statement
-Staff who need goods have no single place to request them, get spending approved within each approver's authority, and record what arrives. Stock levels are tracked ad hoc, so nobody can trust what is on hand or see what is running low. Today's workaround (messages and spreadsheets) causes unapproved spend, lost receipts and stock-outs.
+Staff who need goods have no single controlled way to request them, get them approved within spending authority, and record their arrival. Stock levels are therefore unreliable and nobody sees what is running low.
 
 ## Solution
-A procurement and stock system. Requesters raise purchase requests for catalogue items; approvers approve or reject them within the approval limit; warehouse clerks maintain the item catalogue and receive goods against approved orders, which raises stock. Every stock change is recorded as a ledger entry, and a low-stock view lists items below their reorder level.
+A procurement web app where requesters raise purchase requests for catalogue items, approvers approve or reject them within their approval limit, and warehouse clerks receive goods against approved orders. Receiving raises stock; every stock change is a ledger entry, and a low-stock view lists items below their reorder level.
 
 ## Actors
-- Requester: browses the catalogue, raises purchase requests and follows their status.
-- Approver: reviews pending requests and approves or rejects those within the approval limit.
-- Warehouse Clerk: adds and edits catalogue items, receives goods against approved orders, and views stock levels, the ledger and the low-stock view.
+- Requester: raises purchase requests for catalogue items and follows their status.
+- Approver: approves or rejects purchase requests up to their approval limit.
+- Warehouse clerk: receives goods against approved orders and sees stock levels, the ledger and the low-stock view.
 
 ## Features
-- F1 [Purchase requests](features/F1-purchase-requests.md)
-- F2 [Approvals](features/F2-approvals.md)
-- F3 [Receiving and stock](features/F3-receiving-and-stock.md)
-- F4 [Catalogue](features/F4-catalogue.md)
+- F1 [Catalogue](features/F1-catalogue.md)
+- F2 [Purchase requests](features/F2-purchase-requests.md)
+- F3 [Approvals](features/F3-approvals.md)
+- F4 [Goods receiving](features/F4-goods-receiving.md)
+- F5 [Stock and ledger](features/F5-stock-and-ledger.md)
+- F6 [Low-stock view](features/F6-low-stock-view.md)
 
 ## Product-wide
-Sign-in, reorder levels and the architecture are on the [Product-wide](product-wide.md) page.
+See [Product-wide](product-wide.md).
 
 ## Out of Scope
-- Email or any notifications.
-- File uploads or object storage.
+- Email or any other notifications.
+- File uploads and object storage.
 - Scheduled or background jobs.
 - External integrations.
-- AI features or agents.
-- Stock issues or adjustments other than receiving; deleting catalogue items.
+- AI features.
+
+## Open Questions
+1. Who maintains the catalogue (items and reorder levels)? Assumed to be the warehouse clerk; see F1.

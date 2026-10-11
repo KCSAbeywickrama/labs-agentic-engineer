@@ -6,12 +6,53 @@
   "buildpack": "docker",
   "appPath": "expense-api",
   "entrypoint": "deployment/service",
-  "exposure": "intranet",
-  "dependencies": [
-    { "kind": "platform-resource", "name": "expense-db", "resourceType": "postgres-cnpg" },
-    { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app" }
+  "exposure": "internet",
+  "stories": [
+    "F1.1",
+    "F1.2",
+    "F1.3",
+    "F1.4",
+    "F1.5",
+    "F1.6",
+    "F1.7",
+    "F2.1",
+    "F2.2",
+    "F2.3",
+    "F2.4",
+    "F2.5",
+    "F2.6",
+    "F3.1",
+    "F3.2",
+    "F3.3",
+    "F3.4",
+    "F3.5"
   ],
-  "description": "Owns expense claims, employee/manager relationships, and payroll export batches. Exposes claim submission, edit and withdrawal for employees, team-scoped approval/rejection for managers, and approved-claim export for finance. Does not send email or store any file attachments — no object storage dependency.",
-  "stories": ["F1.1", "F1.2", "F1.3", "F2.1", "F2.2", "F2.3", "F3.1", "F3.2", "F3.3"],
-  "skillsPinned": ["openapi-conventions", "ballerina", "api-management", "thunder-authentication"]
+  "description": "Single backend for expense claims: owns claims, expense lines, employees and their reporting lines, export batches and the audit log; enforces ownership, manager-team scoping and the draft/submitted/approved/rejected/exported lifecycle. Records employees itself: on every authenticated request it upserts an employee (id = the gateway assertion's sub, name = its username), so GET /me registers a person on first open; reporting lines are set by finance, never read from the sign-in directory. Deployed separately from the browser app as the only holder of business data. Sends no notifications and stores no files; export CSVs are generated on download. Does not issue tokens.",
+  "dependencies": [
+    {
+      "kind": "platform-resource",
+      "name": "user-auth",
+      "description": "Sign-in: the gateway validates tokens issued by Thunder and forwards a signed assertion.",
+      "resourceType": "thunder-app",
+      "wiring": {
+        "ref": "ev-expense-claims-92b8ac76",
+        "envBindings": {
+          "client_id": "USER_AUTH_CLIENT_ID",
+          "issuer": "USER_AUTH_ISSUER",
+          "jwks_url": "USER_AUTH_JWKS_URL",
+          "resource": "USER_AUTH_RESOURCE",
+          "scopes": "USER_AUTH_SCOPES"
+        }
+      }
+    }
+  ],
+  "exposesAPI": {
+    "auth": "end-user-required"
+  },
+  "skillsPinned": [
+    "openapi-conventions",
+    "ballerina",
+    "thunder-authentication",
+    "api-management"
+  ]
 }

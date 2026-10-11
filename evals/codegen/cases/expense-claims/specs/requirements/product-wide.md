@@ -3,12 +3,11 @@
 Rules that apply to more than one feature.
 
 ## Requirements
-
-- P1 Every user signs in via SSO through Thunder, the platform identity provider. [org default] Applies to: all.
-- P2 The product sends no email or other notifications; actors check the application to see status changes. Applies to: all.
-- P3 Claims carry no file attachments (receipt images or PDFs); object storage is out of scope. Applies to: F1, F2, F3.
-- P4 All claims are submitted and exported in a single, organization-wide currency. Applies to: F1, F3. *assumed*
+- P1 Users sign in through SSO via Thunder, and what each actor can do depends on their role. [org default] Applies to: all.
+- P2 Every submission, approval, rejection and export is recorded in an audit log. Applies to: all. *assumed*
+- P3 Amounts are in a single company currency, stored in cents. Applies to: F1, F3. *assumed*
 
 ## Decisions
-
-- A user is either an Employee, a Manager, or Finance. *assumed*
+- The product records each signed-in person as an employee on first use; employees and reporting lines are not synchronised from the sign-in directory.
+- No notifications of any kind are sent.
+- No object storage is used.

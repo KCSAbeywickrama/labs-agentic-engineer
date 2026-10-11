@@ -1,10 +1,378 @@
 openapi: 3.0.3
 info:
-  title: Expense API
+  title: Expense Claims API
   version: 0.1.0
-  description: Submission, review and payroll export of expense claims.
 servers:
   - url: /
+security:
+  - oauth2: []
+paths:
+  /me:
+    get:
+      operationId: getMe
+      summary: The caller's employee record (registers the caller on first call)
+      responses:
+        '200':
+          description: The caller's employee record; every authenticated request upserts it from the assertion's sub and username
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /categories:
+    get:
+      operationId: listCategories
+      summary: Fixed list of expense categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/claims:
+    get:
+      operationId: listMyClaims
+      summary: The caller's claims
+      security:
+        - oauth2: [claims:read]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ClaimStatus' }
+        - { $ref: '#/components/parameters/limit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Page of the caller's claims
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createMyClaim
+      summary: Create a draft claim for the caller
+      security:
+        - oauth2: [claims:submit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimInput' }
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/claims/{claimId}:
+    parameters:
+      - { $ref: '#/components/parameters/claimId' }
+    get:
+      operationId: getMyClaim
+      summary: One of the caller's claims
+      security:
+        - oauth2: [claims:read]
+      responses:
+        '200':
+          description: The claim
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateMyClaim
+      summary: Edit the caller's draft or rejected claim
+      security:
+        - oauth2: [claims:submit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimInput' }
+      responses:
+        '200':
+          description: Updated claim
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/claims/{claimId}/submit:
+    post:
+      operationId: submitMyClaim
+      summary: Submit the caller's draft or rejected claim
+      security:
+        - oauth2: [claims:submit]
+      parameters:
+        - { $ref: '#/components/parameters/claimId' }
+      responses:
+        '200':
+          description: Claim now submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/claims/{claimId}/withdraw:
+    post:
+      operationId: withdrawMyClaim
+      summary: Withdraw the caller's undecided submitted claim back to draft
+      security:
+        - oauth2: [claims:submit]
+      parameters:
+        - { $ref: '#/components/parameters/claimId' }
+      responses:
+        '200':
+          description: Claim now draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/team/claims:
+    get:
+      operationId: listTeamClaims
+      summary: Claims of the caller's direct reports, oldest first
+      security:
+        - oauth2: [claims:review-team]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ClaimStatus' }
+        - { $ref: '#/components/parameters/limit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Page of team claims (never draft)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/team/claims/{claimId}:
+    get:
+      operationId: getTeamClaim
+      summary: One claim of a direct report
+      security:
+        - oauth2: [claims:review-team]
+      parameters:
+        - { $ref: '#/components/parameters/claimId' }
+      responses:
+        '200':
+          description: The claim with lines and submitter
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /me/team/claims/{claimId}/approve:
+    post:
+      operationId: approveTeamClaim
+      summary: Approve a direct report's submitted claim
+      security:
+        - oauth2: [claims:approve]
+      parameters:
+        - { $ref: '#/components/parameters/claimId' }
+      responses:
+        '200':
+          description: Claim now approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/team/claims/{claimId}/reject:
+    post:
+      operationId: rejectTeamClaim
+      summary: Reject a direct report's submitted claim with a reason
+      security:
+        - oauth2: [claims:reject]
+      parameters:
+        - { $ref: '#/components/parameters/claimId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Claim now rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /claims:
+    get:
+      operationId: listClaims
+      summary: Every claim
+      security:
+        - oauth2: [claims:read-all]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ClaimStatus' }
+        - { $ref: '#/components/parameters/limit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Page of claims
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /employees:
+    get:
+      operationId: listEmployees
+      summary: Every recorded employee with their manager (the manager picker's source)
+      security:
+        - oauth2: [employees:manage]
+      parameters:
+        - { $ref: '#/components/parameters/limit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Page of employees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Employee' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /employees/{employeeId}/manager:
+    put:
+      operationId: setEmployeeManager
+      summary: Set an employee's manager
+      security:
+        - oauth2: [employees:manage]
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [managerId]
+              properties:
+                managerId: { type: string }
+      responses:
+        '200':
+          description: Updated employee
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /export-batches:
+    get:
+      operationId: listExportBatches
+      summary: Past export batches
+      security:
+        - oauth2: [exports:read]
+      parameters:
+        - { $ref: '#/components/parameters/limit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Page of batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExportBatch' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createExportBatch
+      summary: Export the selected approved claims as one batch
+      security:
+        - oauth2: [exports:create]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [claimIds]
+              properties:
+                claimIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        '201':
+          description: Batch created; claims now exported
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportBatch' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /export-batches/{batchId}:
+    get:
+      operationId: getExportBatch
+      summary: One batch with its claims
+      security:
+        - oauth2: [exports:read]
+      parameters:
+        - { $ref: '#/components/parameters/batchId' }
+      responses:
+        '200':
+          description: The batch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportBatch' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /export-batches/{batchId}/csv:
+    get:
+      operationId: downloadExportBatchCsv
+      summary: CSV file of a batch, one row per claim
+      security:
+        - oauth2: [exports:read]
+      parameters:
+        - { $ref: '#/components/parameters/batchId' }
+      responses:
+        '200':
+          description: CSV with employee, claim, total and approval date
+          content:
+            text/csv:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     oauth2:
@@ -15,15 +383,54 @@ components:
           tokenUrl: /oauth2/token
           scopes:
             claims:read: The caller's own claims
-            claims:submit: Create a new claim
-            claims:update: Edit a pending claim
-            claims:withdraw: Withdraw a pending claim
-            claims:read-team: Claims submitted by the caller's direct reports
-            claims:approve: Approve a submitted claim from the caller's team
-            claims:reject: Reject a submitted claim from the caller's team
-            claims:read-all: Every claim, regardless of employee
-            exports:read: Past export batches
-            exports:create: Export not-yet-exported approved claims
+            claims:submit: Create, edit, submit and withdraw own claims
+            claims:review-team: Claims of direct reports
+            claims:approve: Approve a direct report's claim
+            claims:reject: Reject a direct report's claim
+            claims:read-all: Every claim
+            exports:create: Export approved claims
+            exports:read: Export batches and CSVs
+            employees:manage: List employees and set managers
+  parameters:
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer, default: 0 }
+    claimId:
+      name: claimId
+      in: path
+      required: true
+      schema: { type: string }
+    batchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Not signed in or not permitted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No such row for the caller
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Claim status does not allow this action
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
     Error:
       type: object
@@ -33,402 +440,68 @@ components:
         message: { type: string, description: short human-readable label }
         description: { type: string, description: detailed explanation }
         moreInfo: { type: string, description: URI to documentation }
-    ExpenseClaim:
+    ClaimStatus:
+      type: string
+      enum: [draft, submitted, approved, rejected, exported]
+    ExpenseLine:
       type: object
-      required: [id, employeeId, amount, expenseDate, category, status]
+      required: [expenseDate, category, amountCents, description]
+      properties:
+        id: { type: string }
+        expenseDate: { type: string, format: date }
+        category: { type: string, description: one of listCategories }
+        amountCents: { type: integer, minimum: 1, description: amount in company currency cents }
+        description: { type: string }
+    ClaimInput:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ExpenseLine' }
+    Claim:
+      type: object
+      required: [id, employeeId, employeeName, status, totalCents, lines]
       properties:
         id: { type: string }
         employeeId: { type: string }
-        amount: { type: number, format: double }
-        expenseDate: { type: string, format: date }
-        category: { type: string }
-        description: { type: string }
-        status: { type: string, enum: [pending, approved, rejected, withdrawn] }
+        employeeName: { type: string }
+        status: { $ref: '#/components/schemas/ClaimStatus' }
+        totalCents: { type: integer, description: sum of lines in cents }
         rejectionReason: { type: string, nullable: true }
-        submittedAt: { type: string, format: date-time }
+        submittedAt: { type: string, format: date-time, nullable: true }
         decidedAt: { type: string, format: date-time, nullable: true }
-        exportBatchId: { type: string, nullable: true }
-    ExpenseClaimInput:
+        decidedByName: { type: string, nullable: true }
+        batchId: { type: string, nullable: true }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/ExpenseLine' }
+    ClaimPage:
       type: object
-      required: [amount, expenseDate, category, description]
+      required: [count, data]
       properties:
-        amount: { type: number, format: double }
-        expenseDate: { type: string, format: date }
-        category: { type: string }
-        description: { type: string }
-    RejectInput:
+        count: { type: integer, description: total matching items }
+        next: { type: string, nullable: true }
+        previous: { type: string, nullable: true }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+    Employee:
       type: object
-      required: [reason]
-      properties:
-        reason: { type: string }
-    ExportBatch:
-      type: object
-      required: [id, exportedAt, exportedBy, claimCount]
+      required: [id, name]
       properties:
         id: { type: string }
-        exportedAt: { type: string, format: date-time }
-        exportedBy: { type: string }
-        claimCount: { type: integer }
-security:
-  - oauth2: []
-paths:
-  /me/claims:
-    get:
-      operationId: listMyClaims
-      summary: The caller's claims
-      security:
-        - oauth2: [claims:read]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
-        - name: status
-          in: query
-          schema: { type: string, enum: [pending, approved, rejected, withdrawn] }
-      responses:
-        '200':
-          description: A page of the caller's claims
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [count, data]
-                properties:
-                  count: { type: integer, description: total matching items }
-                  next: { type: string, nullable: true, description: relative URI of the next page }
-                  previous: { type: string, nullable: true, description: relative URI of the previous page }
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/ExpenseClaim' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-    post:
-      operationId: submitClaim
-      summary: Submit a new claim
-      security:
-        - oauth2: [claims:submit]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ExpenseClaimInput' }
-      responses:
-        '201':
-          description: Claim created as pending
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '400':
-          description: Invalid claim input
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /me/claims/{claimId}:
-    get:
-      operationId: getMyClaim
-      summary: A single claim of the caller's
-      security:
-        - oauth2: [claims:read]
-      parameters:
-        - name: claimId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: The claim
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '404':
-          description: No such claim of the caller's
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-    patch:
-      operationId: updateMyClaim
-      summary: Edit a pending claim
-      security:
-        - oauth2: [claims:update]
-      parameters:
-        - name: claimId
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ExpenseClaimInput' }
-      responses:
-        '200':
-          description: Updated claim
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '400':
-          description: Claim is not pending, or invalid input
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: No such claim of the caller's
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /me/claims/{claimId}/withdraw:
-    post:
-      operationId: withdrawMyClaim
-      summary: Withdraw a pending claim
-      security:
-        - oauth2: [claims:withdraw]
-      parameters:
-        - name: claimId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Withdrawn claim
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '400':
-          description: Claim is not pending
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: No such claim of the caller's
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /me/team/claims:
-    get:
-      operationId: listTeamClaims
-      summary: Claims submitted by the caller's direct reports
-      security:
-        - oauth2: [claims:read-team]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
-        - name: status
-          in: query
-          schema: { type: string, enum: [pending, approved, rejected, withdrawn] }
-      responses:
-        '200':
-          description: A page of the team's claims
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [count, data]
-                properties:
-                  count: { type: integer, description: total matching items }
-                  next: { type: string, nullable: true, description: relative URI of the next page }
-                  previous: { type: string, nullable: true, description: relative URI of the previous page }
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/ExpenseClaim' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /me/team/claims/{claimId}/approve:
-    post:
-      operationId: approveTeamClaim
-      summary: Approve a submitted claim from the caller's team
-      security:
-        - oauth2: [claims:approve]
-      parameters:
-        - name: claimId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Approved claim
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '400':
-          description: Claim is not pending
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: No such claim in the caller's team
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /me/team/claims/{claimId}/reject:
-    post:
-      operationId: rejectTeamClaim
-      summary: Reject a submitted claim from the caller's team
-      security:
-        - oauth2: [claims:reject]
-      parameters:
-        - name: claimId
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RejectInput' }
-      responses:
-        '200':
-          description: Rejected claim
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
-        '400':
-          description: Claim is not pending, or missing reason
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: No such claim in the caller's team
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /claims:
-    get:
-      operationId: listAllClaims
-      summary: Every claim, regardless of employee
-      security:
-        - oauth2: [claims:read-all]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
-        - name: status
-          in: query
-          schema: { type: string, enum: [pending, approved, rejected, withdrawn] }
-      responses:
-        '200':
-          description: A page of every claim
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [count, data]
-                properties:
-                  count: { type: integer, description: total matching items }
-                  next: { type: string, nullable: true, description: relative URI of the next page }
-                  previous: { type: string, nullable: true, description: relative URI of the previous page }
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/ExpenseClaim' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /exports:
-    get:
-      operationId: listExports
-      summary: Past export batches
-      security:
-        - oauth2: [exports:read]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
-      responses:
-        '200':
-          description: A page of past export batches
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [count, data]
-                properties:
-                  count: { type: integer, description: total matching items }
-                  next: { type: string, nullable: true, description: relative URI of the next page }
-                  previous: { type: string, nullable: true, description: relative URI of the previous page }
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/ExportBatch' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-    post:
-      operationId: createExport
-      summary: Export not-yet-exported approved claims to a payroll CSV
-      security:
-        - oauth2: [exports:create]
-      responses:
-        '201':
-          description: Export batch created; response body is a CSV file
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ExportBatch' }
-        '400':
-          description: No approved, not-yet-exported claims to export
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Not signed in
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /health:
-    get:
-      operationId: getHealth
-      summary: Liveness check
-      security: []
-      responses:
-        '200':
-          description: Service is healthy
+        name: { type: string }
+        managerId: { type: string, nullable: true }
+        managerName: { type: string, nullable: true }
+    ExportBatch:
+      type: object
+      required: [id, createdAt, claims]
+      properties:
+        id: { type: string }
+        createdAt: { type: string, format: date-time }
+        createdByName: { type: string }
+        claims:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }

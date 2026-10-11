@@ -436,13 +436,13 @@ test("skills: loadSkill is registered over the skillSource, executes server-side
   assert.match(JSON.stringify(stored!.messages), /specs\/design\/components/);
 });
 
-test("toolset task-plan runs planTask over the read-only snapshot (no file mutation)", async () => {
+test("toolset task-plan runs planBuild over the read-only snapshot and the scope (no file mutation)", async () => {
   const store = new InMemoryConversationStore();
   const { events, onEvent } = collector();
 
   // hello-api is a known component in SEED_FILES; the accumulator validates it.
   const model = mockModel([
-    { kind: "toolCall", toolCallId: "p1", toolName: "planTask", input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "core." } },
+    { kind: "toolCall", toolCallId: "p1", toolName: "planBuild", input: { items: [{ item: "F1", components: ["hello-api"], note: "core." }] } },
     { kind: "text", text: "planned" },
   ]);
 
@@ -451,14 +451,15 @@ test("toolset task-plan runs planTask over the read-only snapshot (no file mutat
     instruction: "plan the tasks",
     files: SEED_FILES,
     toolset: "task-plan",
+    planScope: { tag: "v1", features: [{ id: "F1" }] },
     model,
     store,
     onEvent,
   });
 
   assert.equal(conv.status, "done");
-  const planned = events.find((e) => e.type === "tool-result" && e.toolName === "planTask");
-  assert.ok(planned, "planTask executed server-side and streamed a result");
+  const planned = events.find((e) => e.type === "tool-result" && e.toolName === "planBuild");
+  assert.ok(planned, "planBuild executed server-side and streamed a result");
   assert.match(JSON.stringify(planned.output), /"ok":true/);
   // No file mutation tool ever ran.
   assert.equal(events.some((e) => e.toolName === "addFile" || e.toolName === "editFile"), false);

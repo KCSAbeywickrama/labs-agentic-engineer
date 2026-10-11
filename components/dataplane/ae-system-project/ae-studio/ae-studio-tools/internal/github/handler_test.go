@@ -201,9 +201,6 @@ func TestIssueHandlers_SendWhatGitHubExpects(t *testing.T) {
 		{"body", func() (any, error) {
 			return h.SetIssueBody(ctx, gen.SetIssueBodyRequestObject{Owner: "acme", Repo: "greeter", Number: n, Body: &gen.IssueBodyRequest{Body: "nb"}})
 		}, `PATCH /issues/7 "body":"nb"`},
-		{"title", func() (any, error) {
-			return h.SetIssueTitle(ctx, gen.SetIssueTitleRequestObject{Owner: "acme", Repo: "greeter", Number: n, Body: &gen.IssueTitleRequest{Title: "nt"}})
-		}, `PATCH /issues/7 "title":"nt"`},
 		{"milestone", func() (any, error) {
 			return h.SetIssueMilestone(ctx, gen.SetIssueMilestoneRequestObject{Owner: "acme", Repo: "greeter", Number: n, Body: &gen.IssueMilestoneRequest{Number: 3}})
 		}, `PATCH /issues/7 "milestone":3`},

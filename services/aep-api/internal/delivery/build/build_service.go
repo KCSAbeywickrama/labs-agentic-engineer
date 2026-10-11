@@ -92,9 +92,6 @@ type Service struct {
 	// SetPlanPath because its gate resolver is built after this service. Nil
 	// means the build stops at the tag cut.
 	plan *planPath
-	// status backs the approval gate (approval_gate.go), wired via
-	// SetProvisionStatus for the same reason. Nil leaves the gate open.
-	status ProvisionStatusReader
 }
 
 // Deps carries the service's ports.
@@ -146,9 +143,11 @@ type BuildInputItem struct {
 	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
 	SpecContent string `json:"specContent,omitempty"`
 	SpecURL     string `json:"specUrl,omitempty"`
-	// platform-resource: the provisioning params (mixed scalar types).
+	// Request parameters are ignored for platform-resource: the server derives
+	// each resource's approved provision, parameters included, from the design.
 	Parameters map[string]any `json:"parameters,omitempty"`
-	// platform-resource / org-service: the user's approval.
+	// org-service: the user's approval. Ignored for platform-resource (the
+	// click is the consent).
 	Approved bool `json:"approved,omitempty"`
 }
 
@@ -220,10 +219,7 @@ type BuildList struct {
 // (mutex → repo → pre-tag → dependency gate → tag → claim → plan) and
 // is idempotent: a build already in flight already satisfies the trigger, so
 // ErrBuildAlreadyRunning is treated as success (nil). Any other failure
-// propagates so the caller logs it and the reconcile sweep heals later. With no
-// inputs it approves nothing, so a provider whose own platform resources are
-// not provisioned yet is refused (*UnapprovedResourcesError) rather than
-// started into a deploy that cannot succeed: those wait on its own team's build.
+// propagates so the caller logs it and the reconcile sweep heals later.
 func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string) error {
 	// No name: a build the platform starts for itself takes the suggestion.
 	_, failures, err := s.Run(ctx, orgID, projectID, nil, "", nil)
@@ -274,13 +270,6 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	if _, err := s.repos.RepoFullName(ctx, orgID, projectID); err != nil {
 		return "", nil, &EdgeError{Status: 404, Message: "project repository not found"}
 	}
-	// Every platform resource the version will deploy against is provisioned,
-	// in flight, or approved by this request: the run provisions only what is
-	// approved, and its deploy gate waits on all of them. Checked before the
-	// pre-tag work, so a refused build commits nothing and claims no version.
-	if err := s.approvalGate(ctx, orgID, projectID, inputs); err != nil {
-		return "", nil, err
-	}
 
 	// Apply the relevant drawer inputs BEFORE the tag-cut: collect external specs + run the
 	// design derivations (end-user auth and each resource dependency's wiring —
@@ -296,12 +285,9 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if len(fails) > 0 {
 			return "", fails, nil
 		}
-		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
+		prov, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
 		if perr != nil {
 			return "", nil, &EdgeError{Status: 502, Message: "prepare inputs: " + perr.Error(), Err: perr}
-		}
-		if len(pfails) > 0 {
-			return "", pfails, nil
 		}
 		provInputs = prov
 	}

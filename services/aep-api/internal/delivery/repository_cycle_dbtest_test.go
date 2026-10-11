@@ -175,7 +175,7 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 
 	// The merge policy's matched set is the cycle's only record of what it
 	// worked; a verdict is written only when the pull request did NOT merge.
-	declined, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{7, 8},
+	declined, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{7, 8}, Advances: []int{3}},
 		delivery.CycleMergeDeclined, "no resolved issue is this run's work in this milestone")
 	if err != nil || declined == nil {
 		t.Fatalf("NoteMergeDecision(declined) = (%+v, %v)", declined, err)
@@ -183,18 +183,21 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 	if len(declined.Resolves) != 2 || declined.Resolves[0] != 7 || declined.Resolves[1] != 8 {
 		t.Fatalf("resolves = %v, want [7 8]", declined.Resolves)
 	}
+	if len(declined.Advances) != 1 || declined.Advances[0] != 3 {
+		t.Fatalf("advances = %v, want [3]", declined.Advances)
+	}
 	if declined.MergeVerdict != delivery.CycleMergeDeclined || declined.MergeReason == "" {
 		t.Fatalf("verdict = (%q, %q), want declined with a reason",
 			declined.MergeVerdict, declined.MergeReason)
 	}
 	// A re-push that now merges must not leave the stale verdict behind: every
 	// decision overwrites, blanks included.
-	merged, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{7, 8}, "", "resolves agent work in the run's milestone")
+	merged, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{7, 8}}, "", "resolves agent work in the run's milestone")
 	if err != nil || merged == nil {
 		t.Fatalf("NoteMergeDecision(merge) = (%+v, %v)", merged, err)
 	}
-	if merged.MergeVerdict != "" {
-		t.Fatalf("verdict after a merging decision = %q, want cleared", merged.MergeVerdict)
+	if merged.MergeVerdict != "" || len(merged.Advances) != 0 {
+		t.Fatalf("after a merging decision: verdict %q, advances %v, want both cleared", merged.MergeVerdict, merged.Advances)
 	}
 
 	done, err := cycles.Finish(ctx, cycle.ID, "deadbeef")
@@ -214,7 +217,7 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 	}); err != nil || got != nil {
 		t.Fatalf("NotePullRequest on a closed cycle = (%+v, %v), want (nil, nil)", got, err)
 	}
-	if got, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{99}, delivery.CycleMergeRefused, "late"); err != nil || got != nil {
+	if got, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{99}}, delivery.CycleMergeRefused, "late"); err != nil || got != nil {
 		t.Fatalf("NoteMergeDecision on a closed cycle = (%+v, %v), want (nil, nil)", got, err)
 	}
 	if got, err := cycles.Finish(ctx, cycle.ID, "cafebabe"); err != nil || got != nil {

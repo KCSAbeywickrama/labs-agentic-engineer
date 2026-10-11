@@ -1,6 +1,6 @@
 # Book and cancel an appointment
 
-A patient finds an available slot, books it, and later cancels it; the API refuses double booking and late cancellation.
+A patient finds an open slot, books it, and later cancels, subject to no double booking and the 2-hour cut-off.
 
 ```mermaid
 sequenceDiagram
@@ -12,10 +12,11 @@ sequenceDiagram
     Patient->>clinic-webapp: open app
     clinic-webapp->>user-auth: sign in
     user-auth-->>clinic-webapp: token
-    Patient->>clinic-webapp: browse slots (doctor, date)
-    clinic-webapp->>clinic-api: list available slots
-    Patient->>clinic-webapp: book slot
-    clinic-webapp->>clinic-api: create appointment
+    Patient->>clinic-webapp: browse open slots
+    clinic-webapp->>clinic-api: list open slots
+    clinic-api-->>clinic-webapp: slots
+    Patient->>clinic-webapp: book a slot
+    clinic-webapp->>clinic-api: book appointment
     alt slot already taken
         clinic-api-->>clinic-webapp: conflict
     else
@@ -23,9 +24,9 @@ sequenceDiagram
     end
     Patient->>clinic-webapp: cancel appointment
     clinic-webapp->>clinic-api: cancel appointment
-    alt starts within 2 hours
+    alt less than 2 hours to start
         clinic-api-->>clinic-webapp: refused
     else
-        clinic-api-->>clinic-webapp: cancelled, slot freed
+        clinic-api-->>clinic-webapp: cancelled, slot reopened
     end
 ```

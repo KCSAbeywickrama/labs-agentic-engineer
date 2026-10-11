@@ -40,8 +40,8 @@ describe("the build selection on the wire", () => {
   });
 
   it("approves what the preflight lists", () => {
-    const body = buildBody({ features: ["F1"], productWide: [] }, [database]);
-    expect(body.inputs).toEqual(approvalInputsFor([database]));
+    const body = buildBody({ features: ["F1"], productWide: [] }, [database, billing]);
+    expect(body.inputs).toEqual(approvalInputsFor([database, billing]));
   });
 
   it("reads back as the server would", () => {
@@ -69,19 +69,12 @@ describe("a repair build on the wire", () => {
   });
 });
 
-// Clicking Build is the consent to what the build provisions: the platform
-// provisions a resource only from its approval (the classic console's
-// approvalInputsFor).
+// Clicking Build is the consent to what the build provisions. The server
+// derives the platform resources from the design; a cross-project endpoint is
+// approved by the body (the classic console's approvalInputsFor).
 describe("the approvals a build carries", () => {
-  it("approves a platform resource that is not provisioned yet, carrying the design's parameters", () => {
-    expect(approvalInputsFor([database])).toEqual([
-      { component: "lunch-api", dependency: "lunch-db", kind: "platform-resource", approved: true, parameters: { instances: 1 } },
-    ]);
-  });
-
-  it("leaves parameters out when the design authored none", () => {
-    const cache: PreflightItem = { component: "lunch-api", dependency: "cache", kind: "platform-resource", description: "Redis", resourceType: "redis" };
-    expect(approvalInputsFor([cache])[0]).not.toHaveProperty("parameters");
+  it("approves no platform resource: the server derives those from the design", () => {
+    expect(approvalInputsFor([database])).toEqual([]);
   });
 
   it("approves an unresolved cross-project endpoint", () => {
@@ -99,8 +92,7 @@ describe("the approvals a build carries", () => {
     expect(approvalInputsFor(items)).toEqual([]);
   });
 
-  it("approves a shared resource once per component that consumes it", () => {
-    const auth = { ...database, dependency: "user-auth", resourceType: "auth" };
-    expect(approvalInputsFor([auth, { ...auth, component: "lunch-web" }]).map((i) => i.component)).toEqual(["lunch-api", "lunch-web"]);
+  it("approves an endpoint once per component that asks for it", () => {
+    expect(approvalInputsFor([billing, { ...billing, component: "lunch-web" }]).map((i) => i.component)).toEqual(["lunch-api", "lunch-web"]);
   });
 });

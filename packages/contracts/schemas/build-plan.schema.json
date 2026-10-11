@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "items": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string",
+            "pattern": "^(F[0-9]+|foundation|spec)$",
+            "description": "'foundation' for the shared setup and the product-wide requirements, a carried feature's ID (F2), or 'spec' when the version carries no features."
+          },
+          "components": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The design components this item changes (directories under specs/design/components/)."
+          },
+          "note": {
+            "type": "string",
+            "description": "One or two sentences: what the coding agent should know before it starts this item."
+          }
+        },
+        "required": [
+          "item",
+          "components",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "description": "The build's checklist, in the order the coding agent works it."
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "additionalProperties": false
+}

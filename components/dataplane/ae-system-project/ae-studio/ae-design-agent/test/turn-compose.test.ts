@@ -120,6 +120,10 @@ test("/prototype loads its skill and the brief, and trailing component names fol
   // The brief names what to read and what to write.
   assert.match(bare, /specs\/design\/design\.cell/);
   assert.match(bare, /specs\/design\/security\.json/);
+  // Stories live in the feature files, product-wide requirements beside them.
+  assert.match(bare, /stories \(F<n>\.<m>\) and their decisions are in the feature files under specs\/requirements\/features\//);
+  assert.match(bare, /specs\/requirements\/product-wide\.md/);
+  assert.doesNotMatch(bare, /prd\.md/);
   assert.match(bare, /specs\/design\/components\/<component>\/prototype\.json/);
   assert.match(bare, /manifest\) first and then prototype\.tsx/);
   assert.match(bare, /Spec sources live under specs\//);
@@ -326,62 +330,32 @@ test("headless forbids the question tools, and trails everything else", () => {
 
 test("plan carries no spec-paths rule and no scope — it writes no spec files", () => {
   const out = composeInstruction({ kind: "plan" }, { scope: { kind: "feature", feature: "F2", file: APPROVALS } });
-  assert.ok(out.startsWith("Plan the implementation Tasks for this project."));
+  assert.ok(out.startsWith("Plan the build for this version."));
   assert.doesNotMatch(out, /Spec sources live under specs\//);
   assert.doesNotMatch(out, /looking at feature/);
 });
 
-test("plan scope marks each story COVERED or NEEDS TASKS", () => {
-  const out = composeInstruction({
-    kind: "plan",
-    scope: {
-      tag: "spec-v3",
-      stories: [
-        { id: "F1.1", title: "Sign in", covered: true },
-        { id: "F2.4", covered: false },
-      ],
-    },
-  });
-  assert.match(out, /## Milestone scope \(spec spec-v3\)/);
-  assert.match(out, /- Story F1\.1: Sign in — COVERED/);
-  assert.match(out, /- Story F2\.4 — NEEDS TASKS/, "a story with no title still gets a row");
-});
-
-test("plan scope lists the version's features with their needs, and its product-wide items", () => {
+test("plan scope lists the version's features with their needs, its product-wide items and what it holds back", () => {
   const out = composeInstruction({
     kind: "plan",
     scope: {
       tag: "v2",
-      stories: [{ id: "F2.1", title: "Approve a claim", covered: false }],
       features: [{ id: "F1", name: "Submit a claim" }, { id: "F2", name: "Approvals", needs: ["F1"] }],
       productWide: [{ id: "P1", text: "Amounts in the user's currency", appliesTo: ["all"] }],
+      heldBack: ["F2.4"],
     },
   });
+  assert.match(out, /## Version scope \(spec v2\)/);
   assert.match(out, /- F1 Submit a claim\n- F2 Approvals — needs F1/);
   assert.match(out, /- P1: Amounts in the user's currency \(applies to all\)/);
-  assert.ok(out.indexOf("- F2 Approvals") < out.indexOf("- Story F2.1"), "features come before the stories");
+  assert.match(out, /Stories held back \(each needs a feature neither built nor carried\): F2\.4/);
+  assert.doesNotMatch(out, /COVERED|NEEDS TASKS|Existing open Tasks/);
 });
 
-test("an empty scope renders nothing", () => {
-  // The base directive mentions a "Milestone scope" section, so match the
-  // HEADING — the thing the block actually emits.
-  assert.doesNotMatch(
-    composeInstruction({ kind: "plan", scope: { tag: "t", stories: [] } }),
-    /## Milestone scope/,
-  );
-});
-
-test("plan context is sorted by path, so the same inputs give the same prompt", () => {
-  const out = composeInstruction({
-    kind: "plan",
-    taskContext: [
-      { path: "tasks/9.md", body: "nine" },
-      { path: "tasks/2.md", body: "two" },
-    ],
-  });
-  assert.match(out, /## Existing open Tasks in this version \(reference\)/);
-  assert.ok(out.indexOf("tasks/2.md") < out.indexOf("tasks/9.md"), "deterministic order");
-  assert.match(out, /\n--- tasks\/2\.md ---\ntwo\n/);
+test("a plan with no features in its scope is one item for the whole spec", () => {
+  for (const turn of [{ kind: "plan" as const }, { kind: "plan" as const, scope: { tag: "t" } }]) {
+    assert.match(composeInstruction(turn), /This version names no features: the checklist is one item, "spec"/);
+  }
 });
 
 test("eager skills are derived from the flow, not supplied by the caller", () => {
@@ -406,7 +380,7 @@ test("eager skills are derived from the flow, not supplied by the caller", () =>
  */
 test("the instructed skill is always inlined, whatever the flow", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "plan" }), ["task-planning"]);
-  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "wireframes" }), ["wireframes"]);
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "acceptance-criteria" }), ["acceptance-criteria"]);
   // Resolution runs through the SkillSource, so an org-authored flow inlines too;
   // a name that resolves to nothing is skipped downstream, not here.
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "their-own-skill" }), ["their-own-skill"]);

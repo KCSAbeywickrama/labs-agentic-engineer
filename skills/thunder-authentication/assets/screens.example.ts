@@ -34,8 +34,7 @@
 //
 // THE ORDER OF THIS TABLE IS THE RAIL'S ORDER, and its first reachable row is
 // the screen the app lands on. Write the screens in the order of the
-// prototype's navigation (the <AppShell> `nav` entries in prototype.tsx), then
-// the screens no entry opens.
+// prototype's navigation, then the screens it does not list.
 
 import { canCall } from "./core";
 import { OPERATIONS, isOperationKey, type OperationKey } from "./operations.gen";
@@ -54,15 +53,15 @@ export interface ScreenRoute {
    */
   readonly loads: OperationKey | null;
   /**
-   * A screen a requirement opens to a visitor who is not signed in: reachable
-   * before sign-in, routed ABOVE the sign-in guard. Its load operation, if it has one, is `security: []` in the
+   * Drawn on a bare `<Screen>` root: reachable before sign-in, routed ABOVE the
+   * sign-in guard. Its load operation, if it has one, is `security: []` in the
    * contract.
    */
   readonly public?: boolean;
 }
 
 /**
- * YOUR screens, in RAIL ORDER. One row per prototype screen that is a route.
+ * YOUR screens, in RAIL ORDER. One row per prototype screen.
  *
  * `loads` is the operation the screen exists to perform, AT THE REACH THE
  * SCREEN SHOWS: an every-row queue loads `GET /claims`, a "mine" page loads
@@ -77,7 +76,7 @@ export interface ScreenRoute {
  * now called that a defect and patched it, in two different places.
  *
  * `null` is only for a screen that needs no operation at all, which is rare. A
- * screen for a visitor who is not signed in is `public: true`.
+ * screen drawn on a bare `<Screen>` root is `public: true`.
  */
 export const SCREEN_ROUTES: readonly ScreenRoute[] = [
   { key: "myclaims", label: "My claims", path: "/claims", loads: "GET /me/claims" },

@@ -8,9 +8,9 @@
 batch, Retry), as marked in each. **Amends:**
 [ADR-0002](ADR-0002-questions-are-answered-on-a-questions-card.md) (a design
 run's questions are answered on the Design card).
-**Builds on:** [root ADR-0050](../../../../docs/decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+**Builds on:** [root ADR-0051](../../../../docs/decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
 (the loop) and
-[root ADR-0051](../../../../docs/decisions/ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)
+[root ADR-0052](../../../../docs/decisions/ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)
 (`specs/design/review.json`). **Detail:** [design-card.md](../design-card.md).
 
 ## Context

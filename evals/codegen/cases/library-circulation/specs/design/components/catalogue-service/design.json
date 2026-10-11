@@ -7,10 +7,8 @@
   "appPath": "catalogue-service",
   "entrypoint": "deployment/service",
   "exposure": "intranet",
-  "dependencies": [
-    { "kind": "platform-resource", "name": "catalogue-db", "resourceType": "postgres-cnpg", "description": "Stores titles and copies." }
-  ],
-  "description": "Owns the catalogue: titles and their physical copies (status available, on-loan, on-hold, withdrawn), with title search and per-title availability counts, persisted in its own Postgres. Deployed separately because the requirements make the catalogue its own service; only the circulation API calls it, over the intranet. It does not know about members, loans, holds or fees, and does no sign-in handling itself.",
-  "stories": ["F1.1", "F1.2", "F5.1", "F5.2"],
+  "dependencies": [],
+  "description": "Owns titles and their physical copies (barcode, status). Deployed separately because the requirements keep the catalogue in its own service that only the circulation API calls. Keeps its own data (the platform catalogue offers no database resource) and holds no loans, holds or fees. Not reachable by the web app.",
+  "stories": ["F1.1", "F1.2", "F1.3", "F1.4", "F1.5"],
   "skillsPinned": ["openapi-conventions", "ballerina"]
 }

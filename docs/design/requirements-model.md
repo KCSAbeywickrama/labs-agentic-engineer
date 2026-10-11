@@ -16,7 +16,7 @@ and IDs), 0040 (design out of date per feature), 0041 (a build is a selection),
 | Any later change | `refine` (`/feature`, `/actor`, `/amend`, `/settle`) | wherever the change belongs |
 | Design | `design` (`/design F1 F2`) | the gap check's `*assumed*` lines and open questions in the feature files, the design (a prototype per web app, `decisions.md`), acceptance per feature |
 | Address comments | `design` (`/address-comments`) | the files the review's comments touch, and the replies in `specs/design/review.json` |
-| Plan a build | `task-planning` | one Task per feature per component, plus foundation Tasks |
+| Plan a build | `task-planning` | one build issue: Foundation, then one item per feature, in build order |
 | Validate | `validation-task` | the report, for the version's built scope |
 
 `prd-contract` defines every file and line; `grilling` owns the questions.

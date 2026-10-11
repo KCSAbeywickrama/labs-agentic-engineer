@@ -129,7 +129,7 @@ JavaScript and synchronous: Web Crypto's `crypto.subtle` exists only in secure
 contexts, and a console served over plain HTTP must still name a revision. The
 CLI, the console and `@aep/agent-stream` import it. In AEP a comment never
 rides a turn: the console writes each queued comment as a draft in
-`specs/design/review.json` (ADR-0051), whose schema takes its text and id
+`specs/design/review.json` (ADR-0052), whose schema takes its text and id
 limits from here, and a prototype's Checked hash is `prototypeHash`. The
 design agent no longer validates a feedback batch (`prototypeFeedback` is
 retired). The table `test/fixtures/feedback-cases.json` pins the shape and the

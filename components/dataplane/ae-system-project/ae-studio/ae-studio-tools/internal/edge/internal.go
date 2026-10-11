@@ -48,9 +48,8 @@ const (
 	// the parts themselves.
 	referencesBodyBytes int64 = 80 << 20
 	// turnBodyBytes caps a turn start at what the agent's Turn socket takes
-	// (ae-design-agent src/edge/turn-socket.ts MAX_BODY_BYTES): a re-plan's
-	// taskContext carries the open Tasks' bodies, and a cap below the agent's
-	// would refuse here a turn the agent accepts.
+	// (ae-design-agent src/edge/turn-socket.ts MAX_BODY_BYTES): a cap below the
+	// agent's would refuse here a turn the agent accepts.
 	turnBodyBytes int64 = 4 << 20
 	// commitBodyBytes caps a create-commit: its writes travel base64 in one
 	// JSON body.

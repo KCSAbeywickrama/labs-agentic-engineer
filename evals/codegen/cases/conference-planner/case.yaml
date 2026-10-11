@@ -8,7 +8,7 @@ description: "Conference planner: organizers create events with sessions and
   notifications, no file uploads or object storage, no scheduled or background
   jobs, no external integrations or AI features."
 source:
-  project: conference-planner
+  project: ev-conference-planner
   snapshot: current
-  savedAt: 2026-10-04T11:43:11.947Z
+  savedAt: 2026-10-11T13:09:41.297Z
 tags: []

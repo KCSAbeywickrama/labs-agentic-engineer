@@ -61,7 +61,7 @@ listens, so feedback has to reach the same conversation as everything else.
 ## Superseded in part 2026-10-11
 
 By [ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md) and
-[root ADR-0050](../../../../docs/decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md):
+[root ADR-0051](../../../../docs/decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md):
 
 - **Point 1:** the overlay stands. It opens from the prototype's item on the
   Design card (`design?art=prototype-<c>&review=<c>`). The Prototype tab, the

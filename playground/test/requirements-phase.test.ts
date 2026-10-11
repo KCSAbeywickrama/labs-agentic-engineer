@@ -29,7 +29,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mockModel } from "@aep/ae-design-agent/shared/mock-model";
-import { requirementsCommand, chatTurn } from "../src/commands.js";
+import { requirementsCommand, chatTurn, interviewCommand } from "../src/commands.js";
 import { openSession } from "../src/engine/session.js";
 import { readIdea } from "../src/state/descriptor.js";
 
@@ -73,6 +73,36 @@ test("requirements phase: idea → folded requirements.md + captured descriptor 
     assert.equal(readIdea(projectDir), "An online ceramics store");
     assert.ok(existsSync(threadFile(projectDir)), "the project's thread persisted");
     assert.ok(existsSync(join(projectDir, ".aep-playground/project.json")), "project state persisted");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }
+});
+
+test("interview: a headless /interview F<n> writes that feature's stories; an unknown feature never runs", async () => {
+  const projectDir = tempProject();
+  const skillsDir = tempSkills();
+  mkdirSync(join(skillsDir, "interview"), { recursive: true });
+  writeFileSync(join(skillsDir, "interview", "SKILL.md"), "---\nname: interview\ndescription: interview one feature\n---\n\nInterview.\n");
+  try {
+    mkdirSync(join(projectDir, "specs/requirements/features"), { recursive: true });
+    writeFileSync(join(projectDir, "specs/requirements/prd.md"), "# R\n");
+    writeFileSync(join(projectDir, "specs/requirements/features/F1-claims.md"), "# Claims\n\n## Purpose\nSubmit claims.\n");
+    const story = "# Claims\n\n## Purpose\nSubmit claims.\n\n## User Stories\n- F1.1 As an employee, I submit a claim. *assumed*\n";
+    const model = mockModel([
+      { kind: "toolCall", toolCallId: "i1", toolName: "removeFile", input: { path: "specs/requirements/features/F1-claims.md" } },
+      { kind: "toolCall", toolCallId: "i2", toolName: "addFile", input: { path: "specs/requirements/features/F1-claims.md", content: story } },
+      { kind: "text", text: "F1 written." },
+    ]);
+    const outcome = await interviewCommand(projectDir, { model, skillsDir, silent: true }, "F1");
+    assert.equal(outcome.ok, true, outcome.detail);
+    assert.match(readFileSync(join(projectDir, "specs/requirements/features/F1-claims.md"), "utf8"), /F1\.1 As an employee/);
+    const thread = readFileSync(threadFile(projectDir), "utf8");
+    assert.match(thread, /\/interview F1/, "the instruction is the console's command");
+    assert.match(thread, /No interview is possible in this run/, "the run is headless");
+
+    const unknown = await interviewCommand(projectDir, { model: mockModel([]), skillsDir, silent: true }, "F9");
+    assert.deepEqual(unknown, { ok: false, detail: "specs/requirements/features has no F9 — run the requirements phase first" });
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(skillsDir, { recursive: true, force: true });

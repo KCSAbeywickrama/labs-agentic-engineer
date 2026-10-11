@@ -53,7 +53,6 @@ func gitHubRequests(h *harness, base string) map[string]func() *httptest.Respons
 		"close-issue":             send("POST", "/issues/7/close", ``),
 		"reopen-issue":            send("POST", "/issues/7/reopen", ``),
 		"set-issue-body":          send("PUT", "/issues/7/body", `{"body":"b"}`),
-		"set-issue-title":         send("PUT", "/issues/7/title", `{"title":"t"}`),
 		"set-issue-milestone":     send("PUT", "/issues/7/milestone", `{"number":3}`),
 		"add-issue-labels":        send("POST", "/issues/7/labels", `{"labels":["x"]}`),
 		"set-issue-labels":        send("PUT", "/issues/7/labels", `{"labels":[]}`),

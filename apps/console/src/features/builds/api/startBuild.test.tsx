@@ -26,8 +26,9 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
-// Starting a build reads the preflight afresh and approves what it lists: a
-// build sent without those approvals provisions nothing and fails at deploy.
+// Starting a build reads the preflight afresh and approves the cross-project
+// endpoints it lists: a build sent without them never asks for access. The
+// platform resources the server derives from the design itself.
 
 const BASE = "http://localhost/api/v1";
 vi.mock("../../../api/client", async () => {
@@ -76,15 +77,13 @@ async function startBuild() {
 }
 
 describe("starting a build", () => {
-  it("approves a platform resource the preflight lists as not provisioned", async () => {
+  it("sends no approval for a platform resource: the server derives it", async () => {
     preflight = [
       { component: "lunch-api", dependency: "lunch-db", kind: "platform-resource", description: "Postgres", resourceType: "postgres-cnpg", parameters: { instances: 1 } },
     ];
     const start = await startBuild();
     expect(start.data).toBe("v1");
-    expect(sent[0]?.inputs).toEqual([
-      { component: "lunch-api", dependency: "lunch-db", kind: "platform-resource", approved: true, parameters: { instances: 1 } },
-    ]);
+    expect(sent[0]?.inputs).toEqual([]);
   });
 
   it("approves an unresolved cross-project endpoint", async () => {
@@ -93,7 +92,7 @@ describe("starting a build", () => {
     expect(sent[0]?.inputs).toEqual([{ component: "lunch-api", dependency: "billing", kind: "org-service", approved: true }]);
   });
 
-  it("approves nothing when every resource is already provisioned", async () => {
+  it("approves nothing when the preflight lists nothing", async () => {
     await startBuild();
     expect(sent[0]).toEqual({ inputs: [], selection: { features: ["F1"], productWide: [] } });
   });

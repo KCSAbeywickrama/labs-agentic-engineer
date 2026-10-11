@@ -18,19 +18,18 @@
 
 /**
  * A Plan turn (docs/design/playground.md §5 phase 3), started as aep-api
- * starts one in production: on the design agent's Turn socket, kind
- * `plan`, with the existing-Task renders as its task context. The socket
- * answers NDJSON — a `task-op` line per ok `planTask` / `updateTask` result,
- * keep-alives, then one `result` line — and the playground folds the task
- * operations into `issues/` only when the result is `completed`
- * (`FsIssueStore.fold`). The turn's full stream is read beside it on `/v1`
- * for live rendering.
+ * starts one in production: on the design agent's Turn socket, kind `plan`,
+ * with the version's scope. The socket answers NDJSON — a `task-op` line per
+ * ok `planBuild` result, keep-alives, then one `result` line — and the
+ * playground writes the build issue from the last one only when the result is
+ * `completed`. The turn's full stream is read beside it on `/v1` for live
+ * rendering.
  */
 
 import { randomUUID } from "node:crypto";
 import { request, type IncomingMessage } from "node:http";
 import { createInterface } from "node:readline";
-import { parseSseStream, type PlanContextFile, type PlanScope, type StreamPart } from "@aep/agent-stream";
+import { parseSseStream, type BuildPlanOk, type PlanScope, type StreamPart } from "@aep/agent-stream";
 import type { ResultFrame, TaskOpFrame, TurnSocketFrame } from "@aep/ae-design-agent/edge/turn-socket";
 import { PLAYGROUND_USER } from "../kit/auth.js";
 import type { TurnSession } from "./turn.js";
@@ -53,8 +52,19 @@ export interface PlanTurnResult extends PlanTurnOutcome {
 
 export interface PlanTurnOptions {
   onPart?: (part: StreamPart) => void;
-  /** The version's milestone scope, as aep-api computes it (stories, features, product-wide items). */
+  /** What the version carries, as aep-api computes it (features, product-wide items, held-back stories). */
   scope?: PlanScope;
+}
+
+/** The checklist a completed Plan turn settled on: its last ok `planBuild`, as aep-api's plan tap keeps it. */
+export function lastBuildPlan(turn: PlanTurnOutcome): BuildPlanOk | undefined {
+  if (!turn.completed) return undefined;
+  for (let i = turn.taskOps.length - 1; i >= 0; i--) {
+    const { op, output } = turn.taskOps[i]!;
+    const out = output as Partial<BuildPlanOk> | undefined;
+    if (op === "build" && out?.ok === true && out.op === "build" && Array.isArray(out.items) && out.items.length > 0) return out as BuildPlanOk;
+  }
+  return undefined;
 }
 
 /** POST one request to the Turn socket; resolves once the response headers arrive. */
@@ -77,8 +87,8 @@ async function streamParts(session: TurnSession, turnId: string, parts: StreamPa
   }
 }
 
-/** Run one Plan turn over `taskContext` (the existing-Task renders). */
-export async function runPlanTurn(session: TurnSession, taskContext: PlanContextFile[], opts: PlanTurnOptions = {}): Promise<PlanTurnResult> {
+/** Run one Plan turn. */
+export async function runPlanTurn(session: TurnSession, opts: PlanTurnOptions = {}): Promise<PlanTurnResult> {
   const turnId = randomUUID();
   const parts: StreamPart[] = [];
   const taskOps: TaskOp[] = [];
@@ -88,7 +98,6 @@ export async function runPlanTurn(session: TurnSession, taskContext: PlanContext
     kind: "plan",
     credit: { userId: PLAYGROUND_USER.sub, name: PLAYGROUND_USER.name, email: PLAYGROUND_USER.email },
     ...(opts.scope ? { scope: opts.scope } : {}),
-    ...(taskContext.length ? { taskContext } : {}),
   });
   if (res.statusCode !== 200) {
     let text = "";

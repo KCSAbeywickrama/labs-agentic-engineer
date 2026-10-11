@@ -3,13 +3,11 @@
 Rules that apply to more than one feature.
 
 ## Requirements
-- P1 SLA due time is computed by the API from priority at creation and recomputed when priority changes. Applies to: F1, F3, F4. *assumed*
-- P2 Priorities are low, medium, high and critical; example SLA targets are 3 days, 1 day, 8 hours and 2 hours (calendar time). Applies to: F1, F3, F4. *assumed*
-- P3 All users sign in via SSO through the platform IDP; roles distinguish Employee, Support Agent and Team Lead. Applies to: all.
-- P4 Employees see only their own tickets; agents and team leads see all. Applies to: F1, F2, F4. *assumed*
+- P1 Ticket status is one of open, triaged, in progress, resolved, reopened. Applies to: F1, F2, F4. *assumed*
+- P2 A ticket's SLA due time is computed by the API from its priority. Applies to: F1, F2, F4. *assumed*
+- P3 Users sign in through SSO and see only what their role allows. [org default] Applies to: all.
 
 ## Decisions
-- Delivery: one web app and one API service.
-
-## Open Questions
-1. What real SLA targets per priority does the organization require?
+- Priority levels are low, medium, high and critical. *assumed*
+- SLA breach is evaluated when read, not by a background job.
+- People are identified by their sign-in id. A ticket may name its assignee by username before that person has used the help desk; the name binds to their id on their first call.

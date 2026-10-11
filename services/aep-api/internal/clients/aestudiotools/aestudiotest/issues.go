@@ -271,11 +271,6 @@ func (f *Fake) EditIssueBody(_ context.Context, ref sourcecontrol.RepoRef, numbe
 	return f.editIssue(OpEditIssueBody, ref, number, func(is *issue) { is.info.Body = body })
 }
 
-// EditIssueTitle replaces the title.
-func (f *Fake) EditIssueTitle(_ context.Context, ref sourcecontrol.RepoRef, number int, title string) error {
-	return f.editIssue(OpEditIssueTitle, ref, number, func(is *issue) { is.info.Title = title })
-}
-
 // AddIssueLabels merges labels into the issue's set.
 func (f *Fake) AddIssueLabels(_ context.Context, ref sourcecontrol.RepoRef, number int, labels []string) error {
 	return f.editIssue(OpAddIssueLabels, ref, number, func(is *issue) {

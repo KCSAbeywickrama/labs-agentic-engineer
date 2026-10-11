@@ -170,9 +170,10 @@ export function refreshBuilds(queryClient: QueryClient, projectName: string): vo
  * Start a build of the selection; resolves with the version it cut ("v1").
  * The room's pending edits are committed first: the build tags HEAD, and an
  * edit still in the room would not be in the version. The preflight is then
- * read afresh, for the design as committed, and the build approves what it
- * lists (buildSelection.ts). A preflight that cannot be read stops the build:
- * one started without its approvals would provision nothing and fail at deploy.
+ * read afresh, for the design as committed, and the build approves the
+ * cross-project endpoints it lists (buildSelection.ts). A preflight that cannot
+ * be read stops the build: one started without those approvals would never ask
+ * for access, and its deploy would wait on endpoints it cannot reach.
  */
 export function useStartBuild(projectName: string) {
   const queryClient = useQueryClient();

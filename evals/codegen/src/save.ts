@@ -111,6 +111,14 @@ export function caseRoles(dir: string): string[] {
   return buildWirePlan(readWireSpecs(dir, "case")).roles.map((role) => role.name);
 }
 
+/** The web applications with no prototype pair: the planner derives the walk from it. */
+export function webappsWithoutPrototype(dir: string): string[] {
+  return readWireSpecs(dir, "case")
+    .designs.filter((design) => design.type === "web-application")
+    .map((design) => design.name)
+    .filter((name) => ["prototype.json", "prototype.tsx"].some((f) => !existsSync(join(dir, "specs/design/components", name, f))));
+}
+
 /** True when any component's `design.json` is a web application — the only kind `wire` puts a browser on. */
 export function hasWebapp(dir: string): boolean {
   return readWireSpecs(dir, "case").designs.some((design) => design.type === "web-application");
@@ -183,6 +191,10 @@ interface Planned {
  * re-planning the derived items is no reason to lose them.
  */
 async function planInto(caseDir: string, name: string, token: string, say: (line: string) => void): Promise<Planned> {
+  const unprototyped = webappsWithoutPrototype(caseDir);
+  if (unprototyped.length > 0) {
+    throw new Error(`no prototype for ${unprototyped.join(", ")} — run \`play <dir> prototype\` before saving or re-planning`);
+  }
   const roles = caseRoles(caseDir);
   if (roles.length === 0) throw new Error("specs/design/security.json declares no roles — there is no one to walk the app as");
   say(`  roles: ${roles.join(", ")}`);

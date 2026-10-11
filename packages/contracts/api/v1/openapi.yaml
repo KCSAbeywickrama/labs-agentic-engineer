@@ -584,13 +584,7 @@ paths:
             The requested `version` name is already in use, or a build is
             already running for this project, or (`publisher_credentials_missing`)
             the organization has no build credentials: "Reconnect GitHub to set
-            up this organization's build credentials", or
-            (`platform_resources_not_approved`) the design declares a platform
-            resource that is neither provisioned (nor provisioning) nor approved
-            by a `platform-resource` input with `approved: true`; `details` has
-            one row per such resource, its message starting with the dependency
-            name. The build preflight lists each resource to approve. Nothing
-            was cut.
+            up this organization's build credentials". Nothing was cut.
         default:
           content:
             application/json:
@@ -6280,6 +6274,17 @@ components:
         LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a
         cycle whose agent died before opening a pull request.
       properties:
+        advances:
+          description: >-
+            The version's build issue this cycle's pull request advanced
+            (`Advances #N`): it finished some of the build's items, not all, so
+            the merge lands them and the issue stays open with those items
+            ticked. Kept apart from `resolves`, which the merge closes. Empty
+            until a pull request is seen.
+          items:
+            format: int64
+            type: integer
+          type: array
         agentReason:
           description: >-
             Why this cycle's agent stopped without opening a pull request, as the

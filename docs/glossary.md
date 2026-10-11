@@ -469,6 +469,32 @@ being built — a build that gave up leaves its plan open, and only another buil
 may continue it. A **validation** run has none at all. A run settles when its own
 working set is empty; the verdict is a separate run's answer about the version.
 
+### Build issue
+The one `development` issue a version's plan mints into its milestone, titled
+`Build <version>` (ADR-0050). Its body is an ordered checklist of **items**
+plus the version's facts (`Product-wide:`, `Held back:`), and nothing the
+specs already say. The plan turn writes the checklist with `planBuild`; the
+plan tap mints the issue when the turn completes, with dedupe key
+`build:<project>:<milestone>`. It closes when a pull request `Resolves` it
+with every item ticked. It replaces the per-feature-per-component Tasks of
+ADR-0041 decision 4.
+
+### Item
+One line of a build issue's checklist: `foundation` (shared setup and the
+carried product-wide items), a carried feature (`F2`), or `spec` for a version
+that carries no features. The coding agent works items in order, one wave of
+build subagents per item (one per component it names), one commit per item
+ending `(#<issue> <item>)`. A tick (`- [x]`) is the item's done-ness: the run's
+no-progress rule counts the unticked items (`OpenBuildItems`), and a restart
+skips items whose commit is on the branch.
+
+### Advances
+`Advances #N` in a pull request body: a coding cycle finished some items of
+the build issue and not all. The merge policy admits it only for the
+milestone's build issue, and GitHub does not treat it as a closing keyword,
+so the issue stays open for the next cycle. The coding counterpart of
+`Validates #N`.
+
 ### Halted issue
 Work a FAILED run could not finish, stamped `aep:halted` with a comment naming
 the terminal reason. The reconcile sweep skips it, which is what makes a budget
@@ -640,6 +666,21 @@ committed to git `main`. An agent turn's file edits land in the Room; the Room's
 committer commits them to `main`. The git commit — not any draft buffer — is the
 source of truth.
 
+## Design
+
+### Prototype (UI contract)
+A web application's `prototype.json` (roles, display states, screens with the
+roles that reach each, flows per role) and `prototype.tsx` (each screen on
+`@wso2/prototype-kit`), written by the Design run after the data model and
+the roles (ADR-0042, ADR-0051); `/prototype` only regenerates it. It replaced
+`wireframes.dsl` as what Build reads: the coding agent builds one route per
+manifest screen, the shell screens included, each kit element as a real
+element and each display state as a condition on its screen's route
+(`skills/prototype/references/implementing.md`), and the mock walk follows its
+flows. Fidelity is structure, not pixels. The build gate requires a web
+application's prototype and validates it. The console calls it the
+**Prototype** (`apps/console/design/lexicon.md`).
+
 ## Skills
 
 ### Skill audience
@@ -684,9 +725,9 @@ pin additionally appends its body to the system prompt.
 ## Design review
 
 The loop is Design → Address comments → Build
-([ADR-0050](decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+([ADR-0051](decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
 and its review state is one spec file, `specs/design/review.json`
-([ADR-0051](decisions/ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
+([ADR-0052](decisions/ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
 The domain terms live in [`CONTEXT.md`](../CONTEXT.md) § Design review: **Design
 review**, **Gap check**, **Technical decision**, **Prototype**, **Checked**,
 **Review comment**, **Address comments**, **Revision**.

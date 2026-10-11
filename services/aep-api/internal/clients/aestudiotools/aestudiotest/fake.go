@@ -63,7 +63,6 @@ const (
 	OpReopenIssue          = "reopen-issue"
 	OpCommentIssue         = "comment-issue"
 	OpEditIssueBody        = "edit-issue-body"
-	OpEditIssueTitle       = "edit-issue-title"
 	OpAddIssueLabels       = "add-issue-labels"
 	OpRemoveIssueLabel     = "remove-issue-label"
 	OpSetIssueLabels       = "set-issue-labels"

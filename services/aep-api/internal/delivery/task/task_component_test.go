@@ -153,7 +153,6 @@ func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) 
 func (f *fakeIssues) EditIssueBody(context.Context, string, string, int, string) error {
 	return nil
 }
-func (f *fakeIssues) EditIssueTitle(context.Context, string, string, int, string) error { return nil }
 func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, n int, labels []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

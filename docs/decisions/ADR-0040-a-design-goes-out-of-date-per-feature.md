@@ -52,7 +52,7 @@ that commit.
 
 A design run now edits requirements while it runs: the gap check writes
 `*assumed*` lines and open questions
-([ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+([ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
 and Address comments can edit them too. Read at the commit the run started
 from, every feature the run touched was out of date as soon as the run
 finished. Decision 3 now reads as follows.

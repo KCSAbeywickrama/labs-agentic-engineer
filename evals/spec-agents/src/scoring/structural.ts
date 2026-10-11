@@ -229,49 +229,18 @@ export async function designChecks(
 }
 
 export function tasksChecks(projectDir: string, run: TaskPlanRunResult): StructuralReport {
-  const issues = run.issues;
+  const items = run.plan?.items ?? [];
   const components = listComponents(projectDir);
-  const known = new Set(components);
-
-  const coveredComponents = new Set(issues.map((i) => i.component));
-  const uncovered = components.filter((c) => !coveredComponents.has(c));
-
-  const badRefs: string[] = [];
-  for (const i of issues) {
-    for (const dep of i.dependsOn) {
-      if (!known.has(dep)) badRefs.push(`#${i.issueNumber} → ${dep}`);
-    }
-  }
+  const named = new Set(items.flatMap((i) => i.components));
+  const uncovered = components.filter((c) => !named.has(c));
+  const foundation = items.findIndex((i) => i.item === "foundation");
 
   return report([
-    check("plan produced issues", (run.fold?.created.length ?? 0) + (run.fold?.updated.length ?? 0) > 0, run.error ?? "fold wrote nothing (the Plan turn did not complete?)"),
-    check("every component covered", components.length > 0 && uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "no components"),
-    check("dependsOn refs resolve", badRefs.length === 0, badRefs.join("; ")),
-    check("dependsOn acyclic", isAcyclic(issues), "cycle in the component dependency graph"),
+    check("plan produced a build issue", run.issues.some((i) => i.version !== undefined), run.error ?? "no build issue written (the Plan turn did not complete?)"),
+    check("every component named by an item", components.length > 0 && uncovered.length === 0, uncovered.length ? `unnamed: ${uncovered.join(", ")}` : "no components"),
+    check("foundation, when present, comes first", foundation <= 0, `foundation is item ${foundation + 1}`),
     check("turn completed", !run.error, run.error),
   ]);
-}
-
-/** Cycle check over the component-level build-order graph the issues express. */
-export function isAcyclic(issues: Array<{ component: string; dependsOn: string[] }>): boolean {
-  const edges = new Map<string, Set<string>>();
-  for (const i of issues) {
-    const set = edges.get(i.component) ?? new Set<string>();
-    for (const d of i.dependsOn) if (d !== i.component) set.add(d);
-    edges.set(i.component, set);
-  }
-  const visiting = new Set<string>();
-  const done = new Set<string>();
-  const visit = (n: string): boolean => {
-    if (done.has(n)) return true;
-    if (visiting.has(n)) return false;
-    visiting.add(n);
-    for (const d of edges.get(n) ?? []) if (!visit(d)) return false;
-    visiting.delete(n);
-    done.add(n);
-    return true;
-  };
-  return [...edges.keys()].every(visit);
 }
 
 function readSafe(abs: string): string {

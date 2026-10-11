@@ -136,5 +136,5 @@ what to write; this page says what must stay true whatever they write.
 | which handles exist, which roles hold them, who holds a role | `security.json` (`security-design`) | Thunder at Build; `gen-authz.mjs` |
 | which handle an operation needs | `openapi.yaml` `security` (`openapi-conventions`) | the gateway trait; the build gate; `gen-authz.mjs`; the mock gateway |
 | which rows an operation reaches | the operation's path (`openapi-conventions`) | the generated handler |
-| which screens exist and which role's flow walks them | `prototype.json` (`prototype`) | the build (`react-webapp`); the walk (`mock-verification`) |
+| which screens exist and which role reaches them | `prototype.json` (`prototype`) | the walk (`mock-verification`) |
 | which operation a screen loads | `src/authz/screens.ts` (`thunder-authentication`) | `RequireOperation`, `Can`, the rail, the landing redirect |

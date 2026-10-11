@@ -1,7 +1,7 @@
 # ADR-0042 — A prototype is React on a fixed kit, run in a sandbox
 
 **Status:** Accepted · 2026-10-02 · Amended 2026-10-07 (the agent's gate runs in the org's AE Studio) ·
-Amended 2026-10-11 by [ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+Amended 2026-10-11 by [ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
 (Design makes the prototype and Build reads it; review comments live in
 `specs/design/review.json`, not on a `/prototype` turn)
 **Supersedes:** the json-render prototype decision, "ADR-0035 — The prototype
@@ -126,18 +126,29 @@ Where this ADR says "the agents service", read the org's `ae-design-agent`:
 - The Go save gate is unchanged and stays in aep-api: it runs when a build cuts
   the version (`internal/spec/save_gate.go`).
 
-## Amendment 2026-10-11 — Design makes it, Build reads it, comments live in the review file
+## Amendment 2026-10-11 — the prototype is the UI contract: Design makes it, Build reads it, comments live in the review file
 
-[ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
-and [ADR-0051](ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)
-change three consequences above:
+[ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md),
+[ADR-0052](ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)
+and [ADR-0050](ADR-0050-a-version-builds-as-one-issue-with-an-ordered-checklist.md)
+change these consequences above:
 
-- **The prototype is no longer optional.** A design run writes it after the
-  data model and the roles. The wireframes are retired, and the prototype is
-  what Build reads. The build gate now requires a web application's
-  `prototype.json` and `prototype.tsx`. Read "the build gate, which is
-  unchanged" and "The prototype stays optional beside wireframes" as
-  superseded.
+- **The prototype is the UI contract, and it is no longer optional.** A design
+  run writes it after the data model and the roles; `/prototype` stays as a
+  command that only regenerates it. The wireframes are retired, and the
+  prototype is what Build and the coding run read: the `prototype` skill is
+  `[design, coding]`, and the coding run builds against
+  `references/implementing.md`.
+- **The build gate requires it.** For a web application the gate
+  (`services/aep-api/internal/spec/build_gate.go`) asks for `prototype.json`
+  and `prototype.tsx`, and checks them: each passes the save gate's rules, and
+  the prototype offers only roles that `specs/design/security.json` declares
+  when that file exists. Read "the build gate, which is unchanged" and "The
+  prototype stays optional beside wireframes" as superseded.
+- **Projects that carry only wireframes are not supported.** They are not
+  migrated: the gate refuses them as having no prototype, and the `.dsl` write
+  gate, the console's wireframe viewer and `@aep/excalidraw-dsl` are gone.
+  Running Design again writes the prototype.
 - **No feedback rides a turn.** The review's comments are drafts in
   `specs/design/review.json`, sent by Address comments. The typed
   `prototypeFeedback` on a `/prototype` turn is retired, together with its

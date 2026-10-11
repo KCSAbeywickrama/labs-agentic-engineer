@@ -1,75 +1,82 @@
-Feature: Loans
+Feature: F2 Loans
 
   @story-F2.1
-  Rule: A member may borrow an available copy, within limits
+  Rule: Only a librarian checks out a copy, and only when it is available
 
-    Scenario: Borrowing an available copy
+    Scenario: Checking out an available copy
       Given a title has one available copy
-      When Mia the member borrows the title
-      Then Mia has one active loan for it with a due date 14 days from today
-      And the title shows 0 copies available
+      When Leo the librarian checks that copy out to Maya the member
+      Then a loan exists for Maya with a due date 21 days from today
+      And the copy shows the status "on loan"
 
     @negative
-    Scenario: No copy is available
-      Given a title has one copy and it is on loan to someone else
-      When Mia the member tries to borrow the title
-      Then Mia has no loan for it
+    Scenario: A copy already on loan cannot be checked out again
+      Given a copy is on loan to Maya the member
+      When Leo the librarian checks that copy out to Dan the member
+      Then Dan has no loan on that copy
 
     @negative
-    Scenario: A member at the loan limit cannot borrow
-      Given Mia the member has 5 active loans
-      When she tries to borrow another available title
-      Then Mia still has exactly 5 active loans
-
-    @negative
-    Scenario: A member with unpaid fees cannot borrow
-      Given Mia the member has an unpaid fee of 1.00
-      When she tries to borrow an available title
-      Then Mia has no loan for that title
+    Scenario: A member cannot exceed 10 open loans
+      Given Maya the member has 10 open loans
+      When Leo the librarian checks an eleventh available copy out to Maya
+      Then Maya still has 10 open loans
 
   @story-F2.2
-  Rule: A member sees only their own loans, with due dates
+  Rule: Checking in closes the loan and frees the copy
 
-    Scenario: Viewing current loans
-      Given Mia the member has borrowed "The Hobbit"
-      When she opens her loans
-      Then "The Hobbit" is listed with its due date
-
-    @negative
-    Scenario: Another member's loans are not shown
-      Given Dan the member has borrowed "Dune"
-      When Mia the member opens her loans
-      Then "Dune" is not listed
+    Scenario: Returning an item
+      Given a copy is on loan to Maya the member with no holds waiting on its title
+      When Leo the librarian checks the copy in
+      Then Maya's loan is closed
+      And the copy shows the status "available"
 
   @story-F2.3
-  Rule: Only a librarian may check a copy out to a member
+  Rule: A librarian sees a member's open loans and all overdue loans
 
-    Scenario: Checking a copy out
-      Given Mia is a member and a copy is available
-      When Lena the librarian checks the copy out to Mia
-      Then Mia has an active loan for it due 14 days from today
-
-    @negative
-    Scenario: A member cannot check out to another member
-      Given Dan is a member and a copy is available
-      When Mia the member tries to check the copy out to Dan
-      Then Dan has no loan for it
+    Scenario: Listing overdue loans
+      Given a loan for Maya the member is open and 3 days past its due date
+      And a loan for Dan the member is open and not yet due
+      When Leo the librarian lists overdue loans
+      Then Maya's loan is listed
+      And Dan's loan is not listed
 
   @story-F2.4
-  Rule: Only a librarian may check a copy in
+  Rule: A member sees only their own current loans, with due dates and overdue status
 
-    Scenario: Returning a copy with no holds
-      Given Mia has an active loan for a copy and nobody holds the title
-      When Lena the librarian checks the copy in
-      Then the loan is closed and the copy is available
+    Scenario: Maya's current loans
+      Given Maya the member has one open loan due in 5 days and Dan the member has one open loan
+      When Maya opens her loans
+      Then she sees exactly one loan with its due date
 
-    Scenario: Returning a copy that has a hold waiting
-      Given Mia has an active loan and Dan has a waiting hold on the title
-      When Lena the librarian checks the copy in
-      Then Dan's hold is ready and the copy is not offered to anyone else
+    Scenario: An overdue loan is flagged
+      Given Maya the member has an open loan 2 days past its due date
+      When Maya opens her loans
+      Then that loan is marked overdue
+
+  @story-F2.5
+  Rule: A member sees only their own past loans
+
+    Scenario: Past loans
+      Given Maya the member has returned one item and Dan the member has returned one item
+      When Maya opens her past loans
+      Then she sees exactly one loan
+
+  @story-F2.6
+  Rule: Only a librarian may renew a loan, once, and not when holds are waiting
+
+    Scenario: Renewing a loan
+      Given a copy is on loan to Maya the member with no holds waiting on its title
+      When Leo the librarian renews the loan
+      Then the due date is extended
 
     @negative
-    Scenario: A member cannot check a copy in
-      Given Mia has an active loan for a copy
-      When Mia tries to check the copy in
-      Then the loan is still active
+    Scenario: A second renewal is refused
+      Given a loan to Maya the member has already been renewed once
+      When Leo the librarian renews it again
+      Then the due date is unchanged
+
+    @negative
+    Scenario: Renewal is refused when a hold is waiting
+      Given a copy is on loan to Maya the member and Dan the member has a hold on its title
+      When Leo the librarian renews the loan
+      Then the due date is unchanged

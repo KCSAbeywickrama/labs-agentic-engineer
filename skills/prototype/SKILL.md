@@ -1,13 +1,16 @@
 ---
 name: prototype
-description: "Use when the design reaches a web application: write its prototype (prototype.json + prototype.tsx), a clickable, checked app on the data model and the roles that the reviewer uses before anything is built."
+description: "Use when the design reaches a web application: write its prototype (prototype.json + prototype.tsx), a clickable, checked app on the data model and the roles that the reviewer uses before anything is built. A coding run that builds a web-application reads its references/implementing.md."
 metadata:
   aep:
     kind: platform
-    audience: [design]
+    audience: [design, coding]
 ---
 
 # Prototype
+
+A coding run that builds a web-application reads `references/implementing.md`.
+The rest of this file is how the design agent writes a prototype.
 
 A prototype is the reviewable picture of a `web-application` before it is
 built: its screens, navigation, roles, flows and display states, filled with
@@ -47,6 +50,9 @@ Read these before writing anything:
   are about. Every story the application serves gets at least one screen. Set
   a story aside only when the product gives it no view (sign-in through the
   platform's SSO, a machine-facing endpoint), and name it in your closing.
+- A sketch or mockup the user attached: the layout brief. Refine it; do not
+  reinvent it. Where it and the stories disagree, the stories' scope wins and
+  the sketch's layout intent survives inside it.
 - `specs/design/components/<component>/prototype.json` and `prototype.tsx` if
   they already exist: you are revising them, not starting over (see **Stable
   ids**).
@@ -871,6 +877,11 @@ links name screens, flows and states, so:
 - **Revising an existing prototype keeps every key and id whose thing still
   exists.** Rename labels freely; change an id only when its thing is removed
   or genuinely becomes something else.
+- **Regenerating a prototype that has review comments** (`/prototype` on a
+  reviewed design) is a revision like any other: edits, ids kept. Leave
+  `specs/design/review.json` as it is. Its comments stay open for Address
+  comments, and the file's Checked mark clears by itself when the prototype
+  changes.
 
 ## Closing
 

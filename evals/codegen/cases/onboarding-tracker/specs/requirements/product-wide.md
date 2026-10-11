@@ -3,11 +3,10 @@
 Rules that apply to more than one feature.
 
 ## Requirements
-
-- P1 All users sign in via SSO through Thunder, the platform IDP. Applies to: all.
-- P2 No email or push notifications of any kind. Overdue tasks are surfaced only through in-app visual indicators (e.g., on the dashboard and task lists) — a hard requirement from the brief, not a fallback. Applies to: all.
-- P3 The product does not support uploading or storing files or documents against a task or onboarding record. Tasks are tracked as structured data only (name, department, status, due date, notes as text). Applies to: all.
+- P1 Users sign in through SSO; what a user sees and can change depends on their department. [org default] Applies to: all.
+- P2 Reminders appear only inside the app; no email or other notifications are sent. Applies to: F3.
+- P3 No files are stored; tasks hold text only. Applies to: all.
 
 ## Decisions
-
-- Access is split by department — HR Coordinator, IT Staff, Facilities Staff, and Admin — each seeing and acting only on the tasks relevant to their role, with HR Coordinator having the broadest view across all departments. *assumed*
+- Departments are IT, HR and Facilities. *assumed*
+- A person's department is determined by their department role (IT, HR or Facilities team member), not by any other attribute; each department role carries its own permissions. *assumed*

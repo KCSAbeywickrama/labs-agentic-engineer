@@ -2,7 +2,7 @@
 
 > **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
 
-Take a versioned Spec end-to-end: cut the version, plan its Tasks into a GitHub MILESTONE, and run a
+Take a versioned Spec end-to-end: cut the version, plan its build issue into a GitHub MILESTONE, and run a
 supervised loop that dispatches the coding agent at that milestone until it settles — merging, building
 and deploying along the way — then judge what was deployed against the version's validation criteria.
 **Single write-authority over the milestone-run store and the three Temporal workflows that drive it.**
@@ -78,8 +78,8 @@ outside that lock is the duplicate-issue race the lock exists to close.
 
 | Sub-package | Owns | Reaches the root for |
 |---|---|---|
-| `build` (buildpipe) | the whole-spec gate + the version's tag cut (its NAME comes from the request — console ADR-0030), **the milestone plan path** (mint the version's milestone, supersede the previous version into it, admit the run row, then plan its Tasks and mint its gates), the version ledger, dependency preflight — which also answers what the version is called and changes, since the click makes one request | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
-| `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, run in the org's AE Studio pod (`aestudiotools.Turns`; the pod's `task-op` events drive the tap, every event a Temporal heartbeat through the root `WithProgress`/`ReportProgress`), which mints one **prose** issue per Task **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
+| `build` (buildpipe) | the whole-spec gate + the version's tag cut (its NAME comes from the request — console ADR-0030), **the milestone plan path** (mint the version's milestone, supersede the previous version into it, admit the run row, then plan its build issue and mint its gates), the version ledger, dependency preflight — which also answers what the version is called and changes, since the click makes one request | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
+| `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, run in the org's AE Studio pod (`aestudiotools.Turns`; the pod's `task-op` events drive the tap, every event a Temporal heartbeat through the root `WithProgress`/`ReportProgress`), which mints the version's one **build issue** (an ordered checklist, ADR-0050) **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
 | `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal (and builds a merge whose fan-out was lost) | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR — three workflows over one shared loop: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the version's judgement, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
@@ -110,7 +110,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `MilestoneDispatcher` (root, over `MilestoneDispatch`) | offers | the coding agent → the supervisor: launch one agent run at a milestone and answer with an `AgentLaunch` (its Job ref and the model host it runs on). The dispatch prompt is a milestone reference; the runner discovers its own working set. Satisfied by `*codingagent.CodingExecutor`, which writes no execution row — the cycle record is the supervisor's bookkeeping |
 | `ComponentEnsurer` | needs | `eventcore` → the projects component service + the runtime-config emitter. Provision a component's OpenChoreo CR immediately before its first build; see the invariant below |
 | `RunReader` · `CycleReader` · `CycleLogReader` · `ValidationRunReader` · `ValidationCycleReader` · `ValidationSnapshotReader` · `RunCanceller` · `Revalidator` | needs | `runread` → the root run/cycle repositories, `codingagent`'s cycle-log reader (the pod's log through the OC API while the pod exists, then the observer by the cycle's Component UID — component scope, then project scope once the Component is deleted), an app adapter over the Git port (`app.acceptanceCriteria`) for a report and its criteria AT ONE COMMIT, `*run.Supervisor` and the event plane. Six reads and two writes, which is the whole dependency surface of the read model. `Revalidator` is a port for the same reason `RunCanceller` is: deciding a revalidation needs GitHub (is there open work?) and the project repo (is there an oracle?), and this surface must stay free-to-poll |
-| `Gates` · `Planner` | needs | `run` → `dependencies/provisioning` (through an app-root adapter) and `task`. Mint the version's dependency gates, then plan its Tasks — the run's first phase. Declared here rather than imported for the same reason `build` declares its own: `task ⊥ run` is an import ban in both directions, and a port over root types satisfies it |
+| `Gates` · `Planner` | needs | `run` → `dependencies/provisioning` (through an app-root adapter) and `task`. Mint the version's dependency gates, then plan its build issue — the run's first phase. Declared here rather than imported for the same reason `build` declares its own: `task ⊥ run` is an import ban in both directions, and a port over root types satisfies it |
 | `Deployer` · `DeploymentReader` | needs | `run` → `projects.DeploymentService`. Promote a cycle's built components and read back whether they are serving. The supervisor owns the ORDER and the verdict; the projects domain owns the OpenChoreo writes, which is why `run` still names no cluster client |
 | `DeployIssueMinter` | needs | `run` → the event plane. The ONE recovery issue the plane cannot mint on its own initiative: every other one has a webhook behind it, and a ReleaseBinding that never becomes Ready delivers nothing. The supervisor observes it and asks; the plane still owns the write, the labels and the dedupe key |
 | `RunSignaler` · `RunStarter` | needs | `eventcore` and `build` → the run supervisor. Signal a run, start one. Interfaces, which is what keeps both the event plane and the build click free of a workflow engine; both are declared over the root `StartRunRequest`, and `*run.Supervisor` satisfies both |
@@ -126,26 +126,25 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 
 ## Owns
 - The **executions** store (now provisioning gates only) and the Temporal `Runtime` + the three workflows on it.
-- The **build click's whole sequence** (`build`): mutex → repo → approval gate → request pre-tag work →
-  dependency hard gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
+- The **build click's whole sequence** (`build`): mutex → repo → request pre-tag work → dependency hard
+  gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
   domain fact `build` owns; the two halves it does not own (the planning turn, the gate resolvers) are
   root ports. Preflight emits no `external-config` collect for a **Registered External
   resource** the org catalog already holds (ADR-0021). Pre-tag also refuses an unknown
   `resourceType` (`ErrUnknownResourceType` → 409) the same way it refuses an end-user-auth
   conflict: the design is unsatisfiable on this cluster, so the click claims no version and
   starts no workflow.
-- **The approval gate**: the run provisions a platform resource only from the request's
-  `platform-resource` approval for it, while the deploy gate waits on every one the design
-  declares. So a build whose design declares a resource that is neither provisioned (nor
-  provisioning) nor approved is refused before the pre-tag work (`409
-  platform_resources_not_approved`, one detail per resource). It reads readiness the way
-  preflight lists a `platform-resource` item, so a client that approves what preflight lists is
-  never refused, and a rebuild over provisioned resources needs no approval.
 - **What preflight gates**: it reports what a version's dependencies still need, and only
   `needsResolution` — a dependency the design itself cannot name (no service chosen, an unaccepted
   assumption, missing spec, or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
   something to show" flag: an external dependency's config VALUES are collected while the build runs
   and enforced at the deploy gate, so they never hold up starting a build.
+- **The click is the consent to the platform resources it provisions.** `BuildProvisionInputs` derives
+  the provision payload from the design, not the request: one approved `platform-resource` input per
+  resource preflight would still report (`pendingPlatformResource`, the one rule both share: not yet
+  provisioned or in flight, with the design-authored parameters), deduped by name. Request
+  `platform-resource` and `external-config` entries are ignored; only `org-service` approvals ride the
+  request.
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched
   issue and a build terminal. It merges, mints and signals — the supervisor decides. Its three GitHub
   effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA. It owns the
@@ -276,11 +275,13 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   because the plan is closed and the bugs have LEFT. A build that resolves to the SAME title supersedes
   nothing (the title guard skips it) and takes the rebuild path below instead: the same milestone,
   reopened.
-- **Every issue body is prose; nothing platform-side parses one.** That holds for planned Tasks, for
-  dispatch gates and for the validation task alike: the milestone is the version pin, LABELS carry every
-  routable fact, and ordering is the "Depends on #N" lines the AGENT honours. Dedupe on re-plan is the
-  title slug against the milestone's own issues, which makes reconcile additive-only and a crash re-run a
-  no-op.
+- **Every issue body is prose; nothing platform-side routes on one.** That holds for the build issue,
+  for dispatch gates and for the validation task alike: the milestone is the version pin and LABELS carry
+  every routable fact. The one read of a body is a count: the run's poll counts the build issue's
+  unticked items (`taskplan.UncheckedItems`) for the no-progress rule. Ordering is the checklist's own,
+  which the AGENT works top to bottom. The build issue's dedupe key is `build:<project>:<milestone>`
+  (`DedupeKeyBuildIssue`), so a crash re-run of the plan finds the open issue instead of minting a
+  second.
 - **A cycle's own verification happens INSIDE the session, and this domain orchestrates none of it.** A
   coding cycle no longer ends at "it compiles": before committing a `web-application` the agent stands it
   up in mock mode, drives it through a browser against the component's stories and heals what that finds,
@@ -328,13 +329,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   endpoint is AND, so a filter naming two labels demands an issue carrying both and returns nothing; and a
   label predicate split across the fetch and the decision is one rule in two places, which is how the
   validation cycle's pull request once ended up declined as "not this run's work".
-  The policy admits a pull request TWO ways, and the two lists never merge: a CLOSING keyword on any
+  The policy admits a pull request THREE ways, and the lists never merge: a CLOSING keyword on any
   armed issue (the coding cycles' path, where the matched list is also `RunCycle.Resolves`, the durable
-  record of what the cycle finished), or `Validates #N` on the milestone's `validation`-kind task —
-  scoped to that kind, because otherwise `Validates` would become a general-purpose way to merge a pull
-  request while closing nothing and no working set would ever empty.
-- **Milestone assignment rides issue creation.** A plan costs `1+N` content-generating requests against
-  GitHub's 80-per-minute ceiling: one milestone create plus one issue create per Task. Never
+  record of what the cycle finished), `Validates #N` on the milestone's `validation`-kind task, or
+  `Advances #N` on its build issue (`IsBuildIssue`, the same predicate the run poll counts the checklist
+  of; a cycle that finished some items and not all, and the issue stays open with those items ticked).
+  Each non-closing word is scoped to its issue, because
+  otherwise it would become a general-purpose way to merge a pull request while closing nothing and no
+  working set would ever empty.
+- **Milestone assignment rides issue creation.** A plan costs two content-generating requests against
+  GitHub's 80-per-minute ceiling: one milestone create plus the build issue's create. Never
   create-then-PATCH, and never a label pre-create per issue (`sourcecontrol` memoises the ensure).
 - **Settled rows are never resurrected.** Every run and cycle mutator is a guarded update — fenced on the
   run not being terminal, or the cycle not being closed — and returns `(nil, nil)` when it changes no row,
@@ -466,7 +470,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   its one automatic re-trigger with no fix issue to recover it; `deploy-budget` is a component that
   built and never came up, with no fix issue to recover it — a different class from a red build,
   because the code compiled and the platform could not run it; `fix-chain-budget` and `conflict-budget`
-  bound the two recovery chains; `no-progress` is a green cycle that left the milestone unchanged;
+  bound the two recovery chains; `no-progress` is a green cycle that left the milestone unchanged (the working set plus the build
+  issue's unticked items, `progressUnits`);
   `cycle-ceiling` is the backstop over all of them. The validating phase contributes two, and they are
   two because they are different failures: `validation-failed` is a criterion that asserted and lost —
   a fact about the software — while `validation-unreported` is the agent merging its pull request
@@ -578,8 +583,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   before its planning turn and a poll could legitimately land mid-plan — "not planned yet" and "nothing
   to do" were the same reading. Planning is the dev workflow's own first phase now, so by the time
   anything is polled the plan has either landed or settled the run, and the ambiguity is gone. It is
-  also the right answer for a re-build of a version whose Tasks all already exist and are closed, where
-  planning legitimately mints nothing. It files NO validation task: a judgement asserts against what a
+  also the right answer for a re-build of a version whose build issue already exists and is closed:
+  planning is skipped and nothing is open. It files NO validation task: a judgement asserts against what a
   run landed, and this one landed nothing — so it records `skipped`, because nothing will ever judge it
   and an empty verdict would read as "any moment now" forever. Filing none is also what makes this one of
   the two dev endings that CLOSE the milestone: with no verdict owed, there is nothing left to wait for. A run that adopted somebody else's
@@ -641,12 +646,11 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   milestone: the click REOPENS it and exactly the issues carrying `aep:cancelled`, CLEARS the label as it
   goes (it records one abandoned attempt, not a property of the issue), and sets `Rebuild` on the start
   request. The run then mints its gates — they dedupe onto the reopened ones, so a dependency resolved
-  since the cancel is re-read rather than assumed — and **SKIPS `planTasks`**. It must: plan dedupe is
-  the title slug against the milestone's issues in ANY state, which is what makes re-planning
-  additive-only and a crash re-run a no-op, so a re-plan after a cancel that closed everything would
-  recognise every slug, mint NOTHING, and the loop would read the empty working set as "delivered" and
-  settle a version it never built. Reopening is the only path that restores the working set without
-  breaking additive-only dedupe, and it is cheaper: no LLM turn. `Rebuild` rides the REQUEST beside
+  since the cancel is re-read rather than assumed — and **SKIPS `PlanMilestone`** (the planning turn). It must: the build
+  issue's dedupe key matches OPEN issues only, so a re-plan after a cancel that closed it would mint a
+  second build issue beside the first, with every item unticked, and the run would redo work the
+  version already holds. Reopening restores the one build issue with its ticks, and it is cheaper: no
+  LLM turn. `Rebuild` rides the REQUEST beside
   `Tag`, for the same reason and under the same replay rule — the zero value is the pre-existing
   behaviour, so a re-offer from the sweep can never claim a milestone was refilled for it.
 - **Echo suppression is `issues.*`-only.** Every label, comment and milestone assignment the platform

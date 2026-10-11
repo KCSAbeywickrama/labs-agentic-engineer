@@ -18,91 +18,90 @@
 
 import { useState, type ReactNode } from "react";
 import {
-  Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Filters, Form,
-  Heading, Screen, Section, Stat, StatGroup, Table, Timeline, ValidationSummary,
-  defineApp, useCollection, useDisplayState, useParams, useRole, useToday,
+  Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Filters, Form, Heading, Screen,
+  Section, Stat, StatGroup, Table, Text, ValidationSummary, defineApp, useCollection, useDisplayState,
+  useNav, useParams, useRole,
 } from "@wso2/prototype-kit";
 
 interface Ticket {
   id: string;
   title: string;
   description: string;
-  status: string;
+  category: string;
   priority: string;
-  requesterId: string;
+  status: string;
   requesterName: string;
-  assigneeId?: string;
-  assigneeName?: string;
+  assigneeId: string;
+  assigneeName: string;
+  assigneeUsername?: string;
   slaDueAt: string;
-  slaBreached: boolean;
   createdAt: string;
-  resolvedAt?: string;
 }
 
-interface Comment {
-  id: string;
-  ticketId: string;
-  authorId: string;
-  authorName: string;
-  body: string;
-  createdAt: string;
-}
+interface Comment { id: string; ticketId: string; authorName: string; body: string; createdAt: string }
+interface Agent { id: string; displayName: string }
+
+const NOW = "2026-01-15 12:00";
+const PRIORITIES = ["low", "medium", "high", "critical"];
+const CATEGORIES = ["hardware", "software", "access", "network", "other"];
+const STATUSES = ["open", "triaged", "in-progress", "resolved", "reopened"];
+const DUE: Record<string, string> = {
+  critical: "2026-01-15 16:00",
+  high: "2026-01-15 20:00",
+  medium: "2026-01-16 12:00",
+  low: "2026-01-18 12:00",
+};
+
+const ERIN = "Erin Wijesinghe";
+const SAM: Agent = { id: "agent.sam", displayName: "Sam Fernando" };
+const TARA = "Tara Silva";
 
 const tickets: Ticket[] = [
-  { id: "ticket.1042", title: "VPN not connecting", description: "Cannot connect to the office VPN from home.", status: "open", priority: "high", requesterId: "ana", requesterName: "Ana Fernando", slaDueAt: "2026-01-15 18:00", slaBreached: false, createdAt: "2026-01-15 08:00" },
-  { id: "ticket.1038", title: "Replace keyboard", description: "Several keys have stopped responding.", status: "triaged", priority: "high", requesterId: "ana", requesterName: "Ana Fernando", assigneeId: "sam", assigneeName: "Sam Perera", slaDueAt: "2026-01-14 09:00", slaBreached: false, createdAt: "2026-01-13 09:00" },
-  { id: "ticket.1031", title: "Cannot print", description: "The 3rd floor printer is not reachable.", status: "in_progress", priority: "medium", requesterId: "lee", requesterName: "Lee Carvalho", assigneeId: "priya", assigneeName: "Priya Gunasekara", slaDueAt: "2026-01-16 17:00", slaBreached: false, createdAt: "2026-01-12 11:00" },
-  { id: "ticket.1020", title: "Email sync failing", description: "Mail stopped syncing on mobile overnight.", status: "resolved", priority: "critical", requesterId: "lee", requesterName: "Lee Carvalho", assigneeId: "sam", assigneeName: "Sam Perera", slaDueAt: "2026-01-10 08:00", slaBreached: false, createdAt: "2026-01-10 04:00", resolvedAt: "2026-01-10 07:30" },
-  { id: "ticket.1045", title: "Monitor flickering", description: "External monitor flickers intermittently.", status: "reopened", priority: "low", requesterId: "ana", requesterName: "Ana Fernando", assigneeId: "priya", assigneeName: "Priya Gunasekara", slaDueAt: "2026-01-18 17:00", slaBreached: false, createdAt: "2026-01-12 09:00" },
-  { id: "ticket.1050", title: "Password reset needed", description: "Locked out of the HR portal.", status: "open", priority: "critical", requesterId: "lee", requesterName: "Lee Carvalho", slaDueAt: "2026-01-14 06:00", slaBreached: true, createdAt: "2026-01-14 04:00" },
+  { id: "T-1044", title: "Outlook crashes on launch", description: "Outlook closes a few seconds after opening since the last update.", category: "software", priority: "critical", status: "open", requesterName: "Maya Fernando", assigneeId: "", assigneeName: "", slaDueAt: "2026-01-15 13:00", createdAt: "2026-01-15 09:00" },
+  { id: "T-1042", title: "Laptop will not boot", description: "The laptop shows a black screen after the vendor logo.", category: "hardware", priority: "high", status: "in-progress", requesterName: ERIN, assigneeId: SAM.id, assigneeName: SAM.displayName, slaDueAt: "2026-01-15 16:00", createdAt: "2026-01-15 08:00" },
+  { id: "T-1040", title: "VPN drops every hour", description: "The VPN disconnects roughly once an hour while working from home.", category: "network", priority: "medium", status: "triaged", requesterName: "Dan Perera", assigneeId: "agent.priya", assigneeName: "Priya Nair", slaDueAt: "2026-01-15 10:00", createdAt: "2026-01-14 10:00" },
+  { id: "T-1038", title: "Need access to the finance share", description: "I moved to the finance team and need read access to the shared drive.", category: "access", priority: "low", status: "open", requesterName: ERIN, assigneeId: "", assigneeName: "", slaDueAt: "2026-01-17 09:00", createdAt: "2026-01-14 09:00" },
+  { id: "T-1035", title: "Printer jam on floor 3", description: "The floor 3 printer reports a paper jam that cannot be cleared.", category: "hardware", priority: "low", status: "resolved", requesterName: ERIN, assigneeId: SAM.id, assigneeName: SAM.displayName, slaDueAt: "2026-01-13 12:00", createdAt: "2026-01-10 12:00" },
+  { id: "T-1031", title: "Reset my SSO password", description: "The reset link from the portal says it has expired.", category: "access", priority: "high", status: "reopened", requesterName: "Dan Perera", assigneeId: SAM.id, assigneeName: SAM.displayName, slaDueAt: "2026-01-14 18:00", createdAt: "2026-01-14 10:00" },
 ];
 
 const comments: Comment[] = [
-  { id: "comment.1", ticketId: "ticket.1042", authorId: "ana", authorName: "Ana Fernando", body: "Still failing after restart.", createdAt: "2026-01-15 08:30" },
-  { id: "comment.2", ticketId: "ticket.1038", authorId: "sam", authorName: "Sam Perera", body: "Ordering a replacement keyboard.", createdAt: "2026-01-13 10:00" },
-  { id: "comment.3", ticketId: "ticket.1031", authorId: "priya", authorName: "Priya Gunasekara", body: "Checking the printer's network cable now.", createdAt: "2026-01-12 11:30" },
+  { id: "C-1", ticketId: "T-1042", authorName: ERIN, body: "It still shows a black screen after holding the power button.", createdAt: "2026-01-15 08:20" },
+  { id: "C-2", ticketId: "T-1042", authorName: SAM.displayName, body: "Please send the asset tag from the bottom of the laptop.", createdAt: "2026-01-15 09:05" },
+  { id: "C-3", ticketId: "T-1040", authorName: "Dan Perera", body: "It happens mostly during video calls.", createdAt: "2026-01-14 11:30" },
+  { id: "C-4", ticketId: "T-1035", authorName: SAM.displayName, body: "Cleared the jam and replaced the roller.", createdAt: "2026-01-12 15:10" },
 ];
 
-const agents = [
-  { id: "sam", name: "Sam Perera" },
-  { id: "priya", name: "Priya Gunasekara" },
-  { id: "ravi", name: "Ravi Jayasuriya" },
-];
+const agents: Agent[] = [SAM, { id: "agent.priya", displayName: "Priya Nair" }];
 
-const currentEmployeeId = "ana";
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const label = (s: string) => cap(s.replace("-", " "));
+const breached = (t: Ticket) => t.status !== "resolved" && t.slaDueAt < NOW;
+const statusTone = (s: string): "default" | "info" | "success" | "warning" | "error" =>
+  s === "resolved" ? "success" : s === "in-progress" ? "warning" : s === "reopened" ? "error" : "info";
+const slaText = (t: Ticket) => (t.status === "resolved" ? "Met" : breached(t) ? "Breached" : "On track");
+const who = (t: Ticket) => t.assigneeName || (t.assigneeUsername ? `${t.assigneeUsername} (not signed in yet)` : "Unassigned");
+const unassigned = (t: Ticket) => t.assigneeId === "" && !t.assigneeUsername;
 
-const users = {
-  Employee: { name: "Ana Fernando", email: "ana.fernando@acme.example" },
-  "Support Agent": { name: "Sam Perera", email: "sam.perera@acme.example" },
-  "Team Lead": { name: "Tara De Silva", email: "tara.desilva@acme.example" },
-} as const;
-
-function statusTone(status: string): "default" | "info" | "success" | "warning" | "error" {
-  if (status === "resolved") return "success";
-  if (status === "in_progress") return "info";
-  if (status === "reopened") return "error";
-  if (status === "triaged") return "default";
-  return "warning";
-}
-
-function statusLabel(status: string): string {
-  return status.replace("_", " ");
+function useUser() {
+  const role = useRole();
+  if (role === "Employee") return { name: ERIN, email: "erin.wijesinghe@acme.example" };
+  if (role === "Support Agent") return { name: SAM.displayName, email: "sam.fernando@acme.example" };
+  return { name: TARA, email: "tara.silva@acme.example" };
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  const role = useRole();
-  const nav =
-    role === "Employee"
-      ? [{ id: "nav.my-tickets", label: "My tickets", to: "screen.my-tickets" }]
-      : [{ id: "nav.queue", label: "Queue", to: "screen.queue" }];
-  const person = users[role as keyof typeof users];
+  const user = useUser();
   return (
     <AppShell
       id="shell"
-      user={{ name: person.name, email: person.email, role }}
-      nav={nav}
+      user={user}
+      nav={[
+        { id: "nav.my-tickets", label: "My tickets", to: "screen.my-tickets" },
+        { id: "nav.new-ticket", label: "Raise a ticket", to: "screen.new-ticket" },
+        { id: "nav.queue", label: "Queue", to: "screen.queue" },
+      ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -110,373 +109,360 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+function FailedAlert() {
+  const state = useDisplayState();
+  if (state !== "state.failed") return null;
+  return <Alert id="alert.failed" tone="error" title="Help desk unavailable" text="Tickets could not be loaded. Try again in a few minutes." />;
+}
+
+function CommentsSection({ ticketId, authorName }: { ticketId: string; authorName: string }) {
+  const all = useCollection<Comment>("comments");
+  const thread = all.items.filter((c) => c.ticketId === ticketId);
+  return (
+    <Section id="section.comments" title="Comments" count={thread.length} subtitle="Oldest first. Comments cannot be edited once posted.">
+      <Table
+        id="table.comments"
+        columns={["Author", "Comment", "Posted"]}
+        rows={thread.map((c) => ({ id: `comment.${c.id}`, cells: [c.authorName, c.body, c.createdAt] }))}
+        empty={<EmptyState id="empty.comments" title="No comments yet" text="Start the conversation below." />}
+      />
+      <Form
+        id="form.comment"
+        title="Add a comment"
+        onSubmit={(values) => {
+          const body = values["body"];
+          if (body) all.create({ ticketId, authorName, body, createdAt: NOW });
+        }}
+        actions={<Button id="btn.comment" label="Post comment" emphasis="primary" submit />}
+      >
+        <Field id="field.comment" name="body" label="Comment" type="textarea" required />
+      </Form>
+    </Section>
+  );
+}
+
+function ticketRows(list: Ticket[], to: string, withRequester: boolean) {
+  return list.map((t) => ({
+    id: `ticket.${t.id}`,
+    cells: withRequester
+      ? [t.title, t.requesterName, cap(t.priority), who(t), t.slaDueAt, slaText(t)]
+      : [t.title, cap(t.priority), who(t), t.slaDueAt, slaText(t)],
+    status: { text: label(t.status), tone: statusTone(t.status) },
+    to,
+    params: { ticket: t.id },
+  }));
+}
+
 function MyTickets() {
   const state = useDisplayState();
   const all = useCollection<Ticket>("tickets");
-  const today = useToday();
-  const [raising, setRaising] = useState(false);
-  const mine = state === "state.empty" ? [] : all.items.filter((t) => t.requesterId === currentEmployeeId);
+  const mine = state === "state.empty" ? [] : all.items.filter((t) => t.requesterName === ERIN);
+  const active = mine.filter((t) => t.status !== "resolved").length;
   return (
     <Shell>
-      <Heading
-        id="heading.my-tickets"
-        text="My tickets"
-        actions={<Button id="btn.raise" label="Raise ticket" emphasis="primary" onPress={() => setRaising(true)} />}
-      />
-      <Section id="section.my-tickets" title="My tickets" count={mine.length} subtitle="Tickets you have raised, newest first.">
+      <Heading id="heading.my-tickets" text="My tickets" />
+      <FailedAlert />
+      <StatGroup>
+        <Stat id="stat.active" label="Active" value={String(active)} hint="tickets being worked on" icon="Ticket" tone="warning" />
+        <Stat id="stat.resolved" label="Resolved" value={String(mine.length - active)} hint="tickets you can reopen" icon="CircleCheck" tone="success" />
+      </StatGroup>
+      <Section
+        id="section.my-tickets"
+        title="Your tickets"
+        count={mine.length}
+        subtitle="Only tickets you raised are listed."
+        actions={<Button id="btn.raise" label="Raise a ticket" emphasis="primary" to="screen.new-ticket" />}
+      >
         <Table
           id="table.my-tickets"
-          columns={["Title", "Priority", { label: "Status", kind: "status" }, "SLA due"]}
-          rows={mine.map((t) => ({
-            id: `row.${t.id}`,
-            cells: [t.title, t.priority, t.slaDueAt],
-            status: { text: statusLabel(t.status), tone: statusTone(t.status) },
-            to: "screen.ticket",
-            params: { ticket: t.id },
-          }))}
-          empty={
-            <EmptyState
-              id="empty.my-tickets"
-              title="No tickets yet"
-              text="Raise a ticket to get IT's help."
-              actions={<Button id="btn.raise-empty" label="Raise ticket" emphasis="primary" onPress={() => setRaising(true)} />}
-            />
-          }
+          columns={["Title", "Priority", "Assignee", "SLA due", "SLA", { label: "Status", kind: "status" }]}
+          rows={ticketRows(mine, "screen.my-ticket", false)}
+          empty={<EmptyState id="empty.my-tickets" title="No tickets yet" text="Raise a ticket when you need IT help." />}
         />
       </Section>
-      <Dialog id="dialog.raise" title="Raise a ticket" open={raising} onClose={() => setRaising(false)}>
-        <Form
-          id="form.raise"
-          onSubmit={(values) => {
-            all.create({
-              title: values.title,
-              description: values.description,
-              status: "open",
-              priority: values.priority,
-              requesterId: currentEmployeeId,
-              requesterName: "Ana Fernando",
-              slaDueAt: "2026-01-16 17:00",
-              slaBreached: false,
-              createdAt: today,
-            });
-            setRaising(false);
-          }}
-          actions={<Button id="btn.raise.submit" label="Raise" emphasis="primary" submit />}
-        >
-          {state === "state.validation-error" && (
-            <ValidationSummary id="validation.raise" issues={["Title is required", "Description is required"]} />
-          )}
-          <Field
-            id="field.title"
-            name="title"
-            label="Title"
-            required
-            error={state === "state.validation-error" ? "Give the ticket a title" : undefined}
-          />
-          <Field
-            id="field.description"
-            name="description"
-            label="Description"
-            type="textarea"
-            required
-            error={state === "state.validation-error" ? "Describe the problem" : undefined}
-          />
-          <Field
-            id="field.priority"
-            name="priority"
-            label="Priority"
-            type="select"
-            options={["low", "medium", "high", "critical"]}
-            defaultValue="medium"
-            required
-          />
-        </Form>
-      </Dialog>
     </Shell>
   );
 }
 
-function TicketDetail() {
+function NewTicket() {
+  const state = useDisplayState();
+  const navigate = useNav();
+  const all = useCollection<Ticket>("tickets");
+  const invalid = state === "state.validation-error";
+  return (
+    <Shell>
+      <Heading id="heading.new-ticket" text="Raise a ticket" />
+      <FailedAlert />
+      <Breadcrumbs
+        id="crumbs.new-ticket"
+        items={[{ id: "crumb.my-tickets", label: "My tickets", to: "screen.my-tickets" }, { id: "crumb.new", label: "Raise a ticket" }]}
+      />
+      {invalid && <ValidationSummary id="summary.new-ticket" issues={["Enter a title for the ticket"]} />}
+      <Form
+        id="form.new-ticket"
+        title="Ticket details"
+        onSubmit={(values) => {
+          const priority = values["priority"] ?? "medium";
+          all.create({
+            title: values["title"] ?? "",
+            description: values["description"] ?? "",
+            category: values["category"] ?? "other",
+            priority,
+            status: "open",
+            requesterName: ERIN,
+            assigneeId: "",
+            assigneeName: "",
+            slaDueAt: DUE[priority] ?? DUE["medium"]!,
+            createdAt: NOW,
+          });
+          navigate.go("screen.my-tickets");
+        }}
+        actions={<Button id="btn.create-ticket" label="Raise ticket" emphasis="primary" submit />}
+      >
+        <Field id="field.title" name="title" label="Title" required error={invalid ? "Enter a title for the ticket" : undefined} />
+        <Field id="field.description" name="description" label="Description" type="textarea" required />
+        <Field id="field.category" name="category" label="Category" type="select" options={CATEGORIES} defaultValue="software" />
+        <Field id="field.priority" name="priority" label="Priority" type="select" options={PRIORITIES} defaultValue="medium" />
+      </Form>
+      <Text id="text.sla-note" text="The SLA due time is calculated from the priority when you raise the ticket." />
+    </Shell>
+  );
+}
+
+function MyTicket() {
   const { ticket: id } = useParams();
   const state = useDisplayState();
   const all = useCollection<Ticket>("tickets");
-  const allComments = useCollection<Comment>("comments");
-  const today = useToday();
-  const [reopening, setReopening] = useState(false);
-  const mine = all.items.filter((t) => t.requesterId === currentEmployeeId);
+  const mine = all.items.filter((t) => t.requesterName === ERIN);
   const ticket = (id ? all.get(id) : undefined) ?? mine[0]!;
-  const thread = allComments.items.filter((c) => c.ticketId === ticket.id);
+  const [editing, setEditing] = useState(false);
+  const invalid = state === "state.validation-error";
   return (
     <Shell>
-      <Breadcrumbs
-        id="breadcrumbs.ticket"
-        items={[
-          { id: "crumb.my-tickets", label: "My tickets", to: "screen.my-tickets" },
-          { id: "crumb.ticket", label: ticket.title },
-        ]}
+      <Heading
+        id="heading.my-ticket"
+        text={`${ticket.id} ${ticket.title}`}
+        actions={
+          <>
+            {ticket.status === "open" && <Button id="btn.edit" label="Edit ticket" onPress={() => setEditing(true)} />}
+            {ticket.status === "resolved" && (
+              <Button id="btn.reopen" label="Reopen ticket" emphasis="primary" onPress={() => all.update(ticket.id, { status: "reopened" })} />
+            )}
+          </>
+        }
       />
-      <Heading id="heading.ticket" text={ticket.title} />
-      {state === "state.failed" && (
-        <Alert id="alert.ticket-failed" tone="error" title="Couldn't refresh this ticket" text="Showing the last known details." />
+      <FailedAlert />
+      <Breadcrumbs
+        id="crumbs.my-ticket"
+        items={[{ id: "crumb.my-tickets", label: "My tickets", to: "screen.my-tickets" }, { id: "crumb.ticket", label: ticket.id }]}
+      />
+      {ticket.status !== "open" && ticket.status !== "resolved" && (
+        <Alert id="alert.locked" tone="info" text="This ticket has been triaged, so it can no longer be edited. Add a comment to share more detail." />
       )}
       <Detail
-        id="detail.ticket"
+        id="detail.my-ticket"
         fields={[
-          { label: "Description", value: ticket.description },
-          { label: "Status", value: statusLabel(ticket.status) },
-          { label: "Priority", value: ticket.priority },
-          { label: "Assignee", value: ticket.assigneeName ?? "Unassigned" },
+          { label: "Status", value: label(ticket.status) },
+          { label: "Priority", value: cap(ticket.priority) },
+          { label: "Category", value: cap(ticket.category) },
+          { label: "Assignee", value: ticket.assigneeName || ticket.assigneeUsername || "Not assigned yet" },
           { label: "SLA due", value: ticket.slaDueAt },
+          { label: "Raised", value: ticket.createdAt },
+          { label: "Description", value: ticket.description },
         ]}
       />
-      {ticket.status === "resolved" && (
-        <Button id="btn.reopen" label="Reopen" emphasis="primary" onPress={() => setReopening(true)} />
-      )}
-      <Dialog id="dialog.reopen" title={`Reopen ${ticket.title}`} open={reopening} onClose={() => setReopening(false)}>
+      <Dialog id="dialog.edit" title={`Edit ${ticket.id}`} open={editing} onClose={() => setEditing(false)}>
         <Form
-          id="form.reopen"
-          onSubmit={() => {
-            all.update(ticket.id, { status: "reopened" });
-            setReopening(false);
+          id="form.edit"
+          onSubmit={(values) => {
+            const priority = values["priority"] ?? ticket.priority;
+            all.update(ticket.id, {
+              title: values["title"] ?? ticket.title,
+              description: values["description"] ?? ticket.description,
+              priority,
+              slaDueAt: DUE[priority] ?? ticket.slaDueAt,
+            });
+            setEditing(false);
           }}
-          actions={<Button id="btn.reopen.confirm" label="Reopen" emphasis="primary" submit />}
+          actions={<Button id="btn.save-edit" label="Save changes" emphasis="primary" submit />}
         >
-          <Field id="field.reopen-note" name="note" label="Why does this need more work?" type="textarea" />
+          <Field id="field.edit-title" name="title" label="Title" required defaultValue={ticket.title} error={invalid ? "Enter a title for the ticket" : undefined} />
+          <Field id="field.edit-description" name="description" label="Description" type="textarea" defaultValue={ticket.description} />
+          <Field id="field.edit-priority" name="priority" label="Priority" type="select" options={PRIORITIES} defaultValue={ticket.priority} />
         </Form>
       </Dialog>
-      <Section
-        id="section.comments"
-        title="Comments"
-        count={thread.length}
-        subtitle="Visible to you and whoever works this ticket."
-      >
-        <Timeline
-          id="timeline.comments"
-          entries={thread.map((c) => ({ when: c.createdAt, who: c.authorName, text: c.body }))}
-        />
-        <Form
-          id="form.comment"
-          onSubmit={(values) => {
-            allComments.create({ ticketId: ticket.id, authorId: currentEmployeeId, authorName: "Ana Fernando", body: values.body, createdAt: today });
-          }}
-          actions={<Button id="btn.comment.submit" label="Add comment" emphasis="primary" submit />}
-        >
-          <Field
-            id="field.comment"
-            name="body"
-            label="Add a comment"
-            type="textarea"
-            required
-            error={state === "state.validation-error" ? "Say something before posting" : undefined}
-          />
-        </Form>
-      </Section>
+      <CommentsSection ticketId={ticket.id} authorName={ERIN} />
     </Shell>
   );
 }
 
 function Queue() {
   const state = useDisplayState();
+  const role = useRole();
   const all = useCollection<Ticket>("tickets");
-  const [status, setStatus] = useState("all");
-  const [priority, setPriority] = useState("all");
-  const [assignee, setAssignee] = useState("all");
-  const [onlyBreached, setOnlyBreached] = useState(false);
-  const everything = state === "state.empty" ? [] : all.items;
-  const filtered = everything.filter(
-    (t) =>
-      (status === "all" || t.status === status) &&
-      (priority === "all" || t.priority === priority) &&
-      (assignee === "all" || t.assigneeName === assignee) &&
-      (!onlyBreached || t.slaBreached)
-  );
-  const breachedCount = everything.filter((t) => t.slaBreached).length;
+  const [status, setStatus] = useState("All statuses");
+  const [priority, setPriority] = useState("All priorities");
+  const [assignee, setAssignee] = useState("Anyone");
+  const [sla, setSla] = useState("All tickets");
+  const pool = state === "state.empty" ? [] : all.items;
+  const shown = pool
+    .filter((t) => status === "All statuses" || t.status === status)
+    .filter((t) => priority === "All priorities" || t.priority === priority)
+    .filter((t) => assignee === "Anyone" || (assignee === "Unassigned" ? unassigned(t) : t.assigneeName === assignee))
+    .filter((t) => sla === "All tickets" || breached(t))
+    .sort((a, b) => (a.slaDueAt < b.slaDueAt ? -1 : 1));
+  const isAgent = role === "Support Agent";
   return (
     <Shell>
-      <Heading id="heading.queue" text="Ticket queue" />
-      {state === "state.failed" && (
-        <Alert id="alert.queue-failed" tone="error" title="Ticket feed unavailable" text="Refresh in a few minutes; figures may be stale." />
-      )}
+      <Heading id="heading.queue" text="Queue" />
+      <FailedAlert />
       <StatGroup>
-        <Stat id="stat.open" label="Open" value={String(everything.filter((t) => t.status === "open").length)} hint="awaiting triage" icon="Inbox" tone="warning" />
-        <Stat id="stat.breached" label="SLA breaches" value={String(breachedCount)} hint="past their due time" icon="TriangleAlert" tone="error" />
+        <Stat id="stat.breached" label="Breached SLA" value={String(pool.filter(breached).length)} hint="unresolved and overdue" icon="TriangleAlert" tone="error" />
+        <Stat id="stat.unassigned" label="Unassigned" value={String(pool.filter(unassigned).length)} hint="tickets waiting for an owner" icon="Inbox" tone="warning" />
+        <Stat id="stat.open" label="Not resolved" value={String(pool.filter((t) => t.status !== "resolved").length)} hint="tickets in the queue" icon="Ticket" />
       </StatGroup>
-      <Section id="section.queue" title="Tickets" count={filtered.length} subtitle="Every ticket raised across the organization.">
+      <Section id="section.queue" title="All tickets" count={shown.length} subtitle="Soonest SLA due time first.">
         <Filters id="filters.queue">
-          <Field id="field.status" label="Status" type="select" options={["all", "open", "triaged", "in_progress", "resolved", "reopened"]} value={status} onChange={setStatus} />
-          <Field id="field.priority" label="Priority" type="select" options={["all", "low", "medium", "high", "critical"]} value={priority} onChange={setPriority} />
-          <Field id="field.assignee" label="Assignee" type="select" options={["all", ...agents.map((a) => a.name)]} value={assignee} onChange={setAssignee} />
-          <Field id="field.breached" label="SLA breaches only" type="switch" value={onlyBreached ? "on" : "off"} onChange={(v) => setOnlyBreached(v === "on")} />
+          <Field id="field.filter-status" label="Status" type="select" options={["All statuses", ...STATUSES]} value={status} onChange={setStatus} />
+          <Field id="field.filter-priority" label="Priority" type="select" options={["All priorities", ...PRIORITIES]} value={priority} onChange={setPriority} />
+          <Field id="field.filter-assignee" label="Assignee" type="select" options={["Anyone", "Unassigned", ...agents.map((a) => a.displayName)]} value={assignee} onChange={setAssignee} />
+          <Field id="field.filter-sla" label="SLA" type="select" options={["All tickets", "Breached only"]} value={sla} onChange={setSla} />
         </Filters>
         <Table
           id="table.queue"
-          columns={["Title", "Priority", { label: "Status", kind: "status" }, "Assignee", "SLA due"]}
-          rows={filtered.map((t) => ({
-            id: `row.${t.id}`,
-            cells: [t.title, t.priority, t.assigneeName ?? "Unassigned", t.slaDueAt],
-            status: { text: t.slaBreached ? "Breached" : statusLabel(t.status), tone: t.slaBreached ? "error" : statusTone(t.status) },
-            to: "screen.ticket-workspace",
-            params: { ticket: t.id },
+          columns={["Title", "Requester", "Priority", "Assignee", "SLA due", "SLA", { label: "Status", kind: "status" }]}
+          rows={shown.map((t) => ({
+            ...ticketRows([t], "screen.ticket", true)[0]!,
+            actions: isAgent && t.assigneeId !== SAM.id
+              ? [{ id: `ticket.${t.id}.claim`, label: "Assign to me", onPress: () => all.update(t.id, { assigneeId: SAM.id, assigneeName: SAM.displayName, assigneeUsername: "" }) }]
+              : [],
           }))}
-          empty={<EmptyState id="empty.queue" title="Nothing matches these filters" text="Clear a filter to see more tickets." />}
+          empty={<EmptyState id="empty.queue" title="No tickets match" text="Change the filters or wait for new tickets." />}
         />
       </Section>
     </Shell>
   );
 }
 
-function TicketWorkspace() {
+function TicketDetail() {
   const { ticket: id } = useParams();
-  const state = useDisplayState();
   const role = useRole();
+  const state = useDisplayState();
   const all = useCollection<Ticket>("tickets");
-  const allComments = useCollection<Comment>("comments");
-  const today = useToday();
-  const [assigning, setAssigning] = useState(false);
   const ticket = (id ? all.get(id) : undefined) ?? all.items[0]!;
-  const thread = allComments.items.filter((c) => c.ticketId === ticket.id);
-  const actorName = role === "Support Agent" ? "Sam Perera" : "Tara De Silva";
-  const actorId = role === "Support Agent" ? "sam" : "tara";
+  const [triaging, setTriaging] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const isAgent = role === "Support Agent";
+  const mine = ticket.assigneeId === SAM.id;
+  const invalid = state === "state.validation-error";
   return (
     <Shell>
+      <Heading
+        id="heading.ticket"
+        text={`${ticket.id} ${ticket.title}`}
+        actions={
+          <>
+            {isAgent && ticket.status === "open" && <Button id="btn.triage" label="Triage" emphasis="primary" onPress={() => setTriaging(true)} />}
+            {isAgent && mine && (ticket.status === "triaged" || ticket.status === "reopened") && (
+              <Button id="btn.start" label="Start work" emphasis="primary" onPress={() => all.update(ticket.id, { status: "in-progress" })} />
+            )}
+            {isAgent && mine && ticket.status === "in-progress" && (
+              <Button id="btn.resolve" label="Resolve" emphasis="primary" onPress={() => all.update(ticket.id, { status: "resolved" })} />
+            )}
+            {isAgent && !mine && (
+              <Button id="btn.claim" label="Assign to me" onPress={() => all.update(ticket.id, { assigneeId: SAM.id, assigneeName: SAM.displayName, assigneeUsername: "" })} />
+            )}
+            {!isAgent && <Button id="btn.assign" label="Assign to an agent" emphasis="primary" onPress={() => setAssigning(true)} />}
+          </>
+        }
+      />
+      <FailedAlert />
       <Breadcrumbs
-        id="breadcrumbs.workspace"
-        items={[
-          { id: "crumb.queue", label: "Queue", to: "screen.queue" },
-          { id: "crumb.workspace", label: ticket.title },
-        ]}
+        id="crumbs.ticket"
+        items={[{ id: "crumb.queue", label: "Queue", to: "screen.queue" }, { id: "crumb.ticket", label: ticket.id }]}
       />
-      <Heading id="heading.workspace" text={ticket.title} />
+      {breached(ticket) && <Alert id="alert.breached" tone="error" title="SLA breached" text={`This ticket was due ${ticket.slaDueAt} and is not resolved.`} />}
       <Detail
-        id="detail.workspace"
+        id="detail.ticket"
         fields={[
-          { label: "Description", value: ticket.description },
+          { label: "Status", value: label(ticket.status) },
+          { label: "Priority", value: cap(ticket.priority) },
+          { label: "Category", value: cap(ticket.category) },
           { label: "Requester", value: ticket.requesterName },
-          { label: "Status", value: statusLabel(ticket.status) },
-          { label: "Priority", value: ticket.priority },
-          { label: "Assignee", value: ticket.assigneeName ?? "Unassigned" },
+          { label: "Assignee", value: who(ticket) },
           { label: "SLA due", value: ticket.slaDueAt },
+          { label: "SLA", value: slaText(ticket) },
+          { label: "Description", value: ticket.description },
         ]}
       />
-      <Button id="btn.assign" label={ticket.assigneeId ? "Reassign" : "Assign"} onPress={() => setAssigning(true)} />
-      {role === "Support Agent" && ticket.status !== "resolved" && (
+      <Dialog id="dialog.triage" title={`Triage ${ticket.id}`} open={triaging} onClose={() => setTriaging(false)}>
         <Form
           id="form.triage"
-          title="Triage"
-          onSubmit={(values) =>
-            all.update(ticket.id, {
-              priority: values.priority,
-              status: ticket.status === "open" || ticket.status === "reopened" ? "triaged" : ticket.status,
-            })
-          }
-          actions={<Button id="btn.triage.submit" label="Save triage" submit />}
+          onSubmit={(values) => {
+            const priority = values["priority"] ?? ticket.priority;
+            all.update(ticket.id, { status: "triaged", priority, slaDueAt: DUE[priority] ?? ticket.slaDueAt });
+            setTriaging(false);
+          }}
+          actions={<Button id="btn.confirm-triage" label="Confirm triage" emphasis="primary" submit />}
         >
-          <Field
-            id="field.triage-priority"
-            name="priority"
-            label="Priority"
-            type="select"
-            options={["low", "medium", "high", "critical"]}
-            defaultValue={ticket.priority}
-            required
-          />
+          <Field id="field.triage-priority" name="priority" label="Priority" type="select" options={PRIORITIES} defaultValue={ticket.priority} />
+          <Text id="text.triage-note" text="Changing the priority recalculates the SLA due time." />
         </Form>
-      )}
-      {role === "Support Agent" && ticket.status === "triaged" && (
-        <Button id="btn.start" label="Start" onPress={() => all.update(ticket.id, { status: "in_progress" })} />
-      )}
-      {role === "Support Agent" && ticket.status === "in_progress" && (
-        <Button id="btn.resolve" label="Resolve" emphasis="primary" onPress={() => all.update(ticket.id, { status: "resolved", resolvedAt: today })} />
-      )}
-      <Dialog id="dialog.assign" title={`Assign ${ticket.title}`} open={assigning} onClose={() => setAssigning(false)}>
+      </Dialog>
+      <Dialog id="dialog.assign" title={`Assign ${ticket.id}`} open={assigning} onClose={() => setAssigning(false)}>
         <Form
           id="form.assign"
           onSubmit={(values) => {
-            const agent = agents.find((a) => a.name === values.assignee);
-            all.update(ticket.id, { assigneeId: agent?.id, assigneeName: agent?.name });
+            const typed = (values["username"] ?? "").trim();
+            const agent = agents.find((a) => a.displayName === values["agent"]);
+            if (typed) all.update(ticket.id, { assigneeId: "", assigneeName: "", assigneeUsername: typed });
+            else if (agent) all.update(ticket.id, { assigneeId: agent.id, assigneeName: agent.displayName, assigneeUsername: "" });
+            else return;
             setAssigning(false);
           }}
-          actions={<Button id="btn.assign.submit" label="Assign" emphasis="primary" submit />}
+          actions={<Button id="btn.confirm-assign" label="Assign" emphasis="primary" submit />}
         >
           <Field
-            id="field.assignee"
-            name="assignee"
-            label="Agent"
+            id="field.agent"
+            name="agent"
+            label="Known support agent"
             type="select"
-            options={agents.map((a) => a.name)}
-            defaultValue={ticket.assigneeName ?? agents[0]!.name}
-            required
+            options={["Pick a known agent", ...agents.map((a) => a.displayName)]}
+            defaultValue="Pick a known agent"
           />
+          <Field
+            id="field.username"
+            name="username"
+            label="Or type a username"
+            placeholder="priya.nair"
+            error={invalid ? "Pick an agent or type a username" : undefined}
+          />
+          <Text id="text.assign-note" text="A username the help desk has not seen yet is accepted and binds to that person on their first sign-in." />
         </Form>
       </Dialog>
-      <Section
-        id="section.workspace-comments"
-        title="Comments"
-        count={thread.length}
-        subtitle="Visible to the requester and anyone who works this ticket."
-      >
-        <Timeline id="timeline.workspace-comments" entries={thread.map((c) => ({ when: c.createdAt, who: c.authorName, text: c.body }))} />
-        {role === "Support Agent" && (
-          <Form
-            id="form.workspace-comment"
-            onSubmit={(values) =>
-              allComments.create({ ticketId: ticket.id, authorId: actorId, authorName: actorName, body: values.body, createdAt: today })
-            }
-            actions={<Button id="btn.workspace-comment.submit" label="Add comment" emphasis="primary" submit />}
-          >
-            <Field
-              id="field.workspace-comment"
-              name="body"
-              label="Add a comment"
-              type="textarea"
-              required
-              error={state === "state.validation-error" ? "Say something before posting" : undefined}
-            />
-          </Form>
-        )}
-      </Section>
+      <CommentsSection ticketId={ticket.id} authorName={isAgent ? SAM.displayName : TARA} />
     </Shell>
   );
 }
 
 function Account() {
+  const user = useUser();
   const role = useRole();
-  const person = users[role as keyof typeof users];
   return (
     <Shell>
       <Heading id="heading.account" text="Account" />
-      <Detail
-        id="detail.account"
-        fields={[
-          { label: "Name", value: person.name },
-          { label: "Email", value: person.email },
-          { label: "Role", value: role },
-        ]}
-      />
+      <Detail id="detail.account" fields={[{ label: "Name", value: user.name }, { label: "Email", value: user.email }, { label: "Role", value: role }]} />
     </Shell>
   );
 }
 
-function Settings() {
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <EmptyState
-        id="empty.settings"
-        title="Nothing to set up"
-        text="The help desk sends no email or notifications: open a ticket to see its status and comments."
-      />
-    </Shell>
-  );
-}
 
 function SignedOut() {
   const role = useRole();
-  const target = role === "Employee" ? "screen.my-tickets" : "screen.queue";
   return (
     <Screen>
       <Heading id="heading.signed-out" text="You are signed out" />
-      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to={target} />
+      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to={role === "Employee" ? "screen.my-tickets" : "screen.queue"} />
     </Screen>
   );
 }
@@ -484,12 +470,12 @@ function SignedOut() {
 export default defineApp({
   screens: {
     "screen.my-tickets": MyTickets,
-    "screen.ticket": TicketDetail,
+    "screen.new-ticket": NewTicket,
+    "screen.my-ticket": MyTicket,
     "screen.queue": Queue,
-    "screen.ticket-workspace": TicketWorkspace,
+    "screen.ticket": TicketDetail,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
-  data: { tickets, comments },
+  data: { tickets, comments, agents },
 });

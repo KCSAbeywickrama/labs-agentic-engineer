@@ -246,7 +246,7 @@ function walk(dir: string, rel: string, out: Record<string, string>): void {
 
 /**
  * Read one immutable per-SHA snapshot dir into the in-memory `files` map a turn
- * runs against (feeding `new FileBundle(map)` / `new TaskPlan(map)` and
+ * runs against (feeding `new FileBundle(map)` / `new BuildPlan(map)` and
  * `buildPrompt` byte-unchanged). Adapted from `playground/threads.ts`
  * `readSnapshot` (copied — `src/` must not import the playground tree).
  */

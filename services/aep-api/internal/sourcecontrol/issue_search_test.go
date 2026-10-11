@@ -48,18 +48,18 @@ func contains(nums []int, n int) bool {
 
 func TestDedupeLabelFor(t *testing.T) {
 	// Deterministic: same key → same label (dedup relies on this).
-	if a, b := dedupeLabelFor("sre-rca/badbackend-service1"), dedupeLabelFor("sre-rca/badbackend-service1"); a != b {
+	if a, b := DedupeLabel("sre-rca/badbackend-service1"), DedupeLabel("sre-rca/badbackend-service1"); a != b {
 		t.Fatalf("non-deterministic label: %q vs %q", a, b)
 	}
-	if got := dedupeLabelFor("sre-rca/svc1"); got != "dedupe:sre-rca/svc1" {
+	if got := DedupeLabel("sre-rca/svc1"); got != "dedupe:sre-rca/svc1" {
 		t.Errorf("unexpected label: %q", got)
 	}
 	// Whitespace collapses to '-'.
-	if got := dedupeLabelFor("sre rca  key"); got != "dedupe:sre-rca-key" {
+	if got := DedupeLabel("sre rca  key"); got != "dedupe:sre-rca-key" {
 		t.Errorf("whitespace not collapsed: %q", got)
 	}
 	// Capped at GitHub's 50-char label limit.
-	if got := dedupeLabelFor(strings.Repeat("x", 200)); len(got) != 50 {
+	if got := DedupeLabel(strings.Repeat("x", 200)); len(got) != 50 {
 		t.Errorf("expected 50-char cap, got %d", len(got))
 	}
 	// Over-length keys (long component + error fingerprint) must NOT collide by
@@ -67,7 +67,7 @@ func TestDedupeLabelFor(t *testing.T) {
 	// labels via the appended key hash.
 	longA := "sre-rca/demo-developers-test-1-service1/aaaaaaaaaa"
 	longB := "sre-rca/demo-developers-test-1-service1/bbbbbbbbbb"
-	la, lb := dedupeLabelFor(longA), dedupeLabelFor(longB)
+	la, lb := DedupeLabel(longA), DedupeLabel(longB)
 	if len(la) > 50 || len(lb) > 50 {
 		t.Errorf("over-length keys exceeded 50-char cap: %q (%d), %q (%d)", la, len(la), lb, len(lb))
 	}

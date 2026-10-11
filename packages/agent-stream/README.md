@@ -15,10 +15,10 @@ diverge between implementations. The package has **zero server-side dependencies
 | `FileBundle`, `applyToolCall`, `toChange`, `isFileMutationTool` | the fold: reconstruct file state from the streamed tool-calls |
 | `checkComponentDesign`, `componentDesignSchema`, `COMPONENT_DESIGN_JSON_RE` | the component `design.json` write-gate (travels with `FileBundle`) |
 | `checkDesignReview`, `designReviewSchema`, `DesignReview`, `DESIGN_REVIEW_PATH` | `specs/design/review.json`, the Design step's comments and checks; its JSDoc (`src/contracts/design-review.ts`) has the lifecycle and the hash rule |
-| `PLAN_TASK`/`UPDATE_TASK`, `PlanTaskInput`/`UpdateTaskInput`, `*Result`, `TaskContextFile` | the plan-turn tool contract |
-| `planTaskInputSchema`, `updateTaskInputSchema` | the plan-tool Zod inputs (the design agent's tool `inputSchema`s + the JSON-schema source) |
-| `parseKnownComponents`, `parseTaskContextFile` | the read-only plan context convention (`specs/design/components/…` + `tasks/<n>.md`) |
-| `componentDesignJsonSchema()`, `planTaskJsonSchema()`, `updateTaskJsonSchema()` | the schemas as JSON Schema, for the Go services |
+| `PLAN_BUILD`, `BuildPlanInput`/`BuildPlanItem`, `BuildPlanResult` | the plan-turn tool contract |
+| `buildPlanInputSchema` | the plan-tool Zod input (the design agent's tool `inputSchema` + the JSON-schema source) |
+| `parseKnownComponents` | the read-only plan context convention (`specs/design/components/…`) |
+| `componentDesignJsonSchema()`, `designReviewJsonSchema()`, `buildPlanJsonSchema()` | the schemas as JSON Schema |
 | `streamTurn(baseUrl, id, body, { headers })` | the reference SSE reader (transport-only; caller supplies auth + key headers) |
 
 ## Write gates
@@ -56,8 +56,7 @@ The Zod schemas are published as JSON Schema so the Go services (`aep-api`, `ae-
 same definitions the design agent uses — one schema, not two hand-kept copies.
 The checked-in artifacts live under `packages/contracts/schemas/`:
 `component-design.schema.json` (design.json save-gate), `design-review.schema.json`
-(review.json save-gate), `plan-task.schema.json`
-and `update-task.schema.json` (the plan tool inputs `aep-api`'s plan tap vendors).
+(review.json save-gate) and `build-plan.schema.json` (the plan tool input).
 
 Regenerate them after changing a schema:
 

@@ -1,16 +1,15 @@
-# Task generation, standalone: the one-shot task-plan turn from a captured
-# design fixture (#356). No brief — the section has no human in the loop.
+# The build plan, standalone: the one-shot task-plan turn from a captured
+# design fixture (#356), with no scope, so the checklist is one item for the
+# whole spec. No brief — the section has no human in the loop.
 
 name: lunch-coordinator
 fixture: lunch-coordinator-design
 
 rubric:
   mustCover:
-    - item: Every designed component has at least one implementable task
+    - item: The checklist is one item, spec, for the whole design, and it names every designed component
       weight: 2
-    - Frontend tasks list their backend/API providers in build order (dependsOn)
-    - A task covers the Slack notification integration
-    - Tasks are right-sized (a coherent unit of work each, not one giant task or micro-fragments)
+    - The note names the work that crosses components, such as the Slack notification integration
   mustNot:
-    - Tasks for payment processing
-    - Tasks for a native mobile app
+    - Items for payment processing
+    - Items for a native mobile app

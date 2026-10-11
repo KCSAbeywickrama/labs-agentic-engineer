@@ -29,7 +29,10 @@ package spec
 //   - every deployable component is ENRICHED (its design.json moved off the
 //     scaffold placeholder, a language decided) and carries its type-mandated
 //     artifact (service → openapi.yaml, web-application → its prototype,
-//     prototype.json + prototype.tsx);
+//     prototype.json + prototype.tsx), and a web-application's prototype is
+//     sound and current with the design: each file passing the save gate's
+//     rules, and every role it offers a role of specs/design/security.json
+//     when that file exists;
 //   - a design with END-USER SIGN-IN carries specs/design/security.json, it parses,
 //     and every story its roles cite is a real story. The platform creates
 //     the roles and test users that file declares when the tag is built, so a
@@ -206,44 +209,75 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 				})
 			}
 		case "web-application":
-			errs = append(errs, missingPrototype(c.ID, designFiles)...)
+			errs = append(errs, prototypeBuildErrors(designFiles, c.ID)...)
 		}
 	}
 	return errs
 }
 
-// missingPrototype refuses a web-application whose prototype is not whole: the
-// manifest (prototype.json) and the screens (prototype.tsx) are one artifact,
-// and the coding agent builds the app from both. Whether a present file is
-// sound is the save gate's job (prototypeFileErrors); this asks only that both
-// are there.
+// prototypeBuildErrors judges a web-application's prototype at build time. It
+// is the contract the coding run builds the UI against, so it must be whole:
+// the manifest (prototype.json) and the screens (prototype.tsx) are one
+// artifact, and the coding agent builds the app from both. A whole one must
+// also pass the save gate's rules and be current with the design: every role
+// it offers is a role security.json declares, the roles the platform provisions
+// and the built app gates on.
 //
 // A design made before the prototype carries wireframes.dsl instead. The design
 // bundle does not read `.dsl` (decision L6), so such a project is refused here
 // like one with no design for the app, and running Design writes the prototype.
-func missingPrototype(component string, designFiles map[string]string) []FileValidationError {
-	manifest, source := prototypespec.ManifestPath(component), prototypespec.SourcePath(component)
-	hasManifest := strings.TrimSpace(designFiles[manifest]) != ""
-	hasSource := strings.TrimSpace(designFiles[source]) != ""
+func prototypeBuildErrors(designFiles map[string]string, component string) []FileValidationError {
+	manifestKey := prototypespec.ManifestPath(component)
+	sourceKey := prototypespec.SourcePath(component)
+	hasManifest := strings.TrimSpace(designFiles[manifestKey]) != ""
+	hasSource := strings.TrimSpace(designFiles[sourceKey]) != ""
 	switch {
-	case hasManifest && hasSource:
-		return nil
 	case !hasManifest && !hasSource:
 		return []FileValidationError{{
-			Path: manifest, Code: codeMissingComponentArtifact,
+			Path: manifestKey, Code: codeMissingComponentArtifact,
 			Message: fmt.Sprintf("%s has no prototype yet: run Design", component),
 		}}
 	case !hasSource:
 		return []FileValidationError{{
-			Path: source, Code: codeMissingComponentArtifact,
+			Path: sourceKey, Code: codeMissingComponentArtifact,
 			Message: fmt.Sprintf("%s's prototype has no screens (prototype.tsx): run Design again", component),
 		}}
-	default:
+	case !hasManifest:
 		return []FileValidationError{{
-			Path: manifest, Code: codeMissingComponentArtifact,
+			Path: manifestKey, Code: codeMissingComponentArtifact,
 			Message: fmt.Sprintf("%s's prototype has no manifest (prototype.json): run Design again", component),
 		}}
 	}
+
+	manifest, errs := componentPrototypeErrors(designFiles, component)
+	if manifest == nil {
+		return errs
+	}
+	raw := designFiles[securityspec.BundleKey]
+	if strings.TrimSpace(raw) == "" {
+		return errs
+	}
+	doc, err := securityspec.Parse([]byte(raw))
+	if err != nil {
+		return errs // validateRolesDocument reports the document itself
+	}
+	declared := make(map[string]bool, len(doc.Roles))
+	names := make([]string, 0, len(doc.Roles))
+	for _, role := range doc.Roles {
+		declared[role.Name] = true
+		names = append(names, role.Name)
+	}
+	for i, role := range manifest.Roles {
+		if declared[role.ID] {
+			continue
+		}
+		errs = append(errs, FileValidationError{
+			Path: manifestKey, Code: prototypespec.CodeUnknownReference,
+			Message: fmt.Sprintf("roles[%d].id: role %q is not a role in security.json — copy a role name from it verbatim (%s)",
+				i, role.ID, strings.Join(names, ", ")),
+		})
+	}
+	return errs
 }
 
 // validateRolesDocument checks the security design: the permission catalog, the
@@ -363,20 +397,6 @@ func notAStory(spec reqspec.Spec, id, verb string) string {
 	default:
 		return c.Describe(id) + "; " + verb + " a real story or drop it"
 	}
-}
-
-// componentStoryClaims maps each cell component to the stories its design.json
-// claims — the ONE claims read both the gate (coverage union) and
-// BuildScopeAtTag (per-component scope) consume, so they can never disagree on
-// where claims come from.
-func componentStoryClaims(facts *CellFacts, designFiles map[string]string) map[string][]string {
-	out := map[string][]string{}
-	for _, c := range facts.Components {
-		if stories := designJSONStories(designFiles["components/"+c.ID+"/design.json"]); len(stories) > 0 {
-			out[c.ID] = stories
-		}
-	}
-	return out
 }
 
 // designJSONStories reads the story IDs a component's design.json claims.

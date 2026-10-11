@@ -116,3 +116,23 @@ test("author is omitted, not empty, when the journal has none", () => {
   assert.deepEqual(out[0], { role: "user", content: "hi" });
   assert.ok(!("author" in (out[0] as object)));
 });
+
+test("a journal entry from before prototypeFeedback was retired still loads, as the feedback it sent", () => {
+  const legacy = {
+    ...entry(0, "/prototype expense-web"),
+    prototypeFeedback: { component: "expense-web", prototypeHash: "h", requests: [{ text: "a" }, { text: "b" }] },
+  } as TurnJournalEntry;
+  const single = { ...entry(2, "/prototype expense-web"), prototypeFeedback: { requests: [{ text: "a" }] } } as TurnJournalEntry;
+  const out = projectDisplayHistory(
+    conv(
+      [
+        { role: "user", content: PROMPT_1 },
+        { role: "assistant", content: "revised" },
+        { role: "user", content: PROMPT_2 },
+      ],
+      [legacy, single],
+    ),
+  );
+  assert.deepEqual(out[0], { role: "user", content: "Prototype feedback (2 comments)" });
+  assert.deepEqual(out[2], { role: "user", content: "Prototype feedback (1 comment)" });
+});

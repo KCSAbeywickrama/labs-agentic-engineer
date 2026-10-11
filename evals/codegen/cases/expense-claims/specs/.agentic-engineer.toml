@@ -1,5 +1,5 @@
 apiVersion = "agentic-engineer/v1"
-name = "expense-claims"
-createdAt = "2026-09-17T09:03:11.879Z"
-idea = "Employees submit expense claims, managers approve them, and finance exports approved claims to payroll, no email/notifiactions, no object storage"
+name = "ev-expense-claims"
+createdAt = "2026-10-11T12:55:21.834Z"
+idea = "Employees submit expense claims, managers approve them, and finance exports approved claims to payroll. No email or notifications, no object storage."
 

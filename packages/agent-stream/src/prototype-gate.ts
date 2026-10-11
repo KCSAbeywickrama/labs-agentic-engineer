@@ -88,6 +88,14 @@ function remedy(existed: boolean): string {
         "finding and resend the whole corrected file with ONE addFile.";
 }
 
+/**
+ * True for either file of a web-application's prototype pair. A write to one is
+ * the write a client fold cannot judge: the render check runs only in the host.
+ */
+export function isPrototypePath(path: string): boolean {
+  return PROTOTYPE_PATH.test(path);
+}
+
 /** How many findings a refusal lists in its message before summarizing the rest. */
 const MAX_LISTED = 8;
 

@@ -72,3 +72,24 @@ derived is the defect that this step removes.
   design agent writes `skillsPinned` itself.
 - Steps after the tag are not part of this ADR: provisioning, the org-service
   endpoint channel that is resolved at dispatch, and the platform comments.
+
+## Amendment (2026-10-11): `tasks` selects and renders with aep-api's code
+
+The same rule covers planning. A version is one build issue (root ADR-0050),
+and its selection and its body are production code:
+
+- `play <dir> tasks [--features F1,F3] [--product-wide P1]` spawns
+  `go run ./cmd/build-plan scope` (`engine/build-plan.ts`). It runs POST
+  /build's selection (`reqspec.PlanBuild`) over `specs/requirements/` and the
+  earlier versions, then the same hard gate (`spec.GatedSelection`) over the
+  requirements, design and acceptance files. It refuses as production does,
+  and returns the plan turn's scope.
+- The playground then runs the Plan turn on the design agent's Turn socket and
+  keeps its last ok `planBuild`, as aep-api's plan tap does.
+- `cmd/build-plan issue` renders the issue with `taskplan.BuildIssue`, so
+  `issues/<n>.md` (frontmatter, then the body) holds the bytes the plan
+  service would mint.
+- No tag records what a version built, so `tasks` records each version in
+  `.aep-playground/project.json` (`versions`). A later `--features` reads it as
+  production reads the earlier tags' annotations. A new `tasks` waits until
+  the earlier build issue's items are all ticked.

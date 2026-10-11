@@ -3,8 +3,11 @@
 Rules that apply to more than one feature.
 
 ## Requirements
-- P1 All users sign in via SSO through the platform identity provider. [org default] Applies to: all.
-- P2 Each item has a reorder level; low stock means on-hand quantity below it. Applies to: F3, F4. *assumed*
+- P1 Stock (items, levels, ledger) is held in its own inventory service that only the procurement API calls. Applies to: F1, F4, F5, F6.
+- P2 The web app calls only the procurement API. Applies to: all.
+- P3 Every stock change is recorded as a ledger entry; stock levels are never changed without one. Applies to: F4, F5, F6.
+- P4 Users sign in through SSO and see only what their role allows. [org default] Applies to: all.
+- P5 Pages load in under 2 seconds under normal use. Applies to: all. *assumed*
 
 ## Decisions
-- Stock (items, levels, ledger) is held in its own inventory service that only the procurement API calls; the web app calls only the procurement API.
+- No email or notifications, file uploads, scheduled or background jobs, external integrations or AI features.

@@ -670,8 +670,8 @@ _Avoid_: recurrence (a later attempt of the same version meeting the same failur
 
 ## Design review (`specs/design/review.json`, `apps/console`)
 
-The loop is Design → Address comments → Build (ADR-0050); the review state is one file in
-the spec repo (ADR-0051). The console's words for each term are in
+The loop is Design → Address comments → Build (ADR-0051); the review state is one file in
+the spec repo (ADR-0052). The console's words for each term are in
 `apps/console/design/lexicon.md`.
 
 **Design review**:
@@ -729,5 +729,5 @@ _Avoid_: version (a spec version is a build's tag).
 
 **Wireframes** — _retired_:
 `wireframes.dsl`, the per-web-application sketch Design drew and Build read until the
-prototype replaced it (ADR-0050). It is neither written, read nor accepted.
+prototype replaced it (ADR-0051). It is neither written, read nor accepted.
 _Avoid_: wireframe for a prototype.

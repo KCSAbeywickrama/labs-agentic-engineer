@@ -60,7 +60,7 @@ is one the user has already declined for now; leave it alone.
 ## Reference documents ground the design
 
 The kickoff may have attached reference documents — and for design, the ones
-that matter most are the user's own sketches: a drawn wireframe, a form
+that matter most are the user's own sketches: a drawn screen sketch, a form
 screenshot, a mockup image. They are attached to this conversation natively
 (images and PDFs) or in your workspace files (text). When any exist:
 
@@ -366,6 +366,13 @@ it. When no comment is left to act on, say so and stop.
    architecture, the data model, the roles and permissions, the components'
    artifacts (the prototypes, then the contracts, then the agents), the
    dependencies, the flows, `decisions.md`, the acceptance tests.
+   A prototype comment is **cosmetic** when its change touches no record or
+   field, role or permission, API operation, flow step, validation rule or
+   business rule: a label, copy, the layout, the order of things, an empty or
+   an error state. A cosmetic comment stays inside the prototype: change the
+   prototype and nothing else for it. Every other prototype comment starts at
+   the earliest artifact that it touches. When you cannot tell whether a
+   comment is cosmetic, it is not.
 4. **Regenerate from there down, in that order.** Read each later artifact
    again. Change it only where a comment asks, or where an earlier change
    makes it wrong. Write a file only when it changes: edit it, and keep its

@@ -434,7 +434,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit
 	// satisfy the task consumer ports directly.
 	taskReads := task.NewReads(issueService, repoService, executionRepo, milestoneRunRepo)
-	taskPlan := task.NewPlanService(repoRepo, artifactSvcGit, studioTools, issueService, deliveryIssues)
+	taskPlan := task.NewPlanService(repoRepo, artifactSvcGit, studioTools, deliveryIssues)
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -1120,17 +1120,18 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Writer:   deliveryIssues,
 		Criteria: acceptanceCriteria{projFiles},
 	})
+	buildInputs := build.NewInputsCoordinator(
+		designService,                          // SpecCollector (CollectSpec)
+		buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
+		designComponents{store: artifactStore},
+	).WithSkillMirror(skillSvc) // refresh .claude/skills onto HEAD before the tag-cut
 	buildSvc := build.NewService(build.Deps{
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		// A repair build (B4) reads the fixed version's final validation the
 		// way the run read it, and files its failures as the run would have.
 		Repairs: runValidation{projectFiles: projFiles, svc: validationSvc, versions: artifactSvcGit, runs: milestoneRunRepo, cycles: runCycleRepo},
-		Coord: build.NewInputsCoordinator(
-			designService,                          // SpecCollector (CollectSpec)
-			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
-			designComponents{store: artifactStore},
-		).WithSkillMirror(skillSvc), // refresh .claude/skills onto HEAD before the tag-cut
+		Coord:   buildInputs,
 		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
 		// the SAME designComponents{store: artifactStore} adapter PreflightSvc.Design
 		// uses below, so both surfaces read the exact same
@@ -1167,6 +1168,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		ProjectNames:      projectDisplayNamer{client: projectClient},
 	})
 	testUserCoords.svc = provisioningSvc
+	// The build provisions every platform resource preflight would report, so
+	// it reads "already provisioned or in flight" through the same adapter.
+	buildInputs.SetProvisionStatus(buildProvisionStatus{svc: provisioningSvc})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
 	// over the catalog). Both slices are nil-tolerant; the edge 503s when unwired.
@@ -1243,9 +1247,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}
 	params.Deps.Delivery = deliveryHandlers
-	// A planned Task's prose body names the App Path the agent works in — the
-	// same component → appPath read the merged-PR build fan-out matches against.
-	taskPlan.SetComponentPaths(designComponents{store: artifactStore})
 	// Committed-truth write surface for a dependency's directory: the design
 	// service fetches/validates a contract and atomically commits it with the
 	// dependency.json that records it (clearing the needs-contract gate), and
@@ -1277,9 +1278,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// mutex; the run then fills the milestone (gates, then the planning turn) as
 	// its own first phase. Set here rather than in build.Deps because its gate
 	// resolver is provisioningSvc, which is constructed after buildSvc.
-	// The build's approval gate reads platform resources the way the preflight
-	// lists them, so a build is refused for exactly what it was asked to approve.
-	buildSvc.SetProvisionStatus(buildProvisionStatus{svc: provisioningSvc})
 	buildSvc.SetPlanPath(build.PlanPathDeps{
 		Milestones: issueService,
 		Issues:     deliveryIssues,

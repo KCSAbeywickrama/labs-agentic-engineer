@@ -23,12 +23,11 @@ import type { components } from "../../generated/aep-api";
 // applies to. It rides the contract's `selection`; the server plans the rest
 // (what the picked features need) and refuses a feature that cannot be built.
 //
-// Starting a build is also the user's consent to what the build provisions:
-// the platform resources the design needs that are not provisioned yet, and
-// the cross-project endpoints it will ask for. The build preflight lists them,
-// and the body carries one approval per item (`inputs`); the platform
-// provisions a platform resource only from its approval, and refuses a build
-// that would deploy one nobody approved.
+// Starting a build is also the user's consent to what the build provisions.
+// The platform derives the platform resources from the design itself (POST
+// /build ignores a request's `platform-resource` entries). The cross-project
+// endpoints the build will ask for are the one consent the body carries: the
+// build preflight lists them, and `inputs` holds one approval per item.
 //
 // A repair build (Fix on a failing scenario: v1.1 fixes v1) rides the
 // contract's `repair`, naming the version to fix; the server files the
@@ -49,40 +48,17 @@ export interface BuildSelection {
 export type BuildBody = BuildRequest;
 
 /**
- * The approvals a build carries, one per preflight item it consents to (the
- * classic console's `approvalInputsFor`):
- *
- *   - `platform-resource`: a resource the design needs that is not provisioned
- *     yet. Its design-authored `parameters` ride along, since they are what
- *     the provisioner reads.
- *   - `org-service`: an unresolved cross-project endpoint.
- *
- * Every other kind carries no approval: an external dependency's values are
- * collected while the build runs (the server ignores any it is sent), and a
- * resolution blocker has no input to submit. The preflight lists only what is
- * not provisioned or in flight, so a design whose resources are all ready
- * approves nothing.
+ * The approvals a build carries, one per preflight item it consents to: each
+ * `org-service`, an unresolved cross-project endpoint the build asks for
+ * access to (the classic console's `approvalInputsFor`). Every other kind
+ * carries no approval: the server derives a platform resource's from the
+ * design, an external dependency's values are collected while the build runs,
+ * and a resolution blocker has no input to submit.
  */
 export function approvalInputsFor(items: readonly PreflightItem[]): BuildInputItem[] {
-  return items.flatMap((item): BuildInputItem[] => {
-    const { component, dependency } = item;
-    switch (item.kind) {
-      case "platform-resource":
-        return [
-          {
-            component,
-            dependency,
-            kind: "platform-resource",
-            approved: true,
-            ...(item.parameters ? { parameters: item.parameters } : {}),
-          },
-        ];
-      case "org-service":
-        return [{ component, dependency, kind: "org-service", approved: true }];
-      default:
-        return [];
-    }
-  });
+  return items.flatMap(({ component, dependency, kind }): BuildInputItem[] =>
+    kind === "org-service" ? [{ component, dependency, kind: "org-service", approved: true }] : [],
+  );
 }
 
 /**

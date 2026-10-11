@@ -74,7 +74,7 @@ answered and finds Send only after scrolling past all of it.
 
 A design run does not stop to ask, and does not ask its questions in the
 chat
-([root ADR-0050](../../../../docs/decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)).
+([root ADR-0051](../../../../docs/decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)).
 Its questions are stored where their answers go: a feature file's open
 questions, or the agent's question on a review comment. They are answered on
 the Design card ([ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md)),

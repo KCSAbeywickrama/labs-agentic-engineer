@@ -51,9 +51,6 @@ type IssueService interface {
 	// phase to write the LLM-authored body after the placeholder issue was
 	// created.
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
-	// EditIssueTitle replaces the issue's title. Used by the plan tap on a
-	// planned-Task rename (updateTask set.title).
-	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
 	// SetIssueMilestone assigns an existing issue to a milestone by NUMBER —
 	// adoption moving a bare issue into the deployed version's milestone.
 	SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error
@@ -215,7 +212,7 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 	if req.ComponentName != "" || req.ActionStatuses != nil {
 		return nil, ErrIncidentContextRequired
 	}
-	if reservedIncidentLabel(dedupeLabelFor(req.DedupeKey)) {
+	if reservedIncidentLabel(DedupeLabel(req.DedupeKey)) {
 		return nil, ErrIncidentContextRequired
 	}
 	for _, label := range req.Labels {
@@ -232,7 +229,7 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 
 	if key := strings.TrimSpace(req.DedupeKey); key != "" {
 		req.DedupeKey = "" // aep-api-only field; must not reach GitHub
-		label := dedupeLabelFor(key)
+		label := DedupeLabel(key)
 
 		unlock := s.lockRepoCreates(ref)
 		defer unlock()
@@ -303,13 +300,16 @@ const (
 	dedupeHashLen     = 10 // hex chars of the key hash appended on overflow
 )
 
-// dedupeLabelFor maps a dedupe key to its GitHub label. Short keys map to a
-// readable `dedupe:<normalised-key>` label unchanged (so component-only keys
-// stay stable). Keys that would exceed GitHub's 50-char label limit — e.g. a
+// DedupeLabel is the label an issue minted with dedupe key `key` carries: how
+// a reader finds the one issue a key names (the version's build issue, say)
+// among others of its kind.
+//
+// Short keys map to a readable `dedupe:<normalised-key>` label unchanged (so
+// component-only keys stay stable). Keys that would exceed GitHub's 50-char label limit — e.g. a
 // long component name plus an error fingerprint — keep a readable prefix and
 // append a hash of the FULL normalised key, so two distinct long keys can never
 // collide by being truncated to the same 50-char string.
-func dedupeLabelFor(key string) string {
+func DedupeLabel(key string) string {
 	norm := strings.ToLower(strings.Join(strings.Fields(key), "-"))
 	label := dedupeLabelPrefix + norm
 	if len(label) <= maxGitHubLabelLen {
@@ -433,17 +433,6 @@ func (s *issueService) EditIssueBody(ctx context.Context, orgID, projectID strin
 		return err
 	}
 	return s.github.EditIssueBody(ctx, ref, number, body)
-}
-
-func (s *issueService) EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error {
-	if strings.TrimSpace(title) == "" {
-		return fmt.Errorf("title is required")
-	}
-	ref, err := s.resolveRef(ctx, orgID, projectID)
-	if err != nil {
-		return err
-	}
-	return s.github.EditIssueTitle(ctx, ref, number, title)
 }
 
 func (s *issueService) SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error {

@@ -1,71 +1,53 @@
-Feature: Talk proposals
+Feature: F2 Talk proposals
 
-  @story-F2.1
-  Rule: Speakers submit proposals to an event
+  @story-F2.1 @story-F2.5
+  Rule: A speaker may submit a proposal only while the event's call for proposals is open
 
     Scenario: Submitting a proposal
-      Given Olivia has created an event
-      When Sam the speaker submits a proposal titled "Scaling Queues" to that event
-      Then Sam's proposals list shows "Scaling Queues"
+      Given Olivia has opened the call for proposals of an event
+      When Sara submits a proposal "Scaling Waitlists" with an abstract, format "talk" and duration 30 minutes
+      Then Sara's proposals include "Scaling Waitlists" with status "submitted"
+
+    @negative
+    Scenario: Submitting after the call is closed
+      Given Olivia has closed the call for proposals of an event
+      When Sara tries to submit a proposal
+      Then the event has no proposals
 
   @story-F2.2
-  Rule: A speaker sees only their own proposals, with status
+  Rule: A speaker sees only their own proposals with their status
 
-    Scenario: A new proposal is submitted
-      Given Sam has submitted a proposal "Scaling Queues"
-      When Sam opens his proposals
-      Then "Scaling Queues" has status "submitted"
-
-    @negative
-    Scenario: Another speaker's proposals are not visible
-      Given Sam has submitted a proposal "Scaling Queues"
-      When Sara the speaker opens her proposals
-      Then Sara's proposals list does not contain "Scaling Queues"
+    Scenario: Speaker's list
+      Given Sara and Sam each submitted one proposal to the same event
+      When Sara opens her proposals
+      Then she sees exactly one proposal, her own, with its status
 
   @story-F2.3
-  Rule: A reviewer scores each proposal once from 1 to 5
+  Rule: A speaker may edit or withdraw a proposal only while it is submitted and unreviewed
 
-    Scenario: Scoring a proposal
-      Given Sam has submitted a proposal "Scaling Queues"
-      When Rita the reviewer scores it 4
-      Then the proposal shows an average score of 4 from 1 review
-
-    @negative
-    Scenario: A second score from the same reviewer is refused
-      Given Rita has scored "Scaling Queues" 4
-      When Rita scores it 2
-      Then the proposal still shows an average score of 4 from 1 review
+    Scenario: Editing before review
+      Given Sara has a submitted proposal "Scaling Waitlists" with no scores
+      When she changes its title to "Fair Waitlists"
+      Then her proposal is titled "Fair Waitlists"
 
     @negative
-    Scenario: A score of 6 is refused
-      Given Sam has submitted a proposal "Scaling Queues"
-      When Rita tries to score it 6
-      Then the proposal has no reviews
+    Scenario: Editing after a score exists
+      Given Sara's proposal has been scored by a reviewer
+      When she tries to change its title
+      Then the title of her proposal is unchanged
 
   @story-F2.4
-  Rule: Only organizers decide on proposals
+  Rule: A speaker sees the decision and the organizer's comment
 
-    Scenario: Accepting a scored proposal
-      Given "Scaling Queues" has an average score of 4
-      When Olivia accepts it
-      Then Sam sees "Scaling Queues" with status "accepted"
+    Scenario: Seeing a rejection
+      Given Olivia rejected Sara's proposal with the comment "Overlaps another talk"
+      When Sara opens her proposals
+      Then her proposal shows status "rejected" and the comment "Overlaps another talk"
 
-    @negative
-    Scenario: A reviewer cannot accept a proposal
-      Given "Scaling Queues" has an average score of 4
-      When Rita looks for a way to accept it
-      Then the proposal status is still "submitted"
+  @story-F2.6
+  Rule: An organizer sees all proposals of an event, filterable by status
 
-  @story-F2.5
-  Rule: An accepted proposal becomes a scheduled session
-
-    Scenario: Scheduling an accepted proposal
-      Given "Scaling Queues" is accepted for an event with room "Hall A"
-      When Olivia schedules it in "Hall A" from "11:00" to "12:00" with capacity 50
-      Then the event schedule shows "Scaling Queues" in "Hall A" with 50 seats remaining
-
-    @negative
-    Scenario: A rejected proposal cannot be scheduled
-      Given "Scaling Queues" is rejected
-      When Olivia tries to schedule it
-      Then the event has no new session
+    Scenario: Filtering by status
+      Given an event has one accepted and two submitted proposals
+      When Olivia filters the event's proposals by status "submitted"
+      Then she sees exactly two proposals

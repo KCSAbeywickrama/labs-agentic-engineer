@@ -2,278 +2,336 @@
 # list, in this order, from an empty database. HAND-EDITABLE — fix, reorder,
 # reweight or delete items freely; only an explicit replan re-derives it.
 
-# role: one of HRCoordinator, ITStaff, FacilitiesStaff, Admin, no role, signed out
+# role: one of HRCoordinator, ITTeamMember, HRTeamMember, FacilitiesTeamMember, no role, signed out
 # weight: default 1. extras.mustCover items are walked and scored like items;
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - HR Coordinator holds read grants for IT tasks and Facilities tasks, so no refusal item is written for those screens; likewise no refusal for HR on the dashboard and detail screens, and the prototype draws no navigation to the queues for HR.
-#  - Seeded task due dates are specified inconsistently (prototype sets them to the start date, the API describes template offsets), so the items check due dates only on tasks the tester enters; the future start date 2027-03-01 is chosen so seeded tasks are not overdue.
-#  - The prototype's Edit task dialog has an editable Status field, while the API's task edit takes only name, due date and notes; hr-completes-own-task relies on the prototype and on the HR Coordinator's hr-tasks:update grant.
-#  - No screen lists HR tasks across all hires (an HR task API exists), so HR task status can only be changed from the Onboarding detail edit dialog.
-#  - The PRD says task templates seed new records; whether editing or removing a template changes existing records is not specified, so no item checks it.
-#  - The Account, Settings and Signed out prototype screens are outside the flows and the PRD stories, so they are not covered; the Signed out screen's Sign in button cannot appear in wired mode.
-#  - Nothing specifies behaviour when the Onboarding detail screen is opened for a record that does not exist, so no item covers it.
+#  - Nothing in the UI creates reference data besides onboardings, so no precondition is assumed; all data in items comes from the coordinator items.
+#  - The 'Tasks failed to load' state needs the backend to fail and is not walkable.
+#  - The default task template's contents are an open question in the PRD; the items rely only on one default task per IT, HR and Facilities department, matching the prototype, and a tester should compare titles and due offsets (IT and Facilities on the start date, HR one day later) with the spec's final template.
+#  - The Start-onboarding screen draws no way to edit a new hire's details later, though the API has an edit operation; no edit item is written.
+#  - The coordinator is shown no refusal item: its grants reach every screen the app draws. Team roles get one refusal item each, using a different coordinator-only screen.
+#  - Team members' Reopen and Notes controls are drawn only on the team home screen; coordinators have no note or reopen control on the screens drawn.
+#  - The spec does not say what happens to a closed or cancelled onboarding's tasks in team lists, so no item checks that; the close and cancel items are last for that reason.
+#  - The PRD says completing all tasks completes an onboarding, but the prototype draws no completion indicator beyond counts; not checked.
+#  - The due-soon item depends on the tester's today matching the start date entered for Nadia Fernando; entering a different date can make the due-soon and overdue figures differ.
 
 items:
-  - id: admin-lands-on-templates
-    role: Admin
-    screen: Task templates
-    flow: Maintain standard task templates
-    steps: Look at the screen the app opened on.
-    expect: The Task templates screen is shown with a New template button. With nothing created yet the table shows an empty state saying there are no task templates, with a New template button.
-    weight: 1
-  - id: admin-creates-it-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: Click New template. Choose Department IT, Task name 'Provision laptop', Default due offset (days) -2. Click Create template.
-    expect: The dialog closes and the table lists a row for department IT, task 'Provision laptop', offset -2. The empty state is gone.
-    weight: 2
-  - id: admin-creates-hr-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: Click New template. Choose Department HR, Task name 'Collect tax forms', Default due offset (days) 1. Click Create template.
-    expect: The table lists a new row for department HR, task 'Collect tax forms', offset 1, alongside the IT row.
-    weight: 1
-  - id: admin-creates-facilities-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: Click New template. Choose Department Facilities, Task name 'Assign desk', Default due offset (days) 0. Click Create template.
-    expect: The table lists a new row for department Facilities, task 'Assign desk', offset 0.
-    weight: 1
-  - id: admin-creates-extra-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: Click New template. Choose Department Facilities, Task name 'Parking pass', Default due offset (days) 3. Click Create template.
-    expect: The table lists a row for department Facilities, task 'Parking pass', offset 3. The Standard tasks section count includes it.
-    weight: 1
-  - id: admin-edits-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: On the 'Provision laptop' row click Edit. Change Task name to 'Provision laptop and dock' and Default due offset (days) to -3. Click Save.
-    expect: The dialog closes and the IT row now reads 'Provision laptop and dock' with offset -3. The row for 'Provision laptop' no longer appears.
-    weight: 2
-  - id: admin-removes-template
-    role: Admin
-    screen: Task templates
-    flow: "Story F4.1: manage templates"
-    steps: On the 'Parking pass' row (created in admin-creates-extra-template) click Remove.
-    expect: The 'Parking pass' row disappears from the table. The other three templates remain.
-    weight: 2
-  - id: hr-lands-on-dashboard
-    role: HRCoordinator
-    screen: Dashboard
-    flow: Monitor onboarding progress
-    steps: Look at the screen the app opened on.
-    expect: The Onboarding dashboard is shown with a New onboarding button, an Active onboardings figure of 0 and an Overdue tasks figure of 0. The new hires table shows an empty state saying there are no onboarding records yet, with a New onboarding button.
-    weight: 1
-  - id: hr-opens-new-onboarding-form
-    role: HRCoordinator
-    screen: New onboarding
-    flow: Start a new hire's onboarding
-    steps: Click New onboarding.
-    expect: The 'Start a new onboarding' screen opens with a breadcrumb back to Dashboard, a New hire name field, a Start date field and a Create onboarding button.
-    weight: 1
-  - id: hr-new-onboarding-requires-name
-    role: HRCoordinator
-    screen: New onboarding
-    flow: Start a new hire's onboarding
-    steps: On the New onboarding screen leave New hire name empty, set Start date 2027-03-01, click Create onboarding.
-    expect: No onboarding is created and the screen stays on the form, indicating the new hire name is required.
-    weight: 1
-  - id: hr-creates-onboarding
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.1, F1.2: create onboarding"
-    steps: On the New onboarding screen enter New hire name 'Maya Fernando', Start date 2027-03-01. Click Create onboarding.
-    expect: The Onboarding detail screen for Maya Fernando opens showing Start date 2027-03-01 and Status In progress. Under Tasks, the IT tab lists 'Provision laptop and dock', the HR tab lists 'Collect tax forms', the Facilities tab lists 'Assign desk' (and not 'Parking pass'), each with status Pending.
-    weight: 2
-  - id: hr-dashboard-lists-record
-    role: HRCoordinator
-    screen: Dashboard
-    flow: "Story F3.1: dashboard"
-    steps: Click the Dashboard breadcrumb.
-    expect: The dashboard table lists a row for Maya Fernando with start date 2027-03-01, IT 0/1, HR 0/1, Facilities 0/1, Overdue No and status In progress. Active onboardings shows 1.
-    weight: 2
-  - id: hr-opens-detail-from-dashboard
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F3.1: dashboard"
-    steps: On the dashboard click the Maya Fernando row. Then click the HR tab, then the Facilities tab.
-    expect: The Onboarding detail screen for Maya Fernando opens. Each tab shows that department's tasks only.
-    weight: 1
-  - id: hr-adds-task
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.3, F1.4: add task"
-    steps: Click Add task. Choose Department HR, Task name 'Schedule orientation', Due date 2027-03-03, Notes 'Room 4'. Click Add task in the dialog. Open the HR tab.
-    expect: The dialog closes and the HR tab lists 'Schedule orientation' with due date 2027-03-03 and status Pending, next to 'Collect tax forms'.
-    weight: 2
-  - id: hr-adds-overdue-task
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F3.2: overdue flag"
-    steps: Click Add task. Choose Department Facilities, Task name 'Issue badge', Due date 2026-01-01. Click Add task in the dialog. Open the Facilities tab.
-    expect: "'Issue badge' is listed with due date 2026-01-01 and is visibly flagged Overdue. 'Assign desk' is not flagged Overdue."
-    weight: 2
-  - id: hr-edits-task
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.3, F1.4: edit task"
-    steps: Open the HR tab. On the 'Collect tax forms' row click Edit. Change Task name to 'Collect tax and bank forms', Due date to 2027-03-05, Notes to 'Bring ID'. Click Save.
-    expect: The dialog closes and the HR tab shows 'Collect tax and bank forms' with due date 2027-03-05.
-    weight: 2
-  - id: hr-removes-task
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.3: remove task"
-    steps: On the HR tab click Remove on the 'Schedule orientation' row.
-    expect: "'Schedule orientation' disappears from the HR tab. 'Collect tax and bank forms' remains."
-    weight: 2
-  - id: hr-dashboard-flags-overdue
-    role: HRCoordinator
-    screen: Dashboard
-    flow: "Story F3.2: overdue flag"
-    steps: Click the Dashboard breadcrumb.
-    expect: The Maya Fernando row shows Overdue Yes, and the Overdue tasks figure shows 1. The department counts now read IT 0/1, HR 0/1, Facilities 0/2.
-    weight: 2
-  - id: hr-cannot-complete-early
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.5: complete onboarding"
-    steps: Open the Maya Fernando row. Try to click Mark onboarding complete.
-    expect: "Onboarding cannot be marked complete while tasks are still pending: the status stays In progress."
-    weight: 1
-  - id: it-lands-on-queue
-    role: ITStaff
-    screen: IT task queue
-    flow: "Story F2.1: IT task queue"
-    steps: Look at the screen the app opened on.
-    expect: The IT tasks screen is shown with an Overdue figure of 0 and a Status filter. The table lists a row for new hire Maya Fernando, task 'Provision laptop and dock', status Pending. No HR or Facilities tasks are listed.
-    weight: 2
-  - id: it-marks-in-progress
-    role: ITStaff
-    screen: IT task queue
-    flow: "Story F2.2: update IT task"
-    steps: On the 'Provision laptop and dock' row choose Mark in-progress.
-    expect: The row's status changes to In progress.
-    weight: 2
-  - id: it-filters-by-status
-    role: ITStaff
-    screen: IT task queue
-    flow: "Story F2.1: IT task queue"
-    steps: Set the Status filter to in-progress.
-    expect: The table lists 'Provision laptop and dock' for Maya Fernando with status In progress.
-    weight: 1
-  - id: it-marks-complete
-    role: ITStaff
-    screen: IT task queue
-    flow: "Story F2.2: update IT task"
-    steps: Set the Status filter back to all. On the 'Provision laptop and dock' row choose Mark complete.
-    expect: The row's status shows Complete.
-    weight: 2
-  - id: facilities-lands-on-queue
-    role: FacilitiesStaff
-    screen: Facilities task queue
-    flow: "Story F2.3: Facilities task queue"
-    steps: Look at the screen the app opened on.
-    expect: The Facilities tasks screen is shown with an Overdue figure of 1 and a Status filter. The table lists Maya Fernando's 'Assign desk' (Pending) and 'Issue badge' (flagged Overdue). No IT or HR tasks are listed.
-    weight: 2
-  - id: facilities-marks-in-progress
-    role: FacilitiesStaff
-    screen: Facilities task queue
-    flow: "Story F2.4: update Facilities task"
-    steps: On the 'Assign desk' row choose Mark in-progress.
-    expect: The 'Assign desk' row's status changes to In progress.
-    weight: 2
-  - id: facilities-filters-by-status
-    role: FacilitiesStaff
-    screen: Facilities task queue
-    flow: "Story F2.3: Facilities task queue"
-    steps: Set the Status filter to in-progress.
-    expect: The table lists 'Assign desk' with status In progress.
-    weight: 1
-  - id: facilities-marks-complete
-    role: FacilitiesStaff
-    screen: Facilities task queue
-    flow: "Story F2.4: update Facilities task"
-    steps: Set the Status filter back to all. On 'Assign desk' choose Mark complete, then on 'Issue badge' choose Mark complete.
-    expect: Both rows show Complete. The 'Issue badge' row is no longer flagged Overdue and the Overdue figure shows 0.
-    weight: 2
-  - id: hr-completes-own-task
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.5: complete onboarding"
-    steps: Open the Maya Fernando row from the dashboard. On the HR tab click Edit on 'Collect tax and bank forms', set Status to complete, click Save.
-    expect: The HR tab shows 'Collect tax and bank forms' with status Complete.
-    weight: 1
-  - id: hr-marks-onboarding-complete
-    role: HRCoordinator
-    screen: Onboarding detail
-    flow: "Story F1.5: complete onboarding"
-    steps: With every task for Maya Fernando now complete, click Mark onboarding complete.
-    expect: The Status in the record details reads Complete.
-    weight: 2
-  - id: hr-dashboard-shows-complete
-    role: HRCoordinator
-    screen: Dashboard
-    flow: "Story F3.1: dashboard"
-    steps: Click the Dashboard breadcrumb.
-    expect: The Maya Fernando row shows IT 1/1, HR 1/1, Facilities 2/2, Overdue No and status Complete. Active onboardings shows 0.
-    weight: 1
-  - id: hr-refused-templates
-    role: HRCoordinator
-    screen: Task templates
-    flow: Role reach
-    steps: Open the address the Task templates screen had in admin-lands-on-templates.
-    expect: The task templates are not shown to the HR Coordinator; the app refuses the screen without crashing.
-    weight: 1
-  - id: it-refused-dashboard
-    role: ITStaff
-    screen: Dashboard
-    flow: Role reach
-    steps: Open the address the Dashboard had in hr-lands-on-dashboard.
-    expect: No onboarding records are shown to IT Staff; the app refuses the screen without crashing.
-    weight: 1
-  - id: facilities-refused-it-queue
-    role: FacilitiesStaff
-    screen: IT task queue
-    flow: Role reach
-    steps: Open the address the IT task queue had in it-lands-on-queue.
-    expect: No IT tasks are shown to Facilities Staff; the app refuses the screen without crashing.
-    weight: 1
-  - id: admin-refused-dashboard
-    role: Admin
-    screen: Dashboard
-    flow: Role reach
-    steps: Open the address the Dashboard had in hr-lands-on-dashboard.
-    expect: No onboarding records are shown to the Admin; the app refuses the screen without crashing.
-    weight: 1
   - id: no-role-no-access
     role: no role
-    screen: No access
+    screen: Home (onboardings or my department's tasks)
     flow: Role reach
-    steps: Look at what the app shows.
-    expect: "A no-access page is shown instead of the app: no dashboard, task queue or templates."
+    steps: Look at what the app shows after loading with no role held.
+    expect: A no-access page is shown instead of the app; no onboardings or tasks are visible.
     weight: 1
   - id: signed-out-guard
     role: signed out
-    screen: Dashboard
+    screen: Home (onboardings or my department's tasks)
     flow: Role reach
-    steps: Load the app while nobody is signed in.
-    expect: The address loses auth=out and the app reloads into a session without a blank page or crash.
+    steps: Load the app while nobody is signed in and wait for it to settle.
+    expect: "The sign-in guard brings the app back through sign-in into a session: the address loses the sign-out marker and the app reloads into a session, with no blank page or crash."
     weight: 1
-  - id: sign-out
+  - id: coordinator-lands-on-onboardings
     role: HRCoordinator
-    screen: No access
+    screen: Home (onboardings or my department's tasks)
+    flow: HR coordinator entry, empty state
+    steps: Look at the landing screen. Read the two counters and the 'All onboardings' section.
+    expect: The 'Onboardings' screen shows, with Active onboardings and Overdue tasks counters, a 'New onboarding' button, and the empty state 'No onboardings yet' (Nothing to show state) because nothing exists yet.
+    weight: 1
+  - id: coordinator-all-tasks-empty
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks, empty state
+    steps: Open 'All tasks' from the navigation. Open the New hire filter dropdown.
+    expect: The 'All tasks' screen shows the empty state 'No matching tasks' with Department, Status and New hire filters; New hire offers only 'All'.
+    weight: 1
+  - id: coordinator-overdue-empty
+    role: HRCoordinator
+    screen: Overdue tasks
+    flow: Review overdue tasks, empty state
+    steps: Open 'Overdue' from the navigation.
+    expect: The 'Overdue tasks' screen shows the empty state 'Nothing overdue'.
+    weight: 1
+  - id: it-lands-on-department-tasks
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: IT team entry, empty state
+    steps: Look at the landing screen.
+    expect: An 'IT tasks' screen shows (not the onboardings list), with Overdue, Due soon and Open counters at 0, and empty states 'Nothing open' and 'Nothing completed yet' (Nothing to show state).
+    weight: 1
+  - id: hr-lands-on-department-tasks
+    role: HRTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: HR team entry, empty state
+    steps: Look at the landing screen.
+    expect: An 'HR tasks' screen shows, with Overdue, Due soon and Open counters at 0, and empty states 'Nothing open' and 'Nothing completed yet'.
+    weight: 1
+  - id: facilities-lands-on-department-tasks
+    role: FacilitiesTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Facilities team entry, empty state
+    steps: Look at the landing screen.
+    expect: A 'Facilities tasks' screen shows, with Overdue, Due soon and Open counters at 0, and empty states 'Nothing open' and 'Nothing completed yet'.
+    weight: 1
+  - id: coordinator-new-onboarding-validation
+    role: HRCoordinator
+    screen: Start onboarding
+    flow: Start an onboarding, validation
+    steps: Click 'New onboarding'. Leave New hire name and Start date empty and click 'Start onboarding'.
+    expect: The 'Start onboarding' screen stays open and shows validation errors for the new hire name and the start date; no onboarding is created.
+    weight: 1
+  - id: coordinator-start-onboarding-past
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Start an onboarding
+    steps: On 'Start onboarding' (still open from the previous item, or reach it via 'New onboarding' on Home), enter New hire name 'Maya Perera', Role 'Support Engineer', Start date 2025-01-06 and click 'Start onboarding'.
+    expect: The 'Onboarding detail' screen for Maya Perera opens, showing Role Support Engineer, Start date 2025-01-06 and an active status, with default tasks for IT, HR and Facilities listed with due dates.
+    weight: 1
+  - id: coordinator-start-onboarding-future
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Start an onboarding
+    steps: Go to Home, click 'New onboarding'. Enter New hire name 'Kasun Silva', Role 'Accountant', Start date 2099-03-02 and click 'Start onboarding'.
+    expect: The 'Onboarding detail' screen for Kasun Silva opens with default IT, HR and Facilities tasks, all open and none flagged overdue.
+    weight: 1
+  - id: coordinator-start-onboarding-today
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Start an onboarding
+    steps: Go to Home, click 'New onboarding'. Enter New hire name 'Nadia Fernando', Role 'Designer', Start date set to today's date and click 'Start onboarding'.
+    expect: The 'Onboarding detail' screen for Nadia Fernando opens with default IT, HR and Facilities tasks, all open and none flagged overdue.
+    weight: 1
+  - id: coordinator-onboardings-list
+    role: HRCoordinator
+    screen: Home (onboardings or my department's tasks)
+    flow: Onboardings list and overdue flags
+    steps: Click 'Onboardings' in the breadcrumb or 'Home' in the navigation. Read the counters and the table.
+    expect: The table lists Maya Perera, Kasun Silva and Nadia Fernando with their role, start date, open task counts and status Active; Maya Perera shows overdue tasks flagged while Kasun Silva and Nadia Fernando show none; Active onboardings reads 3 and Overdue tasks is above 0.
+    weight: 1
+  - id: coordinator-open-onboarding-from-list
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Start an onboarding
+    steps: On Home, click the row for Maya Perera.
+    expect: The 'Onboarding detail' screen for Maya Perera opens.
+    weight: 1
+  - id: coordinator-detail-department-progress
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Progress by department
+    steps: On Maya Perera's detail screen, read 'Progress by department' and the 'Tasks' table.
+    expect: Progress by department lists IT, HR and Facilities each with open and done counts (1 open, 0 done each for the default tasks); the Tasks table lists the same tasks with their department and due date.
+    weight: 1
+  - id: coordinator-add-task
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Manage tasks on an onboarding
+    steps: On Maya Perera's detail screen click 'Add task'. Enter Title 'Order business cards', Department Facilities, Due date 2025-01-10, Description 'Standard design' and click 'Save task'.
+    expect: The dialog closes and 'Order business cards' appears in the Tasks table with department Facilities and due 2025-01-10; the Facilities open count increases by one.
+    weight: 1
+  - id: coordinator-edit-task
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Manage tasks on an onboarding
+    steps: On the 'Order business cards' row use 'Edit'. Change Title to 'Order name badge', Due date to 2025-01-12 and click 'Save task'.
+    expect: The row now reads 'Order name badge' due 2025-01-12; no duplicate row is created.
+    weight: 1
+  - id: coordinator-remove-task
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Manage tasks on an onboarding
+    steps: On the 'Order name badge' row use 'Remove'.
+    expect: The row disappears from the Tasks table and the Facilities open count goes back down by one.
+    weight: 1
+  - id: coordinator-all-tasks-list
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks
+    steps: Open 'All tasks' from the navigation with the filters at 'All'.
+    expect: All nine default tasks of the three new hires are listed with new hire, department, due date and a status, soonest due first; Maya Perera's tasks are shown as overdue.
+    weight: 1
+  - id: coordinator-overdue-list
+    role: HRCoordinator
+    screen: Overdue tasks
+    flow: Review overdue tasks
+    steps: Open 'Overdue' from the navigation.
+    expect: The Past due list shows Maya Perera's three default tasks (IT, HR, Facilities) with their days overdue, most overdue first; Kasun Silva's and Nadia Fernando's tasks are not listed.
+    weight: 1
+  - id: coordinator-overdue-row-opens-detail
+    role: HRCoordinator
+    screen: Onboarding detail
+    flow: Review overdue tasks
+    steps: On the Overdue tasks screen click the row for Maya Perera's HR task 'Collect signed contract and orientation' (not its action button).
+    expect: The 'Onboarding detail' screen for Maya Perera opens.
+    weight: 1
+  - id: coordinator-overdue-mark-done
+    role: HRCoordinator
+    screen: Overdue tasks
+    flow: Review overdue tasks
+    steps: Open 'Overdue' from the navigation. On the row 'Collect signed contract and orientation' click 'Mark done'.
+    expect: That task disappears from the overdue list at once, and the other two Maya Perera tasks remain.
+    weight: 1
+  - id: coordinator-filter-department
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks
+    steps: Open 'All tasks'. Set Department to 'HR'.
+    expect: Only HR tasks are listed, including Maya Perera's, Kasun Silva's and Nadia Fernando's; no IT or Facilities task is shown.
+    weight: 1
+  - id: coordinator-filter-status
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks
+    steps: Set Department back to 'All' and Status to 'Done'.
+    expect: Only done tasks are listed, including Maya Perera's 'Collect signed contract and orientation'; no open task is shown.
+    weight: 1
+  - id: coordinator-filter-new-hire
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks
+    steps: Set Status back to 'All' and New hire to 'Kasun Silva'.
+    expect: Only Kasun Silva's three tasks are listed; the New hire dropdown offered Maya Perera, Kasun Silva and Nadia Fernando.
+    weight: 1
+  - id: coordinator-all-tasks-mark-done
+    role: HRCoordinator
+    screen: All tasks
+    flow: Filter all tasks
+    steps: Set New hire back to 'All'. On Maya Perera's Facilities task 'Assign desk and issue badge' click 'Mark done'.
+    expect: The task now shows as Done and has no 'Mark done' action.
+    weight: 1
+  - id: coordinator-home-overdue-after-done
+    role: HRCoordinator
+    screen: Home (onboardings or my department's tasks)
+    flow: Onboardings list and overdue flags
+    steps: Open 'Home' from the navigation and read the Overdue tasks counter and Maya Perera's row.
+    expect: Maya Perera's overdue count has dropped to 1 (the IT task), and the Overdue tasks counter reflects it.
+    weight: 1
+  - id: it-lists-open-tasks-soonest-first
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (IT)
+    steps: Look at the 'Open tasks' table on the landing screen.
+    expect: Three open IT tasks are listed for Maya Perera, Nadia Fernando and Kasun Silva, in soonest due first order (Maya, then Nadia, then Kasun); no HR or Facilities task appears; the Open counter reads 3.
+    weight: 1
+  - id: it-overdue-highlight-and-count
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Overdue reminders (IT)
+    steps: Read the alert and counters above the table.
+    expect: A warning shows '1 overdue' and the Overdue counter reads 1; Maya Perera's IT task is highlighted as overdue.
+    weight: 1
+  - id: it-days-overdue
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Overdue reminders (IT)
+    steps: Read the 'Days overdue' column for Maya Perera's task and for Kasun Silva's task.
+    expect: Maya Perera's task shows a positive number of days overdue (days since 2025-01-06); Kasun Silva's shows 0.
+    weight: 1
+  - id: it-due-soon
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Overdue reminders (IT)
+    steps: Read the status of Nadia Fernando's IT task and the Due soon counter.
+    expect: Nadia Fernando's task is marked 'Due soon' and the Due soon counter reads 1.
+    weight: 1
+  - id: it-mark-done
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (IT)
+    steps: On Maya Perera's IT task click 'Mark done'.
+    expect: The task leaves the Open tasks table at once, the overdue warning and count clear, and the task appears in 'Completed' with today's completion date.
+    weight: 1
+  - id: it-reopen
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (IT)
+    steps: In the Completed table click 'Reopen' on Maya Perera's task.
+    expect: The task leaves Completed and returns to Open tasks, flagged overdue again.
+    weight: 1
+  - id: it-add-note
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (IT)
+    steps: On Nadia Fernando's IT task click 'Notes'. In the Note field enter 'Laptop ordered, arrives Thursday' and click 'Add note'.
+    expect: The note text 'Laptop ordered, arrives Thursday' appears in the notes dialog for that task.
+    weight: 1
+  - id: hr-lists-open-tasks
+    role: HRTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (HR)
+    steps: Look at the 'Open tasks' table on the landing screen.
+    expect: "Only HR tasks are listed, soonest due first: Nadia Fernando's and Kasun Silva's HR tasks; Maya Perera's HR task (done earlier) appears under Completed. No IT or Facilities task appears."
+    weight: 1
+  - id: hr-mark-done
+    role: HRTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (HR)
+    steps: On Nadia Fernando's HR task click 'Mark done'.
+    expect: The task leaves Open tasks and appears under Completed with a completion date.
+    weight: 1
+  - id: facilities-lists-open-tasks
+    role: FacilitiesTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (Facilities)
+    steps: Look at the 'Open tasks' table on the landing screen.
+    expect: "Only Facilities tasks are listed, soonest due first: Nadia Fernando's and Kasun Silva's; Maya Perera's (done earlier) appears under Completed. No IT or HR task appears."
+    weight: 1
+  - id: facilities-mark-done
+    role: FacilitiesTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Complete a department task (Facilities)
+    steps: On Nadia Fernando's Facilities task click 'Mark done'.
+    expect: The task leaves Open tasks and appears under Completed with a completion date.
+    weight: 1
+  - id: it-refused-all-tasks
+    role: ITTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Role reach
+    steps: Open the address the All tasks screen had in coordinator-all-tasks-list.
+    expect: "The IT team member is refused: the all-tasks list and its data are not shown."
+    weight: 1
+  - id: hr-refused-overdue
+    role: HRTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Role reach
+    steps: Open the address the Overdue tasks screen had in coordinator-overdue-list.
+    expect: "The HR team member is refused: the overdue list across departments is not shown."
+    weight: 1
+  - id: facilities-refused-onboarding-detail
+    role: FacilitiesTeamMember
+    screen: Home (onboardings or my department's tasks)
+    flow: Role reach
+    steps: Open the address the Onboarding detail screen had in coordinator-open-onboarding-from-list.
+    expect: "The Facilities team member is refused: Maya Perera's onboarding detail is not shown."
+    weight: 1
+  - id: coordinator-account
+    role: HRCoordinator
+    screen: Account
+    flow: Account screen
+    steps: Open the user menu and choose the account entry.
+    expect: The 'Account' screen shows the user's name, email and department.
+    weight: 1
+  - id: coordinator-close-onboarding
+    role: HRCoordinator
+    screen: Home (onboardings or my department's tasks)
+    flow: Close or cancel an onboarding
+    steps: Open Kasun Silva's row from Home and click 'Close onboarding'.
+    expect: The app returns to the onboardings list, where Kasun Silva's status reads Closed.
+    weight: 1
+  - id: coordinator-cancel-onboarding
+    role: HRCoordinator
+    screen: Home (onboardings or my department's tasks)
+    flow: Close or cancel an onboarding
+    steps: Open Nadia Fernando's row from Home and click 'Cancel onboarding'.
+    expect: The app returns to the onboardings list, where Nadia Fernando's status reads Cancelled.
+    weight: 1
+  - id: coordinator-sign-out
+    role: HRCoordinator
+    screen: Signed out
     flow: Sign out
-    steps: Open the user menu and choose Sign out.
-    expect: The Dashboard and onboarding data are gone and the app shows its no-access state, with no sign-in form.
+    steps: Open the user menu and choose sign out.
+    expect: The previous role's screens and data are gone and the no-access state shows; no sign-in form appears.
     weight: 1
 extras:
   mustCover: []

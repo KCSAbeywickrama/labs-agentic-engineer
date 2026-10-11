@@ -8,7 +8,7 @@ description: "Procurement and stock: requesters raise purchase requests for
   procurement API. No email or notifications, no file uploads or object storage,
   no scheduled or background jobs, no external integrations or AI features."
 source:
-  project: procurement-inventory
+  project: ev-procurement-inventory
   snapshot: current
-  savedAt: 2026-10-04T12:00:36.243Z
+  savedAt: 2026-10-11T13:09:52.854Z
 tags: []

@@ -1,7 +1,7 @@
 # ADR-0033 — A screen's gate is the scope of the operation it loads
 
 **Status:** Accepted · 2026-09-16 · points 4 and 7 amended 2026-10-11 by
-[ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+[ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
 (the prototype replaces the wireframes)
 **Amends:** [ADR-0030](ADR-0030-scopes-are-the-authorization-authority-for-a-generated-app.md)
 point 1 ("which operation every screen reaches" is no longer authored) and
@@ -84,7 +84,7 @@ is already in `openapi.yaml`. Nothing about screens is authored anywhere.**
    compare, one scope per operation, reach is the path, 401 for everything and
    the browser's rule for it, screen gates derive from loads, refresh narrows,
    no groups claim — each with its measured reason and its ADR.
-   `security-design`, `openapi-conventions`, `wireframes`, `react-webapp` and
+   `security-design`, `openapi-conventions`, `react-webapp` and
    `thunder-authentication` point at it and say only what is theirs.
 8. **`architecture` pins the auth skills.** A component that declares the auth
    dependency carries `thunder-authentication` in `skillsPinned`, and a service
@@ -142,22 +142,38 @@ union changes, and the stale `loads` is a compile error. A stale committed
 `operations.gen.ts` is the same hazard the previous generator had and the same
 cure: `gen` before `tsc`, always.
 
-## Amendment 2026-10-11 — the prototype replaces the wireframes
+## Amendment 2026-10-11 — the screens come from the prototype
 
 Design writes a prototype for each web application instead of
 `wireframes.dsl`
-([ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)).
-The decision stands: a screen's gate is the scope of the operation it loads.
-Two points change:
+([ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and the prototype is a web-application's UI contract
+([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+The decision stands: a screen's gate is the scope of the operation it loads,
+and nothing about screens is authored in `security.json`. Where this ADR says
+the wireframe declares the screens, read the prototype:
 
-- **Point 4.** A screen shown before sign-in is one that a requirement opens
-  to a visitor who is not signed in. The prototype draws every screen under a
-  role, so `thunder-authentication` takes `public: true` from the story, not
-  from the manifest. `screens.ts` is written from the prototype: one row per
-  screen that is a route, in the order of the `<AppShell>` navigation.
+- **The screen set is `prototype.json` `screens[]`.** Each screen's `roleIds`
+  names the roles that reach it in the review, and `flows[]` names the walk
+  of each role. `roleIds` is not an authorization statement (the third
+  alternative above stands): the gate is still the operation.
+- **The coding agent writes `src/authz/screens.ts` from it** (point 2): one
+  entry per manifest screen, the shell screens included, in the order of the
+  `<AppShell>` navigation. It reads `loads` from what `prototype.tsx` draws
+  and the `openapi.yaml` behind it
+  (`skills/prototype/references/implementing.md`).
+- **A public screen** (point 4) is, in the coding run, a screen drawn on a bare
+  `<Screen>` root with no app shell (Signed out, a landing page). It is routed
+  above the sign-in guard.
 - **Point 7.** The `wireframes` skill is retired. `prototype` owns which
-  screens exist and which role's flow walks them. The design's grants pass
-  (`security-design`) walks each role's flows in `prototype.json` and grants
-  the operation each screen loads.
+  screens exist and which role's flow walks them. `security-design` writes
+  each role's grants from its stories before the prototype exists, and the
+  design's grants pass walks each role's flows in `prototype.json` once the
+  screens and the operations exist, granting the operation each screen loads.
+- **The mock walk** (point 6) walks each prototype flow as its role, from its
+  first screen.
+- **The build gate** refuses a prototype that offers a role `security.json`
+  does not declare, so the roles a reviewer saw are the roles the platform
+  provisions.
 
 The console no longer reads wireframes for anything.

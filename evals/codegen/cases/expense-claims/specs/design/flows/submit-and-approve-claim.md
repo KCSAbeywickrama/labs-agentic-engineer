@@ -1,34 +1,30 @@
-# Submit and Approve a Claim
+# Submit and approve a claim
 
-An Employee submits an expense claim; their Manager reviews it and approves
-or rejects it.
+An employee submits a claim and their manager approves or rejects it; a rejected claim returns to the employee.
 
 ```mermaid
 sequenceDiagram
     actor Employee
     actor Manager
-    participant webapp as expense-webapp
-    participant api as expense-api
+    participant expense-webapp
+    participant expense-api
+    participant user-auth
 
-    Employee->>webapp: submit claim (amount, date, category, description)
-    webapp->>api: POST /me/claims
-    api-->>webapp: created (pending)
-
-    Manager->>webapp: open approval queue
-    webapp->>api: GET /me/team/claims
-    api-->>webapp: pending claims
-
+    Employee->>expense-webapp: open app
+    expense-webapp->>user-auth: sign in
+    expense-webapp->>expense-api: get me (records the employee on first open)
+    Employee->>expense-webapp: submit draft claim
+    expense-webapp->>expense-api: submit claim
+    expense-api-->>expense-webapp: submitted
+    Manager->>expense-webapp: open team queue
+    expense-webapp->>expense-api: list team claims
+    Manager->>expense-webapp: decide claim
     alt approve
-        Manager->>webapp: approve claim
-        webapp->>api: POST /me/team/claims/{id}/approve
-        api-->>webapp: approved
-    else reject
-        Manager->>webapp: reject claim (reason)
-        webapp->>api: POST /me/team/claims/{id}/reject
-        api-->>webapp: rejected
+        expense-webapp->>expense-api: approve claim
+    else reject with reason
+        expense-webapp->>expense-api: reject claim
+        expense-api-->>expense-webapp: rejected
     end
-
-    Employee->>webapp: check claim status
-    webapp->>api: GET /me/claims
-    api-->>webapp: status (approved/rejected)
+    Employee->>expense-webapp: view my claims
+    expense-webapp->>expense-api: list my claims
 ```

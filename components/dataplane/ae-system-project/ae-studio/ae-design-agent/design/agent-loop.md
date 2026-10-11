@@ -47,6 +47,26 @@ reviewable change, and `applyToolCall` folds the streamed calls through the cano
 | **A file write settles at its own call** ([ADR-0004](./ADR-0004-a-write-settles-at-its-own-call.md)) | the SDK queues a step's tool calls and runs them all at `model-call-end`, so a batched design turn's first file had no verdict until the last file's body finished streaming — four completed documents shown as pending for minutes. A bundle op is a pure function of the bundle and the args, and the args close at `tool-input-end`, so it runs there and its `tool-result` rides its own `tool-call`; the ledger memoises per `toolCallId`, so the SDK's later `execute()` re-reads that verdict instead of re-applying the op |
 | **SSE event types in `packages/agent-stream/src/contracts/sse-events.ts`** | one shared definition for producer, console and playground, owned by `@aep/agent-stream`; `OpResult` / tool-input types re-exported from the domain Zod schemas (no parallel copy) |
 
+## The `/design` and `/prototype` lineups
+
+`FLOW_SUPPORTING_SKILLS` (`src/prompts/turn.ts`) names what each flow inlines.
+
+- **`/design`** inlines `cell-design`, `architecture`, `security-design`,
+  `prototype`, the organization's design system, `openapi-conventions`,
+  `agent-building` and `acceptance-criteria`. It writes each web
+  application's prototype in its own run, after the data model and the roles
+  (root ADR-0051); it writes no wireframes.
+- **`/prototype`** only regenerates the prototypes, with edits that keep their
+  ids, and inlines `cell-design`, `security-design` and the design system. Its
+  brief (`FLOW_BRIEFS.prototype`) names the inputs: `design.cell`, the records
+  in `domain-model.md`, the roles in `security.json`, each web application's
+  `design.json` and the stories and decisions of the feature files, and
+  `product-wide.md`. No review comment rides it: comments go through
+  `specs/design/review.json` and `/address-comments`.
+- **`prototype` is a `[design, coding]` skill.** This agent writes the
+  prototype from its body; the coding run builds against its
+  `references/implementing.md`.
+
 ## Prototype write gate
 
 A turn's file tools are built with `gates.prototypeRender` (`buildFileToolSet`),

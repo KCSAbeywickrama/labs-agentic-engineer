@@ -18,137 +18,85 @@
 
 import { useState, type ReactNode } from "react";
 import {
-  Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Filters, Form, Heading,
-  Screen, Section, Stat, StatGroup, Table, Tabs, defineApp, useCollection, useDisplayState, useNav,
+  Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Filters, Form, Heading, Screen,
+  Section, Stat, StatGroup, Table, Text, ValidationSummary, defineApp, useCollection, useDisplayState, useNav,
   useParams, useRole, useToday,
 } from "@wso2/prototype-kit";
 
-type Department = "it" | "hr" | "facilities";
-
-interface OnboardingRecord {
-  id: string;
-  newHireName: string;
-  startDate: string;
-  status: string;
-  createdAt: string;
-  itTasksComplete: number;
-  itTasksTotal: number;
-  hrTasksComplete: number;
-  hrTasksTotal: number;
-  facilitiesTasksComplete: number;
-  facilitiesTasksTotal: number;
-  hasOverdueTasks: boolean;
-}
-
+interface Onboarding { id: string; newHireName: string; role: string; startDate: string; status: string }
 interface Task {
-  id: string;
-  onboardingRecordId: string;
-  department: Department;
-  name: string;
-  status: string;
-  dueDate: string;
-  notes: string;
-  overdue: boolean;
+  id: string; onboardingId: string; newHireName: string; title: string; description: string;
+  department: string; dueDate: string; status: string; completedOn: string;
 }
+interface Note { id: string; taskId: string; text: string; author: string }
 
-interface TaskTemplate {
-  id: string;
-  department: Department;
-  name: string;
-  defaultDueOffsetDays: number;
-}
-
-const onboardingRecords: OnboardingRecord[] = [
-  { id: "1001", newHireName: "Maya Fernando", startDate: "2026-01-20", status: "in-progress", createdAt: "2026-01-10T09:00:00Z", itTasksComplete: 1, itTasksTotal: 3, hrTasksComplete: 2, hrTasksTotal: 3, facilitiesTasksComplete: 0, facilitiesTasksTotal: 2, hasOverdueTasks: true },
-  { id: "1002", newHireName: "Ravi Perera", startDate: "2026-01-22", status: "in-progress", createdAt: "2026-01-12T09:00:00Z", itTasksComplete: 2, itTasksTotal: 2, hrTasksComplete: 1, hrTasksTotal: 3, facilitiesTasksComplete: 1, facilitiesTasksTotal: 1, hasOverdueTasks: false },
-  { id: "1003", newHireName: "Ana Silva", startDate: "2025-12-15", status: "complete", createdAt: "2025-12-01T09:00:00Z", itTasksComplete: 3, itTasksTotal: 3, hrTasksComplete: 3, hrTasksTotal: 3, facilitiesTasksComplete: 2, facilitiesTasksTotal: 2, hasOverdueTasks: false },
-  { id: "1004", newHireName: "Daniel Wong", startDate: "2026-02-01", status: "in-progress", createdAt: "2026-01-14T09:00:00Z", itTasksComplete: 0, itTasksTotal: 2, hrTasksComplete: 0, hrTasksTotal: 2, facilitiesTasksComplete: 0, facilitiesTasksTotal: 1, hasOverdueTasks: false },
+const onboardings: Onboarding[] = [
+  { id: "o1", newHireName: "Maya Perera", role: "Support Engineer", startDate: "2026-01-05", status: "active" },
+  { id: "o2", newHireName: "Kasun Silva", role: "Accountant", startDate: "2026-01-12", status: "active" },
+  { id: "o3", newHireName: "Nadia Fernando", role: "Designer", startDate: "2026-02-02", status: "active" },
 ];
 
 const tasks: Task[] = [
-  { id: "it-1", onboardingRecordId: "1001", department: "it", name: "Provision laptop", status: "complete", dueDate: "2026-01-18", notes: "", overdue: false },
-  { id: "it-2", onboardingRecordId: "1001", department: "it", name: "Create email account", status: "in-progress", dueDate: "2026-01-12", notes: "", overdue: true },
-  { id: "it-3", onboardingRecordId: "1001", department: "it", name: "Set up VPN access", status: "pending", dueDate: "2026-01-25", notes: "", overdue: false },
-  { id: "hr-1", onboardingRecordId: "1001", department: "hr", name: "Send offer letter", status: "complete", dueDate: "2026-01-05", notes: "", overdue: false },
-  { id: "hr-2", onboardingRecordId: "1001", department: "hr", name: "Collect tax forms", status: "complete", dueDate: "2026-01-14", notes: "", overdue: false },
-  { id: "hr-3", onboardingRecordId: "1001", department: "hr", name: "Schedule orientation", status: "pending", dueDate: "2026-01-19", notes: "", overdue: false },
-  { id: "fac-1", onboardingRecordId: "1001", department: "facilities", name: "Assign desk", status: "pending", dueDate: "2026-01-13", notes: "", overdue: true },
-  { id: "fac-2", onboardingRecordId: "1001", department: "facilities", name: "Issue badge", status: "pending", dueDate: "2026-01-19", notes: "", overdue: false },
-
-  { id: "it-4", onboardingRecordId: "1002", department: "it", name: "Provision laptop", status: "complete", dueDate: "2026-01-20", notes: "", overdue: false },
-  { id: "it-5", onboardingRecordId: "1002", department: "it", name: "Create email account", status: "complete", dueDate: "2026-01-20", notes: "", overdue: false },
-  { id: "hr-4", onboardingRecordId: "1002", department: "hr", name: "Send offer letter", status: "complete", dueDate: "2026-01-10", notes: "", overdue: false },
-  { id: "hr-5", onboardingRecordId: "1002", department: "hr", name: "Collect tax forms", status: "pending", dueDate: "2026-01-21", notes: "", overdue: false },
-  { id: "hr-6", onboardingRecordId: "1002", department: "hr", name: "Schedule orientation", status: "pending", dueDate: "2026-01-21", notes: "", overdue: false },
-  { id: "fac-3", onboardingRecordId: "1002", department: "facilities", name: "Assign desk", status: "complete", dueDate: "2026-01-21", notes: "", overdue: false },
-
-  { id: "it-6", onboardingRecordId: "1003", department: "it", name: "Provision laptop", status: "complete", dueDate: "2025-12-10", notes: "", overdue: false },
-  { id: "it-7", onboardingRecordId: "1003", department: "it", name: "Create email account", status: "complete", dueDate: "2025-12-10", notes: "", overdue: false },
-  { id: "it-8", onboardingRecordId: "1003", department: "it", name: "Set up VPN access", status: "complete", dueDate: "2025-12-12", notes: "", overdue: false },
-  { id: "hr-9", onboardingRecordId: "1003", department: "hr", name: "Send offer letter", status: "complete", dueDate: "2025-12-05", notes: "", overdue: false },
-  { id: "hr-10", onboardingRecordId: "1003", department: "hr", name: "Collect tax forms", status: "complete", dueDate: "2025-12-14", notes: "", overdue: false },
-  { id: "hr-11", onboardingRecordId: "1003", department: "hr", name: "Schedule orientation", status: "complete", dueDate: "2025-12-14", notes: "", overdue: false },
-  { id: "fac-4", onboardingRecordId: "1003", department: "facilities", name: "Assign desk", status: "complete", dueDate: "2025-12-13", notes: "", overdue: false },
-  { id: "fac-5", onboardingRecordId: "1003", department: "facilities", name: "Issue badge", status: "complete", dueDate: "2025-12-14", notes: "", overdue: false },
-
-  { id: "it-9", onboardingRecordId: "1004", department: "it", name: "Provision laptop", status: "pending", dueDate: "2026-01-30", notes: "", overdue: false },
-  { id: "it-10", onboardingRecordId: "1004", department: "it", name: "Create email account", status: "pending", dueDate: "2026-01-31", notes: "", overdue: false },
-  { id: "hr-12", onboardingRecordId: "1004", department: "hr", name: "Send offer letter", status: "pending", dueDate: "2026-01-28", notes: "", overdue: false },
-  { id: "hr-13", onboardingRecordId: "1004", department: "hr", name: "Collect tax forms", status: "pending", dueDate: "2026-01-29", notes: "", overdue: false },
-  { id: "fac-6", onboardingRecordId: "1004", department: "facilities", name: "Assign desk", status: "pending", dueDate: "2026-01-30", notes: "", overdue: false },
+  { id: "t1", onboardingId: "o1", newHireName: "Maya Perera", title: "Set up laptop", description: "Image and hand over", department: "IT", dueDate: "2026-01-05", status: "done", completedOn: "2026-01-05" },
+  { id: "t2", onboardingId: "o1", newHireName: "Maya Perera", title: "Create email and SSO accounts", description: "Standard accounts", department: "IT", dueDate: "2026-01-07", status: "open", completedOn: "" },
+  { id: "t3", onboardingId: "o1", newHireName: "Maya Perera", title: "Collect signed contract", description: "Signed copy on file", department: "HR", dueDate: "2026-01-06", status: "open", completedOn: "" },
+  { id: "t4", onboardingId: "o1", newHireName: "Maya Perera", title: "Issue access badge", description: "Main entrance and floor 3", department: "Facilities", dueDate: "2026-01-09", status: "open", completedOn: "" },
+  { id: "t5", onboardingId: "o2", newHireName: "Kasun Silva", title: "Set up laptop", description: "Image and hand over", department: "IT", dueDate: "2026-01-12", status: "open", completedOn: "" },
+  { id: "t6", onboardingId: "o2", newHireName: "Kasun Silva", title: "Orientation session", description: "Book the Friday session", department: "HR", dueDate: "2026-01-16", status: "open", completedOn: "" },
+  { id: "t7", onboardingId: "o2", newHireName: "Kasun Silva", title: "Assign desk", description: "Finance area", department: "Facilities", dueDate: "2026-01-17", status: "open", completedOn: "" },
+  { id: "t8", onboardingId: "o2", newHireName: "Kasun Silva", title: "Enrol in payroll", description: "Bank details form", department: "HR", dueDate: "2026-01-20", status: "open", completedOn: "" },
+  { id: "t9", onboardingId: "o3", newHireName: "Nadia Fernando", title: "Order laptop", description: "Design spec machine", department: "IT", dueDate: "2026-01-28", status: "open", completedOn: "" },
+  { id: "t10", onboardingId: "o3", newHireName: "Nadia Fernando", title: "Reserve parking", description: "Visitor bay until badge", department: "Facilities", dueDate: "2026-01-30", status: "open", completedOn: "" },
 ];
 
-const taskTemplates: TaskTemplate[] = [
-  { id: "tpl-it-1", department: "it", name: "Provision laptop", defaultDueOffsetDays: -2 },
-  { id: "tpl-it-2", department: "it", name: "Create email account", defaultDueOffsetDays: -3 },
-  { id: "tpl-it-3", department: "it", name: "Set up VPN access", defaultDueOffsetDays: 5 },
-  { id: "tpl-hr-1", department: "hr", name: "Send offer letter", defaultDueOffsetDays: -10 },
-  { id: "tpl-hr-2", department: "hr", name: "Collect tax forms", defaultDueOffsetDays: -1 },
-  { id: "tpl-hr-3", department: "hr", name: "Schedule orientation", defaultDueOffsetDays: 2 },
-  { id: "tpl-fac-1", department: "facilities", name: "Assign desk", defaultDueOffsetDays: -2 },
-  { id: "tpl-fac-2", department: "facilities", name: "Issue badge", defaultDueOffsetDays: 2 },
+const notes: Note[] = [
+  { id: "n1", taskId: "t2", text: "Waiting on HR to confirm the start date", author: "Ian Mendis" },
 ];
 
-const userNames: Record<string, string> = {
-  HRCoordinator: "Priya Nair",
-  ITStaff: "Sam Okafor",
-  FacilitiesStaff: "Jordan Lee",
-  Admin: "Taylor Brooks",
+const users: Record<string, { name: string; email: string; department: string }> = {
+  HRCoordinator: { name: "Hana Jayasuriya", email: "hana@acme.example", department: "HR" },
+  ITTeamMember: { name: "Ian Mendis", email: "ian@acme.example", department: "IT" },
+  HRTeamMember: { name: "Helen Abeysekara", email: "helen@acme.example", department: "HR" },
+  FacilitiesTeamMember: { name: "Fiona Rodrigo", email: "fiona@acme.example", department: "Facilities" },
 };
-const userEmails: Record<string, string> = {
-  HRCoordinator: "priya.nair@acme.example",
-  ITStaff: "sam.okafor@acme.example",
-  FacilitiesStaff: "jordan.lee@acme.example",
-  Admin: "taylor.brooks@acme.example",
-};
-const userLabels: Record<string, string> = {
-  HRCoordinator: "HR Coordinator",
-  ITStaff: "IT Staff",
-  FacilitiesStaff: "Facilities Staff",
-  Admin: "Admin",
-};
-const homeScreen: Record<string, string> = {
-  HRCoordinator: "screen.dashboard",
-  ITStaff: "screen.it-queue",
-  FacilitiesStaff: "screen.facilities-queue",
-  Admin: "screen.templates",
-};
+
+const departments = ["IT", "HR", "Facilities"];
+
+function dayNumber(iso: string): number {
+  const [y, m, d] = iso.split("-").map(Number);
+  return Math.floor(Date.UTC(y!, m! - 1, d!) / 86400000);
+}
+function addDays(iso: string, n: number): string {
+  return new Date((dayNumber(iso) + n) * 86400000).toISOString().slice(0, 10);
+}
+function daysOverdue(t: Task, today: string): number {
+  return t.status === "open" ? Math.max(0, dayNumber(today) - dayNumber(t.dueDate)) : 0;
+}
+function isDueSoon(t: Task, today: string): boolean {
+  const diff = dayNumber(t.dueDate) - dayNumber(today);
+  return t.status === "open" && diff >= 0 && diff <= 2;
+}
+function taskStatus(t: Task, today: string): { text: string; tone: "error" | "warning" | "default" | "success" } {
+  if (t.status === "done") return { text: "Done", tone: "success" };
+  const od = daysOverdue(t, today);
+  if (od > 0) return { text: `Overdue ${od}d`, tone: "error" };
+  if (isDueSoon(t, today)) return { text: "Due soon", tone: "warning" };
+  return { text: "Open", tone: "default" };
+}
 
 function Shell({ children }: { children: ReactNode }) {
   const role = useRole();
-  const navByRole: Record<string, { id: string; label: string; to: string }[]> = {
-    HRCoordinator: [{ id: "nav.dashboard", label: "Dashboard", to: "screen.dashboard" }],
-    ITStaff: [{ id: "nav.it-queue", label: "IT tasks", to: "screen.it-queue" }],
-    FacilitiesStaff: [{ id: "nav.facilities-queue", label: "Facilities tasks", to: "screen.facilities-queue" }],
-    Admin: [{ id: "nav.templates", label: "Task templates", to: "screen.templates" }],
-  };
+  const user = users[role] ?? users["HRCoordinator"]!;
   return (
     <AppShell
       id="shell"
-      user={{ name: userNames[role] ?? "User", email: userEmails[role], role: userLabels[role] }}
-      nav={navByRole[role] ?? []}
+      user={{ name: user.name, email: user.email }}
+      nav={[
+        { id: "nav.home", label: "Home", to: "screen.home" },
+        { id: "nav.tasks", label: "All tasks", to: "screen.tasks" },
+        { id: "nav.overdue", label: "Overdue", to: "screen.overdue" },
+      ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -156,495 +104,347 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function statusTone(task: Task): "error" | "success" | "default" {
-  if (task.overdue) return "error";
-  if (task.status === "complete") return "success";
-  return "default";
-}
-
-function statusText(task: Task): string {
-  if (task.overdue) return "Overdue";
-  if (task.status === "complete") return "Complete";
-  if (task.status === "in-progress") return "In progress";
-  return "Pending";
-}
-
-function Dashboard() {
+function CoordinatorHome() {
   const state = useDisplayState();
-  const records = useCollection<OnboardingRecord>("onboardingRecords");
-  const rows = state === "state.empty" ? [] : records.items;
-  const active = rows.filter((r) => r.status === "in-progress").length;
-  const overdue = rows.filter((r) => r.hasOverdueTasks).length;
+  const today = useToday();
+  const ob = useCollection<Onboarding>("onboardings");
+  const tk = useCollection<Task>("tasks");
+  const list = state === "state.empty" ? [] : ob.items;
+  const overdueFor = (id: string) => tk.items.filter((t) => t.onboardingId === id && daysOverdue(t, today) > 0).length;
+  const openFor = (id: string) => tk.items.filter((t) => t.onboardingId === id && t.status === "open").length;
+  const totalOverdue = state === "state.empty" ? 0 : tk.items.filter((t) => daysOverdue(t, today) > 0).length;
   return (
     <Shell>
-      <Heading
-        id="heading.dashboard"
-        text="Onboarding dashboard"
-        actions={<Button id="btn.new-onboarding" label="New onboarding" emphasis="primary" to="screen.new-onboarding" />}
-      />
+      <Heading id="heading.onboardings" text="Onboardings" />
       {state === "state.failed" && (
-        <Alert id="alert.dashboard-failed" tone="error" title="Could not load onboarding records" text="Try again in a few minutes." />
+        <Alert id="alert.failed" tone="error" title="Onboardings unavailable" text="The list could not be loaded. Try again in a few minutes." />
       )}
       <StatGroup>
-        <Stat id="stat.active" label="Active onboardings" value={String(active)} hint="in progress" icon="Users" tone="default" />
-        <Stat id="stat.overdue" label="Overdue tasks" value={String(overdue)} hint="new hires with an overdue task" icon="TriangleAlert" tone="warning" />
+        <Stat id="stat.active" label="Active onboardings" value={String(list.filter((o) => o.status === "active").length)} hint="new hires in progress" icon="Users" />
+        <Stat id="stat.overdue" label="Overdue tasks" value={String(totalOverdue)} hint="across all departments" icon="TriangleAlert" tone={totalOverdue > 0 ? "error" : "success"} />
       </StatGroup>
-      <Section id="section.new-hires" title="New hires" count={rows.length} subtitle="Open a new hire to manage their tasks.">
+      <Section
+        id="section.onboardings"
+        title="All onboardings"
+        count={list.length}
+        subtitle="Start date, progress and overdue tasks per new hire."
+        actions={<Button id="btn.new-onboarding" label="New onboarding" emphasis="primary" to="screen.onboarding-new" />}
+      >
         <Table
-          id="table.new-hires"
-          columns={["New hire", "Start date", "IT", "HR", "Facilities", "Overdue", { label: "Status", kind: "status" }]}
-          rows={rows.map((r) => ({
-            id: `record.${r.id}`,
-            cells: [
-              r.newHireName,
-              r.startDate,
-              `${r.itTasksComplete}/${r.itTasksTotal}`,
-              `${r.hrTasksComplete}/${r.hrTasksTotal}`,
-              `${r.facilitiesTasksComplete}/${r.facilitiesTasksTotal}`,
-              r.hasOverdueTasks ? "Yes" : "No",
-            ],
-            status: { text: r.status === "complete" ? "Complete" : "In progress", tone: r.status === "complete" ? "success" : "info" },
+          id="table.onboardings"
+          columns={["New hire", "Role", "Start date", { label: "Open tasks", kind: "number" }, { label: "Overdue", kind: "number" }, { label: "Status", kind: "status" }]}
+          rows={list.map((o) => ({
+            id: `onboarding.${o.id}`,
+            cells: [o.newHireName, o.role, o.startDate, String(openFor(o.id)), String(overdueFor(o.id))],
+            status: { text: o.status === "active" ? "Active" : o.status === "closed" ? "Closed" : "Cancelled", tone: o.status === "active" ? "info" : "default" },
             to: "screen.onboarding-detail",
-            params: { record: r.id },
+            params: { onboarding: o.id },
           }))}
-          empty={
-            <EmptyState
-              id="empty.new-hires"
-              title="No onboarding records yet"
-              text="Start a new hire's onboarding to see it here."
-              actions={<Button id="btn.empty-new-onboarding" label="New onboarding" emphasis="primary" to="screen.new-onboarding" />}
-            />
-          }
+          empty={<EmptyState id="empty.onboardings" title="No onboardings yet" text="Start one when a new hire is confirmed." />}
         />
       </Section>
     </Shell>
   );
 }
 
-function NewOnboarding() {
+function TeamHome() {
+  const role = useRole();
   const state = useDisplayState();
-  const navigate = useNav();
-  const records = useCollection<OnboardingRecord>("onboardingRecords");
-  const taskList = useCollection<Task>("tasks");
-  const templates = useCollection<TaskTemplate>("taskTemplates");
   const today = useToday();
-  const submit = (values: Record<string, string>) => {
-    const id = records.create({
-      newHireName: values.newHireName,
-      startDate: values.startDate,
-      status: "in-progress",
-      createdAt: `${today}T09:00:00Z`,
-      itTasksComplete: 0,
-      itTasksTotal: templates.items.filter((t) => t.department === "it").length,
-      hrTasksComplete: 0,
-      hrTasksTotal: templates.items.filter((t) => t.department === "hr").length,
-      facilitiesTasksComplete: 0,
-      facilitiesTasksTotal: templates.items.filter((t) => t.department === "facilities").length,
-      hasOverdueTasks: false,
-    });
-    templates.items.forEach((t) => {
-      taskList.create({
-        onboardingRecordId: id,
-        department: t.department,
-        name: t.name,
-        status: "pending",
-        dueDate: values.startDate,
-        notes: "",
-        overdue: false,
-      });
-    });
-    navigate.go("screen.onboarding-detail", { record: id });
-  };
+  const dept = (users[role] ?? users["ITTeamMember"]!).department;
+  const tk = useCollection<Task>("tasks");
+  const nt = useCollection<Note>("notes");
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const mine = state === "state.empty" ? [] : tk.items.filter((t) => t.department === dept);
+  const open = mine.filter((t) => t.status === "open").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const done = mine.filter((t) => t.status === "done");
+  const overdueCount = open.filter((t) => daysOverdue(t, today) > 0).length;
+  const soonCount = open.filter((t) => isDueSoon(t, today)).length;
+  const noteTask = noteFor ? tk.get(noteFor) : undefined;
   return (
     <Shell>
-      <Breadcrumbs
-        id="breadcrumbs.new-onboarding"
-        items={[{ id: "crumb.dashboard", label: "Dashboard", to: "screen.dashboard" }, { id: "crumb.new", label: "New onboarding" }]}
-      />
-      <Heading id="heading.new-onboarding" text="Start a new onboarding" />
-      <Section id="section.new-onboarding-form" title="New hire" subtitle="Tasks are pre-populated from the standard department templates.">
-        <Form
-          id="form.new-onboarding"
-          onSubmit={submit}
-          actions={<Button id="btn.create-onboarding" label="Create onboarding" emphasis="primary" submit />}
-        >
-          <Field
-            id="field.new-hire-name"
-            label="New hire name"
-            name="newHireName"
-            required
-            error={state === "state.validation-error" ? "Enter the new hire's name" : undefined}
-          />
-          <Field
-            id="field.start-date"
-            label="Start date"
-            name="startDate"
-            type="date"
-            required
-            defaultValue={today}
-            error={state === "state.validation-error" ? "Choose a start date" : undefined}
-          />
-        </Form>
+      <Heading id="heading.my-tasks" text={`${dept} tasks`} />
+      {state === "state.failed" && (
+        <Alert id="alert.failed" tone="error" title="Tasks unavailable" text="Your department's tasks could not be loaded. Try again in a few minutes." />
+      )}
+      {overdueCount > 0 && (
+        <Alert id="alert.overdue" tone="warning" title={`${overdueCount} overdue`} text="Overdue tasks are highlighted below. Mark them done to clear the reminder." />
+      )}
+      <StatGroup>
+        <Stat id="stat.overdue" label="Overdue" value={String(overdueCount)} hint="past their due date" icon="TriangleAlert" tone={overdueCount > 0 ? "error" : "success"} />
+        <Stat id="stat.soon" label="Due soon" value={String(soonCount)} hint="within 2 days" icon="Clock" tone="warning" />
+        <Stat id="stat.open" label="Open" value={String(open.length)} hint="tasks for your team" icon="ListChecks" />
+      </StatGroup>
+      <Section id="section.open" title="Open tasks" count={open.length} subtitle="Soonest due first.">
+        <Table
+          id="table.open"
+          columns={["Task", "New hire", "Due", { label: "Days overdue", kind: "number" }, { label: "Status", kind: "status" }]}
+          rows={open.map((t) => ({
+            id: `task.${t.id}`,
+            cells: [t.title, t.newHireName, t.dueDate, String(daysOverdue(t, today))],
+            status: taskStatus(t, today),
+            actions: [
+              { id: `task.${t.id}.done`, label: "Mark done", onPress: () => tk.update(t.id, { status: "done", completedOn: today }) },
+              { id: `task.${t.id}.note`, label: "Notes", onPress: () => setNoteFor(t.id) },
+            ],
+          }))}
+          empty={<EmptyState id="empty.open" title="Nothing open" text="Tasks for your team appear here when an onboarding starts." />}
+        />
       </Section>
+      <Section id="section.done" title="Completed" count={done.length} subtitle="Reopen a task marked done by mistake.">
+        <Table
+          id="table.done"
+          columns={["Task", "New hire", "Completed", { label: "Status", kind: "status" }]}
+          rows={done.map((t) => ({
+            id: `task.${t.id}`,
+            cells: [t.title, t.newHireName, t.completedOn],
+            status: taskStatus(t, today),
+            actions: [{ id: `task.${t.id}.reopen`, label: "Reopen", onPress: () => tk.update(t.id, { status: "open", completedOn: "" }) }],
+          }))}
+          empty={<EmptyState id="empty.done" title="Nothing completed yet" text="Completed tasks are listed here." />}
+        />
+      </Section>
+      <Dialog id="dialog.notes" title={noteTask ? `Notes: ${noteTask.title}` : "Notes"} open={noteFor !== null} onClose={() => setNoteFor(null)}>
+        {noteTask && nt.items.filter((n) => n.taskId === noteTask.id).map((n) => (
+          <Text key={n.id} id={`text.note.${n.id}`} text={`${n.author}: ${n.text}`} />
+        ))}
+        <Form
+          id="form.note"
+          onSubmit={(v) => {
+            if (noteTask && v["text"]) nt.create({ taskId: noteTask.id, text: v["text"], author: (users[role] ?? users["ITTeamMember"]!).name });
+          }}
+          actions={<Button id="btn.note.add" label="Add note" emphasis="primary" submit />}
+        >
+          <Field id="field.note" name="text" label="Note" type="textarea" required />
+        </Form>
+      </Dialog>
+    </Shell>
+  );
+}
+
+function Home() {
+  const role = useRole();
+  return role === "HRCoordinator" ? <CoordinatorHome /> : <TeamHome />;
+}
+
+function OnboardingNew() {
+  const state = useDisplayState();
+  const today = useToday();
+  const navigate = useNav();
+  const ob = useCollection<Onboarding>("onboardings");
+  const tk = useCollection<Task>("tasks");
+  const bad = state === "state.validation-error";
+  return (
+    <Shell>
+      <Breadcrumbs id="crumbs.new" items={[{ id: "crumb.home", label: "Onboardings", to: "screen.home" }, { id: "crumb.new", label: "New onboarding" }]} />
+      <Heading id="heading.new" text="Start an onboarding" />
+      {bad && <ValidationSummary id="summary.new" issues={["New hire name is required", "Start date is required"]} />}
+      <Form
+        id="form.new"
+        title="New hire"
+        onSubmit={(v) => {
+          const start = v["startDate"] || today;
+          const name = v["newHireName"] || "New hire";
+          const id = ob.create({ newHireName: name, role: v["role"] || "", startDate: start, status: "active" });
+          const seed = [
+            { title: "Set up laptop and accounts", department: "IT", offset: 0 },
+            { title: "Collect signed contract and orientation", department: "HR", offset: 1 },
+            { title: "Assign desk and issue badge", department: "Facilities", offset: 0 },
+          ];
+          seed.forEach((s) => tk.create({ onboardingId: id, newHireName: name, title: s.title, description: "Default task", department: s.department, dueDate: addDays(start, s.offset), status: "open", completedOn: "" }));
+          navigate.go("screen.onboarding-detail", { onboarding: id });
+        }}
+        actions={<Button id="btn.create" label="Start onboarding" emphasis="primary" submit />}
+      >
+        <Field id="field.name" name="newHireName" label="New hire name" required error={bad ? "Enter the new hire's name" : undefined} />
+        <Field id="field.role" name="role" label="Role" />
+        <Field id="field.start" name="startDate" label="Start date" type="date" required error={bad ? "Pick a start date" : undefined} />
+      </Form>
+      <Text id="text.defaults" text="The default IT, HR and Facilities tasks are added automatically; due dates are offsets from the start date. *assumed*" />
     </Shell>
   );
 }
 
 function OnboardingDetail() {
-  const { record: recordId } = useParams();
-  const state = useDisplayState();
-  const records = useCollection<OnboardingRecord>("onboardingRecords");
-  const taskList = useCollection<Task>("tasks");
+  const { onboarding: id } = useParams();
   const today = useToday();
-  const record = (recordId ? records.get(recordId) : undefined) ?? records.items[0]!;
-  const recordTasks = taskList.items.filter((t) => t.onboardingRecordId === record.id);
-  const [activeTab, setActiveTab] = useState("tab.it");
-  const [addingTask, setAddingTask] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-
-  const departments: { id: string; label: string; key: Department }[] = [
-    { id: "tab.it", label: "IT", key: "it" },
-    { id: "tab.hr", label: "HR", key: "hr" },
-    { id: "tab.facilities", label: "Facilities", key: "facilities" },
-  ];
-
-  const allComplete = recordTasks.length > 0 && recordTasks.every((t) => t.status === "complete");
-
-  const renderDeptTable = (dept: Department) => {
-    const deptTasks = state === "state.empty" ? [] : recordTasks.filter((t) => t.department === dept);
-    return (
-      <Table
-        id={`table.tasks.${dept}`}
-        columns={["Task", "Due date", { label: "Status", kind: "status" }]}
-        rows={deptTasks.map((t) => ({
-          id: `task.${t.id}`,
-          cells: [t.name, t.dueDate],
-          status: { text: statusText(t), tone: statusTone(t) },
-          actions: [
-            { id: `task.${t.id}.edit`, label: "Edit", onPress: () => setEditingTask(t) },
-            { id: `task.${t.id}.remove`, label: "Remove", emphasis: "danger" as const, onPress: () => taskList.remove(t.id) },
-          ],
-        }))}
-        empty={<EmptyState id={`empty.tasks.${dept}`} title="No tasks" text="Add a task for this department." />}
-      />
-    );
-  };
-
+  const state = useDisplayState();
+  const navigate = useNav();
+  const ob = useCollection<Onboarding>("onboardings");
+  const tk = useCollection<Task>("tasks");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const o = (id ? ob.get(id) : undefined) ?? ob.items[0]!;
+  const mine = state === "state.empty" ? [] : tk.items.filter((t) => t.onboardingId === o.id);
+  const editTask = editing ? tk.get(editing) : undefined;
+  const bad = state === "state.validation-error";
+  const close = () => { setOpen(false); setEditing(null); };
   return (
     <Shell>
-      <Breadcrumbs
-        id="breadcrumbs.detail"
-        items={[{ id: "crumb.dashboard2", label: "Dashboard", to: "screen.dashboard" }, { id: "crumb.record", label: record.newHireName }]}
-      />
+      <Breadcrumbs id="crumbs.detail" items={[{ id: "crumb.home", label: "Onboardings", to: "screen.home" }, { id: "crumb.current", label: o.newHireName }]} />
       <Heading
         id="heading.detail"
-        text={record.newHireName}
+        text={o.newHireName}
         actions={
-          <Button
-            id="btn.mark-complete"
-            label="Mark onboarding complete"
-            emphasis="primary"
-            disabled={!allComplete || record.status === "complete"}
-            onPress={() => records.update(record.id, { status: "complete" })}
-          />
+          <>
+            <Button id="btn.close" label="Close onboarding" onPress={() => { ob.update(o.id, { status: "closed" }); navigate.go("screen.home"); }} />
+            <Button id="btn.cancel" label="Cancel onboarding" emphasis="danger" onPress={() => { ob.update(o.id, { status: "cancelled" }); navigate.go("screen.home"); }} />
+          </>
         }
       />
-      {state === "state.failed" && (
-        <Alert id="alert.detail-failed" tone="error" title="Could not save changes" text="Try the action again in a few minutes." />
-      )}
-      <Detail
-        id="detail.record"
-        fields={[
-          { label: "Start date", value: record.startDate },
-          { label: "Status", value: record.status === "complete" ? "Complete" : "In progress" },
-          { label: "Created", value: record.createdAt },
-        ]}
-      />
+      <Detail id="detail.onboarding" fields={[{ label: "Role", value: o.role }, { label: "Start date", value: o.startDate }, { label: "Status", value: o.status }]} />
+      <Section id="section.departments" title="Progress by department">
+        <Table
+          id="table.departments"
+          columns={["Department", { label: "Open", kind: "number" }, { label: "Done", kind: "number" }]}
+          rows={departments.map((d) => ({
+            id: `dept.${d}`,
+            cells: [d, String(mine.filter((t) => t.department === d && t.status === "open").length), String(mine.filter((t) => t.department === d && t.status === "done").length)],
+          }))}
+        />
+      </Section>
       <Section
         id="section.tasks"
         title="Tasks"
-        subtitle="Tasks seeded from the standard templates; add, edit or remove exceptions here."
-        actions={<Button id="btn.add-task" label="Add task" onPress={() => setAddingTask(true)} />}
+        count={mine.length}
+        actions={<Button id="btn.add-task" label="Add task" emphasis="primary" onPress={() => setOpen(true)} />}
       >
-        <Tabs
-          id="tabs.departments"
-          tabs={departments.map((d) => ({ id: d.id, label: d.label, content: renderDeptTable(d.key) }))}
-          active={activeTab}
-          onChange={setActiveTab}
-        />
-      </Section>
-      <Dialog id="dialog.add-task" title="Add a task" open={addingTask} onClose={() => setAddingTask(false)}>
-        <Form
-          id="form.add-task"
-          onSubmit={(values) => {
-            taskList.create({
-              onboardingRecordId: record.id,
-              department: values.department as Department,
-              name: values.name,
-              status: "pending",
-              dueDate: values.dueDate,
-              notes: values.notes ?? "",
-              overdue: false,
-            });
-            setAddingTask(false);
-          }}
-          actions={<Button id="btn.add-task.confirm" label="Add task" emphasis="primary" submit />}
-        >
-          <Field id="field.add-task.department" label="Department" name="department" type="select" options={["it", "hr", "facilities"]} required defaultValue="it" />
-          <Field
-            id="field.add-task.name"
-            label="Task name"
-            name="name"
-            required
-            error={state === "state.validation-error" ? "Enter a task name" : undefined}
-          />
-          <Field id="field.add-task.due-date" label="Due date" name="dueDate" type="date" required defaultValue={today} />
-          <Field id="field.add-task.notes" label="Notes" name="notes" type="textarea" />
-        </Form>
-      </Dialog>
-      <Dialog
-        id="dialog.edit-task"
-        title={editingTask ? `Edit ${editingTask.name}` : "Edit task"}
-        open={editingTask !== null}
-        onClose={() => setEditingTask(null)}
-      >
-        {editingTask && (
-          <Form
-            id="form.edit-task"
-            onSubmit={(values) => {
-              taskList.update(editingTask.id, { name: values.name, dueDate: values.dueDate, notes: values.notes, status: values.status });
-              setEditingTask(null);
-            }}
-            actions={<Button id="btn.edit-task.confirm" label="Save" emphasis="primary" submit />}
-          >
-            <Field id="field.edit-task.name" label="Task name" name="name" required defaultValue={editingTask.name} />
-            <Field id="field.edit-task.due-date" label="Due date" name="dueDate" type="date" required defaultValue={editingTask.dueDate} />
-            <Field id="field.edit-task.status" label="Status" name="status" type="select" options={["pending", "in-progress", "complete"]} defaultValue={editingTask.status} />
-            <Field id="field.edit-task.notes" label="Notes" name="notes" type="textarea" defaultValue={editingTask.notes} />
-          </Form>
-        )}
-      </Dialog>
-    </Shell>
-  );
-}
-
-function ItQueue() {
-  const state = useDisplayState();
-  const taskList = useCollection<Task>("tasks");
-  const records = useCollection<OnboardingRecord>("onboardingRecords");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const itTasks = state === "state.empty"
-    ? []
-    : taskList.items.filter((t) => t.department === "it" && (statusFilter === "all" || t.status === statusFilter));
-  const overdueCount = taskList.items.filter((t) => t.department === "it" && t.overdue).length;
-  const newHireName = (id: string) => records.get(id)?.newHireName ?? "Unknown";
-  return (
-    <Shell>
-      <Heading id="heading.it-queue" text="IT tasks" />
-      {state === "state.failed" && (
-        <Alert id="alert.it-failed" tone="error" title="Could not load IT tasks" text="Try again in a few minutes." />
-      )}
-      <StatGroup>
-        <Stat id="stat.it-overdue" label="Overdue" value={String(overdueCount)} hint="IT tasks past due" icon="TriangleAlert" tone="warning" />
-      </StatGroup>
-      <Section id="section.it-tasks" title="IT tasks" count={itTasks.length} subtitle="Tasks across every new hire.">
-        <Filters id="filters.it-tasks">
-          <Field id="field.it-status-filter" label="Status" type="select" options={["all", "pending", "in-progress", "complete"]} value={statusFilter} onChange={setStatusFilter} />
-        </Filters>
         <Table
-          id="table.it-tasks"
-          columns={["New hire", "Task", "Due date", { label: "Status", kind: "status" }]}
-          rows={itTasks.map((t) => ({
-            id: `it-task.${t.id}`,
-            cells: [newHireName(t.onboardingRecordId), t.name, t.dueDate],
-            status: { text: statusText(t), tone: statusTone(t) },
-            actions: t.status === "complete" ? [] : [
-              { id: `it-task.${t.id}.start`, label: "Mark in-progress", onPress: () => taskList.update(t.id, { status: "in-progress" }) },
-              { id: `it-task.${t.id}.complete`, label: "Mark complete", onPress: () => taskList.update(t.id, { status: "complete", overdue: false }) },
-            ],
-          }))}
-          empty={<EmptyState id="empty.it-tasks" title="No IT tasks" text="Tasks appear here once a new onboarding starts." />}
-        />
-      </Section>
-    </Shell>
-  );
-}
-
-function FacilitiesQueue() {
-  const state = useDisplayState();
-  const taskList = useCollection<Task>("tasks");
-  const records = useCollection<OnboardingRecord>("onboardingRecords");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const facTasks = state === "state.empty"
-    ? []
-    : taskList.items.filter((t) => t.department === "facilities" && (statusFilter === "all" || t.status === statusFilter));
-  const overdueCount = taskList.items.filter((t) => t.department === "facilities" && t.overdue).length;
-  const newHireName = (id: string) => records.get(id)?.newHireName ?? "Unknown";
-  return (
-    <Shell>
-      <Heading id="heading.facilities-queue" text="Facilities tasks" />
-      {state === "state.failed" && (
-        <Alert id="alert.facilities-failed" tone="error" title="Could not load Facilities tasks" text="Try again in a few minutes." />
-      )}
-      <StatGroup>
-        <Stat id="stat.facilities-overdue" label="Overdue" value={String(overdueCount)} hint="Facilities tasks past due" icon="TriangleAlert" tone="warning" />
-      </StatGroup>
-      <Section id="section.facilities-tasks" title="Facilities tasks" count={facTasks.length} subtitle="Tasks across every new hire.">
-        <Filters id="filters.facilities-tasks">
-          <Field id="field.facilities-status-filter" label="Status" type="select" options={["all", "pending", "in-progress", "complete"]} value={statusFilter} onChange={setStatusFilter} />
-        </Filters>
-        <Table
-          id="table.facilities-tasks"
-          columns={["New hire", "Task", "Due date", { label: "Status", kind: "status" }]}
-          rows={facTasks.map((t) => ({
-            id: `facilities-task.${t.id}`,
-            cells: [newHireName(t.onboardingRecordId), t.name, t.dueDate],
-            status: { text: statusText(t), tone: statusTone(t) },
-            actions: t.status === "complete" ? [] : [
-              { id: `facilities-task.${t.id}.start`, label: "Mark in-progress", onPress: () => taskList.update(t.id, { status: "in-progress" }) },
-              { id: `facilities-task.${t.id}.complete`, label: "Mark complete", onPress: () => taskList.update(t.id, { status: "complete", overdue: false }) },
-            ],
-          }))}
-          empty={<EmptyState id="empty.facilities-tasks" title="No Facilities tasks" text="Tasks appear here once a new onboarding starts." />}
-        />
-      </Section>
-    </Shell>
-  );
-}
-
-function Templates() {
-  const state = useDisplayState();
-  const templates = useCollection<TaskTemplate>("taskTemplates");
-  const [addingTemplate, setAddingTemplate] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<TaskTemplate | null>(null);
-  const rows = state === "state.empty" ? [] : templates.items;
-  return (
-    <Shell>
-      <Heading
-        id="heading.templates"
-        text="Task templates"
-        actions={<Button id="btn.new-template" label="New template" emphasis="primary" onPress={() => setAddingTemplate(true)} />}
-      />
-      {state === "state.failed" && (
-        <Alert id="alert.templates-failed" tone="error" title="Could not save template" text="Try again in a few minutes." />
-      )}
-      <Section id="section.templates" title="Standard tasks" count={rows.length} subtitle="Applied automatically when a new onboarding record is created.">
-        <Table
-          id="table.templates"
-          columns={["Department", "Task", { label: "Default due offset (days)", kind: "number" }]}
-          rows={rows.map((t) => ({
-            id: `template.${t.id}`,
-            cells: [t.department, t.name, String(t.defaultDueOffsetDays)],
+          id="table.tasks"
+          columns={["Task", "Department", "Due", { label: "Status", kind: "status" }]}
+          rows={mine.map((t) => ({
+            id: `task.${t.id}`,
+            cells: [t.title, t.department, t.dueDate],
+            status: taskStatus(t, today),
             actions: [
-              { id: `template.${t.id}.edit`, label: "Edit", onPress: () => setEditingTemplate(t) },
-              { id: `template.${t.id}.remove`, label: "Remove", emphasis: "danger" as const, onPress: () => templates.remove(t.id) },
+              { id: `task.${t.id}.edit`, label: "Edit", onPress: () => { setEditing(t.id); setOpen(true); } },
+              { id: `task.${t.id}.remove`, label: "Remove", emphasis: "danger", onPress: () => tk.remove(t.id) },
             ],
           }))}
-          empty={
-            <EmptyState
-              id="empty.templates"
-              title="No task templates"
-              text="New onboarding records start with an empty checklist."
-              actions={<Button id="btn.empty-new-template" label="New template" emphasis="primary" onPress={() => setAddingTemplate(true)} />}
-            />
-          }
+          empty={<EmptyState id="empty.tasks" title="No tasks" text="Add a task for IT, HR or Facilities." />}
         />
       </Section>
-      <Dialog id="dialog.add-template" title="New task template" open={addingTemplate} onClose={() => setAddingTemplate(false)}>
+      <Dialog id="dialog.task" title={editTask ? "Edit task" : "Add task"} open={open} onClose={close}>
         <Form
-          id="form.add-template"
-          onSubmit={(values) => {
-            templates.create({ department: values.department as Department, name: values.name, defaultDueOffsetDays: Number(values.defaultDueOffsetDays) });
-            setAddingTemplate(false);
+          id="form.task"
+          key={editing ?? "new"}
+          onSubmit={(v) => {
+            const patch = { title: v["title"] || "Untitled task", description: v["description"] || "", department: v["department"] || "IT", dueDate: v["dueDate"] || today };
+            if (editTask) tk.update(editTask.id, patch);
+            else tk.create({ ...patch, onboardingId: o.id, newHireName: o.newHireName, status: "open", completedOn: "" });
+            close();
           }}
-          actions={<Button id="btn.add-template.confirm" label="Create template" emphasis="primary" submit />}
+          actions={<Button id="btn.task.save" label="Save task" emphasis="primary" submit />}
         >
-          <Field id="field.add-template.department" label="Department" name="department" type="select" options={["it", "hr", "facilities"]} required defaultValue="it" />
-          <Field
-            id="field.add-template.name"
-            label="Task name"
-            name="name"
-            required
-            error={state === "state.validation-error" ? "Enter a task name" : undefined}
-          />
-          <Field id="field.add-template.offset" label="Default due offset (days)" name="defaultDueOffsetDays" type="number" required defaultValue="0" />
+          <Field id="field.title" name="title" label="Title" required defaultValue={editTask?.title} error={bad ? "A title is required" : undefined} />
+          <Field id="field.department" name="department" label="Department" type="select" options={departments} defaultValue={editTask?.department ?? "IT"} />
+          <Field id="field.due" name="dueDate" label="Due date" type="date" required defaultValue={editTask?.dueDate} error={bad ? "A due date is required" : undefined} />
+          <Field id="field.description" name="description" label="Description" type="textarea" defaultValue={editTask?.description} />
         </Form>
       </Dialog>
-      <Dialog
-        id="dialog.edit-template"
-        title={editingTemplate ? `Edit ${editingTemplate.name}` : "Edit template"}
-        open={editingTemplate !== null}
-        onClose={() => setEditingTemplate(null)}
-      >
-        {editingTemplate && (
-          <Form
-            id="form.edit-template"
-            onSubmit={(values) => {
-              templates.update(editingTemplate.id, { name: values.name, defaultDueOffsetDays: Number(values.defaultDueOffsetDays) });
-              setEditingTemplate(null);
-            }}
-            actions={<Button id="btn.edit-template.confirm" label="Save" emphasis="primary" submit />}
-          >
-            <Field id="field.edit-template.name" label="Task name" name="name" required defaultValue={editingTemplate.name} />
-            <Field id="field.edit-template.offset" label="Default due offset (days)" name="defaultDueOffsetDays" type="number" required defaultValue={String(editingTemplate.defaultDueOffsetDays)} />
-          </Form>
-        )}
-      </Dialog>
+    </Shell>
+  );
+}
+
+function AllTasks() {
+  const today = useToday();
+  const state = useDisplayState();
+  const tk = useCollection<Task>("tasks");
+  const ob = useCollection<Onboarding>("onboardings");
+  const [dept, setDept] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [hire, setHire] = useState("All");
+  const list = (state === "state.empty" ? [] : tk.items)
+    .filter((t) => dept === "All" || t.department === dept)
+    .filter((t) => status === "All" || t.status === status.toLowerCase())
+    .filter((t) => hire === "All" || t.newHireName === hire)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  return (
+    <Shell>
+      <Heading id="heading.tasks" text="All tasks" />
+      <Section id="section.all-tasks" title="Tasks" count={list.length} subtitle="Filter by department, status and new hire.">
+        <Filters id="filters.tasks">
+          <Field id="filter.department" label="Department" type="select" options={["All", ...departments]} value={dept} onChange={setDept} />
+          <Field id="filter.status" label="Status" type="select" options={["All", "Open", "Done"]} value={status} onChange={setStatus} />
+          <Field id="filter.hire" label="New hire" type="select" options={["All", ...ob.items.map((o) => o.newHireName)]} value={hire} onChange={setHire} />
+        </Filters>
+        <Table
+          id="table.all-tasks"
+          columns={["Task", "New hire", "Department", "Due", { label: "Status", kind: "status" }]}
+          rows={list.map((t) => ({
+            id: `task.${t.id}`,
+            cells: [t.title, t.newHireName, t.department, t.dueDate],
+            status: taskStatus(t, today),
+            actions: t.status === "open" ? [{ id: `task.${t.id}.done`, label: "Mark done", onPress: () => tk.update(t.id, { status: "done", completedOn: today }) }] : [],
+          }))}
+          empty={<EmptyState id="empty.all-tasks" title="No matching tasks" text="Change the filters to see more." />}
+        />
+      </Section>
+    </Shell>
+  );
+}
+
+function Overdue() {
+  const today = useToday();
+  const state = useDisplayState();
+  const tk = useCollection<Task>("tasks");
+  const list = (state === "state.empty" ? [] : tk.items)
+    .filter((t) => daysOverdue(t, today) > 0)
+    .sort((a, b) => daysOverdue(b, today) - daysOverdue(a, today));
+  return (
+    <Shell>
+      <Heading id="heading.overdue" text="Overdue tasks" />
+      {state === "state.failed" && (
+        <Alert id="alert.failed" tone="error" title="Overdue list unavailable" text="Try again in a few minutes." />
+      )}
+      <Section id="section.overdue" title="Past due" count={list.length} subtitle="Most overdue first, across all departments.">
+        <Table
+          id="table.overdue"
+          columns={["Task", "New hire", "Department", "Due", { label: "Days overdue", kind: "number" }]}
+          rows={list.map((t) => ({
+            id: `task.${t.id}`,
+            cells: [t.title, t.newHireName, t.department, t.dueDate, String(daysOverdue(t, today))],
+            to: "screen.onboarding-detail",
+            params: { onboarding: t.onboardingId },
+            actions: [{ id: `task.${t.id}.done`, label: "Mark done", onPress: () => tk.update(t.id, { status: "done", completedOn: today }) }],
+          }))}
+          empty={<EmptyState id="empty.overdue" title="Nothing overdue" text="Every open task is on schedule." />}
+        />
+      </Section>
     </Shell>
   );
 }
 
 function Account() {
   const role = useRole();
+  const user = users[role] ?? users["HRCoordinator"]!;
   return (
     <Shell>
       <Heading id="heading.account" text="Account" />
-      <Detail
-        id="detail.account"
-        fields={[
-          { label: "Name", value: userNames[role] ?? "" },
-          { label: "Email", value: userEmails[role] ?? "" },
-          { label: "Role", value: userLabels[role] ?? "" },
-        ]}
-      />
+      <Detail id="detail.account" fields={[{ label: "Name", value: user.name }, { label: "Email", value: user.email }, { label: "Department", value: user.department }]} />
     </Shell>
   );
 }
 
-function Settings() {
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <EmptyState
-        id="empty.settings"
-        title="Nothing to set up"
-        text="Onboarding Tracker sends no email or notifications: overdue tasks are flagged in the app."
-      />
-    </Shell>
-  );
-}
 
 function SignedOut() {
-  const role = useRole();
   return (
     <Screen>
       <Heading id="heading.signed-out" text="You are signed out" />
-      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to={homeScreen[role] ?? "screen.dashboard"} />
+      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to="screen.home" />
     </Screen>
   );
 }
 
 export default defineApp({
   screens: {
-    "screen.dashboard": Dashboard,
-    "screen.new-onboarding": NewOnboarding,
+    "screen.home": Home,
+    "screen.onboarding-new": OnboardingNew,
     "screen.onboarding-detail": OnboardingDetail,
-    "screen.it-queue": ItQueue,
-    "screen.facilities-queue": FacilitiesQueue,
-    "screen.templates": Templates,
+    "screen.tasks": AllTasks,
+    "screen.overdue": Overdue,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
-  data: { onboardingRecords, tasks, taskTemplates },
+  data: { onboardings, tasks, notes },
 });

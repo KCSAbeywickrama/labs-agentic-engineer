@@ -52,7 +52,6 @@ export type {
   TurnSpec,
   TurnKind,
   PlanScope,
-  PlanContextFile,
   TurnAttachment,
   TurnConnection,
   ModelCapabilities,
@@ -117,26 +116,19 @@ export type {
   ExposesAPI,
 } from "./contracts/component-design.js";
 
-// --- Task-plan tool contract (tasks-github-native §9.3/§10.3) ----------------
-export { PLAN_TASK, UPDATE_TASK } from "./contracts/task-tools.js";
+// --- Build-plan tool contract --------------------------------------------------
+export { PLAN_BUILD, FOUNDATION_ITEM, WHOLE_SPEC_ITEM } from "./contracts/task-tools.js";
 export type {
-  TaskOrigin,
   TaskOp,
   TaskToolErrCode,
-  PlanTaskInput,
-  UpdateTaskInput,
-  UpdateTaskSet,
-  TaskRef,
-  PlanTaskOk,
-  UpdateTaskOk,
+  BuildPlanItem,
+  BuildPlanInput,
+  BuildPlanOk,
   TaskToolErr,
-  AddressableRefs,
-  PlanTaskResult,
-  UpdateTaskResult,
-  TaskContextFile,
+  BuildPlanResult,
 } from "./contracts/task-tools.js";
-export { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
-export { parseKnownComponents, parseTaskContextFile, TASK_CONTEXT_FILE_RE } from "./task-context.js";
+export { buildPlanInputSchema } from "./task-tools-schema.js";
+export { parseKnownComponents } from "./task-context.js";
 
 // --- The stream-part seam ----------------------------------------------------
 export type { StreamPart } from "./stream-types.js";
@@ -147,7 +139,7 @@ export type { Equal } from "./type-equal.js";
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
 export type { PlannedWrite, WritePlan } from "./bundle.js";
-export { writeWithRenderCheck } from "./prototype-gate.js";
+export { isPrototypePath, writeWithRenderCheck } from "./prototype-gate.js";
 export type { FileWrite, PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
 export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 
@@ -263,8 +255,7 @@ export {
   componentDesignJsonSchema,
   securityDesignJsonSchema,
   designReviewJsonSchema,
-  planTaskJsonSchema,
-  updateTaskJsonSchema,
+  buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "./json-schema.js";
 

@@ -93,12 +93,6 @@ func TestIssueOps_RequestAndReply(t *testing.T) {
 			},
 		},
 		{
-			name: "edit issue title", method: "PUT", path: "/repos/acme/greeter/issues/7/title", status: 204, body: `{"title":"T"}`,
-			call: func(ctx context.Context, a *Adapter) (any, error) {
-				return none(a.EditIssueTitle(ctx, trunkRef, 7, "T"))
-			},
-		},
-		{
 			name: "add labels", method: "POST", path: "/repos/acme/greeter/issues/7/labels", status: 204, body: `{"labels":["a","b"]}`,
 			call: func(ctx context.Context, a *Adapter) (any, error) {
 				return none(a.AddIssueLabels(ctx, trunkRef, 7, []string{"a", "b"}))
@@ -202,7 +196,6 @@ func TestIssueOps_MissingIssueOnAWriteIsIssueNotFound(t *testing.T) {
 		"reopen":    func() error { return a.ReopenIssue(ctx, trunkRef, 7) },
 		"comment":   func() error { return a.CommentIssue(ctx, trunkRef, 7, "x") },
 		"body":      func() error { return a.EditIssueBody(ctx, trunkRef, 7, "x") },
-		"title":     func() error { return a.EditIssueTitle(ctx, trunkRef, 7, "x") },
 		"add":       func() error { return a.AddIssueLabels(ctx, trunkRef, 7, []string{"x"}) },
 		"set":       func() error { return a.SetIssueLabels(ctx, trunkRef, 7, []string{"x"}) },
 		"remove":    func() error { return a.RemoveIssueLabel(ctx, trunkRef, 7, "x") },

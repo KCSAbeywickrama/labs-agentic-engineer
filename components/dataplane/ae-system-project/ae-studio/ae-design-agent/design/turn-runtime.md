@@ -58,7 +58,8 @@ comments live in `specs/design/review.json` and go to the agent with
 scope into the instruction after the snapshot read and journals it on the
 message. The composer gives
 each turn its start time (`now`); only the Address comments brief uses it, as
-the comments' `addressedAt`.
+the comments' `addressedAt`. A journal entry written before the field was
+retired still loads: its chat row reads "Prototype feedback (N comments)".
 
 ## Start and watch are separate
 
@@ -94,7 +95,7 @@ request: a closed tab does not stop it. Watchers attach to its replay buffer.
 `TurnDesk` is the only turn lock: one running turn per scope. A project is
 one scope for browser, kickoff and Plan turns alike, so a Plan blocks chat on
 that project and a chat blocks planning. A plan read against a design that is
-changing underneath it would plan the wrong Tasks.
+changing underneath it would plan the wrong build.
 
 - A busy scope answers `409 turn_in_progress` with `activeTurnId`: in the
   `TurnConflict` body on `/v1`, and on the Turn socket, where `aep-api` reads

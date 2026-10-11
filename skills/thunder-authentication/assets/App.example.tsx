@@ -46,7 +46,7 @@
 //     taken from SCREEN_ROUTES — never a handle or an operation typed here.
 //
 //   A `public` screen is routed ABOVE the sign-in guard.
-//     `public: true` is a screen for a visitor who is not signed in, reachable
+//     `public: true` is a screen drawn on a bare `<Screen>` root, reachable
 //     BEFORE sign-in. SignedIn() below redirects anyone without a session to
 //     the IdP, so a public screen routed inside it can never be seen by the
 //     visitor it exists for. It keeps the session provider (so <Can> and

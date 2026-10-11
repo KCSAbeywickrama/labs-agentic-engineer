@@ -36,7 +36,7 @@ tools and skills it needs. The flow:
 - A **shared workspace** lets BAs, designers, and engineers collaborate on the same
   artifacts, each with a view suited to them.
 - Everything is captured as **spec files in a Git repository** (`specs/requirements/`,
-  `specs/design/`, prototypes, domain models). Those specs become the contract
+  `specs/design/`, UI prototypes, domain models). Those specs become the contract
   downstream agents work against.
 - Coding agents pick up tasks from those specs, work via **GitHub issues + branches
   + PRs** (no merge without human review), and the platform watches webhooks to drive

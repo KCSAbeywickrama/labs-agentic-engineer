@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/platform/designspec"
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 )
 
@@ -214,6 +215,54 @@ func TestBuildGate_ReviewNeverRefuses(t *testing.T) {
 	}
 }
 
+// lunchWebPrototype is a sound prototype for lunch-web whose one role is the
+// rolesDoc's "Member".
+func lunchWebPrototype(files map[string]string, roleID string) map[string]string {
+	files[prototypespec.ManifestPath("lunch-web")] = strings.ReplaceAll(validPrototypeManifest, `"user"`, `"`+roleID+`"`)
+	files[prototypespec.SourcePath("lunch-web")] = validPrototypeSource
+	return files
+}
+
+func TestBuildGate_SoundPrototypePasses(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	if errs := gateErrors(t, lunchWebPrototype(files, "Member")); len(errs) != 0 {
+		t.Fatalf("a sound, current prototype must pass, got %+v", errs)
+	}
+}
+
+func TestBuildGate_InvalidPrototypeFails(t *testing.T) {
+	files := lunchWebPrototype(completeDesignFiles(), "user")
+	key := prototypespec.ManifestPath("lunch-web")
+	files[key] = strings.Replace(files[key], `"entryScreen": "home"`, `"entryScreen": "nowhere"`, 1)
+	errs := gateErrors(t, files)
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference || errs[0].Path != key {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+}
+
+// A prototype is current with the design: a role security.json does not
+// declare is one the platform never provisions and the app never gates on.
+func TestBuildGate_PrototypeRoleUnknownToSecurityFails(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	errs := gateErrors(t, lunchWebPrototype(files, "member"))
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference ||
+		errs[0].Path != prototypespec.ManifestPath("lunch-web") {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+	assertContains(t, errs[0].Message, `role "member" is not a role in security.json`)
+	assertContains(t, errs[0].Message, "Member")
+}
+
+// Without security.json the roles come from the PRD's actors: nothing to
+// cross-check.
+func TestBuildGate_PrototypeRolesUncheckedWithoutSecurity(t *testing.T) {
+	if errs := gateErrors(t, lunchWebPrototype(completeDesignFiles(), "anyone")); len(errs) != 0 {
+		t.Fatalf("want a clean gate, got %+v", errs)
+	}
+}
+
 // Infrastructure nodes (database, cache, …) are not deployable: no design.json
 // directory, no artifact, and the gate must never ask for one.
 func TestBuildGate_InfrastructureExempt(t *testing.T) {
@@ -371,7 +420,9 @@ func signInDesignFiles() map[string]string {
 	files := completeDesignFiles()
 	files["components/lunch-api/design.json"] = authService("lunch-api", "F1.1", "F1.2", "F1.4")
 	files["components/lunch-api/openapi.yaml"] = protectedStubSpec
-	return files
+	// The prototype offers the role the rolesDoc declares, as a sign-in
+	// design's prototype must once security.json exists.
+	return lunchWebPrototype(files, "Member")
 }
 
 // A design with no sign-in needs no roles document — most designs are this.

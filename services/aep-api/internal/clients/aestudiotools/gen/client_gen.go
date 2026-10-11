@@ -96,16 +96,13 @@ func (e ResultFrameType) Valid() bool {
 
 // Defines values for TaskOpFrameOp.
 const (
-	TaskOpFrameOpPlan   TaskOpFrameOp = "plan"
-	TaskOpFrameOpUpdate TaskOpFrameOp = "update"
+	Build TaskOpFrameOp = "build"
 )
 
 // Valid indicates whether the value is a known member of the TaskOpFrameOp enum.
 func (e TaskOpFrameOp) Valid() bool {
 	switch e {
-	case TaskOpFrameOpPlan:
-		return true
-	case TaskOpFrameOpUpdate:
+	case Build:
 		return true
 	default:
 		return false
@@ -144,16 +141,16 @@ func (e TurnInProgressCode) Valid() bool {
 
 // Defines values for TurnRequestKind.
 const (
-	TurnRequestKindPlan  TurnRequestKind = "plan"
-	TurnRequestKindStart TurnRequestKind = "start"
+	Plan  TurnRequestKind = "plan"
+	Start TurnRequestKind = "start"
 )
 
 // Valid indicates whether the value is a known member of the TurnRequestKind enum.
 func (e TurnRequestKind) Valid() bool {
 	switch e {
-	case TurnRequestKindPlan:
+	case Plan:
 		return true
-	case TurnRequestKindStart:
+	case Start:
 		return true
 	default:
 		return false
@@ -455,11 +452,6 @@ type IssueResult struct {
 	URL string `json:"url"`
 }
 
-// IssueTitleRequest defines model for IssueTitleRequest.
-type IssueTitleRequest struct {
-	Title string `json:"title"`
-}
-
 // KeepAliveFrame One line of the turn stream, sent every 15 s.
 type KeepAliveFrame struct {
 	Type KeepAliveFrameType `json:"type"`
@@ -516,12 +508,6 @@ type MilestoneResult struct {
 	Number  int  `json:"number"`
 }
 
-// PlanContextFile One existing-Task render under its tasks/<n>.md name.
-type PlanContextFile struct {
-	Body string `json:"body"`
-	Path string `json:"path"`
-}
-
 // PlanFeature defines model for PlanFeature.
 type PlanFeature struct {
 	ID   string `json:"id"`
@@ -539,29 +525,19 @@ type PlanItem struct {
 	Text      string   `json:"text,omitempty,omitzero"`
 }
 
-// PlanScope The spec version a plan turn covers, its stories and which of them already have Tasks, the features it carries and its product-wide items.
+// PlanScope What the spec version a plan turn plans carries, from its tag's annotation, the features, the product-wide items and the stories it holds back.
 type PlanScope struct {
-	// Features The features the version carries, in ID order, each with the carried features it is built after; the planner cuts one Task per feature per component.
+	// Features The features the version carries, in ID order, each with the carried features it is built after; each is one item of the build's checklist.
 	Features []PlanFeature `json:"features,omitempty,omitzero"`
 
-	// ProductWide The product-wide items the version carries, in ID order; each component's Foundation Task builds them.
-	ProductWide []PlanItem `json:"productWide,omitempty,omitzero"`
+	// HeldBack The stories of carried features the version holds back, in ID order; each needs a feature neither built nor carried.
+	HeldBack []string `json:"heldBack,omitempty,omitzero"`
 
-	// Stories Each story the version builds, in ID order.
-	Stories []PlanStory `json:"stories"`
+	// ProductWide The product-wide items the version carries, in ID order; the build's Foundation item builds them.
+	ProductWide []PlanItem `json:"productWide,omitempty,omitzero"`
 
 	// Tag The version's tag name, describing the version to the planner. Not the pin and not checked against it; the turn's `at` is.
 	Tag string `json:"tag"`
-}
-
-// PlanStory defines model for PlanStory.
-type PlanStory struct {
-	// Covered The story already has Tasks, the planner leaves it alone.
-	Covered bool `json:"covered"`
-
-	// ID The story's ID, F<feature>.<story>.
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty,omitzero"`
 }
 
 // Problem defines model for Problem.
@@ -678,11 +654,11 @@ type TagList struct {
 	Tags []Tag `json:"tags"`
 }
 
-// TaskOpFrame One line of the turn stream, a Task operation the agent produced.
+// TaskOpFrame One line of the turn stream, the build plan the agent produced.
 type TaskOpFrame struct {
 	Op TaskOpFrameOp `json:"op"`
 
-	// Output The operation's payload, as the plan or update tool emitted it.
+	// Output The operation's payload, as the planBuild tool emitted it.
 	Output map[string]interface{} `json:"output"`
 	Type   TaskOpFrameType        `json:"type"`
 }
@@ -743,11 +719,8 @@ type TurnRequest struct {
 	// Project Project name (DNS-label slug)
 	Project string `json:"project"`
 
-	// Scope The spec version a plan turn covers, its stories and which of them already have Tasks, the features it carries and its product-wide items.
+	// Scope What the spec version a plan turn plans carries, from its tag's annotation, the features, the product-wide items and the stories it holds back.
 	Scope PlanScope `json:"scope,omitempty,omitzero"`
-
-	// TaskContext The existing-Task renders of a plan turn. Platform state, not repository files.
-	TaskContext []PlanContextFile `json:"taskContext,omitempty,omitzero"`
 
 	// Text The free text of the turn (the project idea of a start turn).
 	Text   string             `json:"text,omitempty,omitzero"`
@@ -973,12 +946,6 @@ type ReopenIssueParams struct {
 	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
 }
 
-// SetIssueTitleParams defines parameters for SetIssueTitle.
-type SetIssueTitleParams struct {
-	// XImpersonateOrg The org the call acts for; must be the pod's org id.
-	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
-}
-
 // EnsureLabelParams defines parameters for EnsureLabel.
 type EnsureLabelParams struct {
 	// XImpersonateOrg The org the call acts for; must be the pod's org id.
@@ -1162,9 +1129,6 @@ type SetIssueLabelsJSONRequestBody = IssueLabelsRequest
 // SetIssueMilestoneJSONRequestBody defines body for SetIssueMilestone for application/json ContentType.
 type SetIssueMilestoneJSONRequestBody = IssueMilestoneRequest
 
-// SetIssueTitleJSONRequestBody defines body for SetIssueTitle for application/json ContentType.
-type SetIssueTitleJSONRequestBody = IssueTitleRequest
-
 // EnsureLabelJSONRequestBody defines body for EnsureLabel for application/json ContentType.
 type EnsureLabelJSONRequestBody = EnsureLabelRequest
 
@@ -1336,11 +1300,6 @@ type ClientInterface interface {
 
 	// ReopenIssue request
 	ReopenIssue(ctx context.Context, owner Owner, repo Repo, number Number, params *ReopenIssueParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// SetIssueTitleWithBody request with any body
-	SetIssueTitleWithBody(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	SetIssueTitle(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// EnsureLabelWithBody request with any body
 	EnsureLabelWithBody(ctx context.Context, owner Owner, repo Repo, params *EnsureLabelParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1750,30 +1709,6 @@ func (c *Client) SetIssueMilestone(ctx context.Context, owner Owner, repo Repo, 
 
 func (c *Client) ReopenIssue(ctx context.Context, owner Owner, repo Repo, number Number, params *ReopenIssueParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReopenIssueRequest(c.Server, owner, repo, number, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) SetIssueTitleWithBody(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetIssueTitleRequestWithBody(c.Server, owner, repo, number, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) SetIssueTitle(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetIssueTitleRequest(c.Server, owner, repo, number, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3598,80 +3533,6 @@ func NewReopenIssueRequest(server string, owner Owner, repo Repo, number Number,
 	return req, nil
 }
 
-// NewSetIssueTitleRequest calls the generic SetIssueTitle builder with application/json body
-func NewSetIssueTitleRequest(server string, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewSetIssueTitleRequestWithBody(server, owner, repo, number, params, "application/json", bodyReader)
-}
-
-// NewSetIssueTitleRequestWithBody generates requests for SetIssueTitle with any type of body
-func NewSetIssueTitleRequestWithBody(server string, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "owner", owner, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "repo", repo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam2 string
-
-	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "number", number, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/repos/%s/%s/issues/%s/title", pathParam0, pathParam1, pathParam2)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		var headerParam0 string
-
-		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Impersonate-Org", params.XImpersonateOrg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-		if err != nil {
-			return nil, err
-		}
-
-		req.Header.Set("X-Impersonate-Org", headerParam0)
-
-	}
-
-	return req, nil
-}
-
 // NewEnsureLabelRequest calls the generic EnsureLabel builder with application/json body
 func NewEnsureLabelRequest(server string, owner Owner, repo Repo, params *EnsureLabelParams, body EnsureLabelJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5182,11 +5043,6 @@ type ClientWithResponsesInterface interface {
 	// ReopenIssueWithResponse request
 	ReopenIssueWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *ReopenIssueParams, reqEditors ...RequestEditorFn) (*ReopenIssueResponse, error)
 
-	// SetIssueTitleWithBodyWithResponse request with any body
-	SetIssueTitleWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error)
-
-	SetIssueTitleWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error)
-
 	// EnsureLabelWithBodyWithResponse request with any body
 	EnsureLabelWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, params *EnsureLabelParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnsureLabelResponse, error)
 
@@ -5967,41 +5823,6 @@ func (r ReopenIssueResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ReopenIssueResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type SetIssueTitleResponse struct {
-	Body                      []byte
-	HTTPResponse              *http.Response
-	ApplicationProblemJSON400 *Problem
-	ApplicationProblemJSON401 *Problem
-	ApplicationProblemJSON403 *Problem
-	ApplicationProblemJSON429 *RateLimited
-	ApplicationProblemJSON502 *GitHubAPIError
-	ApplicationProblemJSON503 *Problem
-}
-
-// Status returns HTTPResponse.Status
-func (r SetIssueTitleResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r SetIssueTitleResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r SetIssueTitleResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6938,23 +6759,6 @@ func (c *ClientWithResponses) ReopenIssueWithResponse(ctx context.Context, owner
 		return nil, err
 	}
 	return ParseReopenIssueResponse(rsp)
-}
-
-// SetIssueTitleWithBodyWithResponse request with arbitrary body returning *SetIssueTitleResponse
-func (c *ClientWithResponses) SetIssueTitleWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error) {
-	rsp, err := c.SetIssueTitleWithBody(ctx, owner, repo, number, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseSetIssueTitleResponse(rsp)
-}
-
-func (c *ClientWithResponses) SetIssueTitleWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error) {
-	rsp, err := c.SetIssueTitle(ctx, owner, repo, number, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseSetIssueTitleResponse(rsp)
 }
 
 // EnsureLabelWithBodyWithResponse request with arbitrary body returning *EnsureLabelResponse
@@ -8456,67 +8260,6 @@ func ParseReopenIssueResponse(rsp *http.Response) (*ReopenIssueResponse, error) 
 	}
 
 	response := &ReopenIssueResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
-		var dest RateLimited
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON429 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
-		var dest GitHubAPIError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON502 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest Problem
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationProblemJSON503 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseSetIssueTitleResponse parses an HTTP response from a SetIssueTitleWithResponse call
-func ParseSetIssueTitleResponse(rsp *http.Response) (*SetIssueTitleResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &SetIssueTitleResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

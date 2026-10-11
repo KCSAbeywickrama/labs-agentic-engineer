@@ -29,7 +29,9 @@
  * - the Turn socket on a Unix socket in the session's private temp dir.
  *
  * There is no Room: a turn's edits stream back to the caller, which folds
- * them to disk (`engine/turn.ts`). The `/v1` edge listens on loopback only.
+ * them to disk (`engine/turn.ts`), so the starter is told the caller saves
+ * them (a prototype review batch needs a saved turn). The `/v1` edge listens
+ * on loopback only.
  */
 
 import { join } from "node:path";

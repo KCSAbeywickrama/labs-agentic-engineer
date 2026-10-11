@@ -60,9 +60,10 @@ import (
 // the wrong version.
 type IssueSpec struct {
 	Title string
-	// Body is PROSE. Nothing platform-side parses an issue body back — not the
-	// event plane, not the supervisor, not the reads — so a body may say
-	// whatever a coding agent needs to hear.
+	// Body is PROSE. The one platform reader of a body is the supervisor's
+	// count of the build issue's unticked checklist items
+	// (taskplan.UncheckedItems); every other body may say whatever a coding
+	// agent needs to hear.
 	Body string
 	// Labels is the population this issue joins (labels.go). ORDER IS
 	// PRESERVED: the host appends the derived dedupe label after these, and a
@@ -307,4 +308,22 @@ func DedupeKeyValidationFix(scenarioID string) string {
 // per-version singletons and they read as one family on a milestone.
 func DedupeKeyValidationIssue(projectID string, milestoneNumber int) string {
 	return "validation:" + projectID + ":" + strconv.Itoa(milestoneNumber)
+}
+
+// DedupeKeyBuildIssue identifies a VERSION's build issue, the one development
+// issue its plan mints: a plan re-run after a crash finds the open one rather
+// than filing a second checklist beside it. Same per-version family as the
+// validation issue's key.
+func DedupeKeyBuildIssue(projectID string, milestoneNumber int) string {
+	return "build:" + projectID + ":" + strconv.Itoa(milestoneNumber)
+}
+
+// IsBuildIssue reports whether an issue carrying `labels` is the version's
+// build issue: the one its plan minted under DedupeKeyBuildIssue. That dedupe
+// label is the build issue's identity, so another development issue in the
+// milestone (filed by hand, say) is not it. The run poll counts this issue's
+// checklist and the merge policy admits `Advances #N` only on it, so the two
+// agree on which issue the build is.
+func IsBuildIssue(labels []string, projectID string, milestoneNumber int) bool {
+	return HasLabel(labels, sourcecontrol.DedupeLabel(DedupeKeyBuildIssue(projectID, milestoneNumber)))
 }

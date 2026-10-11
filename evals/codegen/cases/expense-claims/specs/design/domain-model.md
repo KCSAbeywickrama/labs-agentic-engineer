@@ -1,46 +1,51 @@
-# Domain Model
+# Domain model
 
-Expense claims move from submission through manager review to a finance
-export. An employee's manager is modeled as a self-reference on `EMPLOYEE` so
-a manager's team can be resolved without a separate assignment table.
+Employees file claims made of expense lines; their manager decides; finance groups approved claims into export batches. Amounts are integer cents in one company currency (P3).
 
 ```mermaid
 erDiagram
-    EMPLOYEE ||--o{ EXPENSE_CLAIM : submits
+    EMPLOYEE ||--o{ CLAIM : files
     EMPLOYEE ||--o{ EMPLOYEE : manages
-    EXPORT_BATCH ||--o{ EXPENSE_CLAIM : includes
+    CLAIM ||--|{ EXPENSE_LINE : contains
+    EXPORT_BATCH ||--|{ CLAIM : includes
+    CLAIM ||--o{ AUDIT_ENTRY : records
 
     EMPLOYEE {
-        string id
-        string name
-        string email
-        string managerId
+        string id PK "assertion sub"
+        string name "assertion username"
+        string managerId FK
     }
-    EXPENSE_CLAIM {
-        string id
-        string employeeId
-        decimal amount
-        date expenseDate
-        string category
-        string description
-        string status
+    CLAIM {
+        string id PK
+        string employeeId FK
+        string status "draft submitted approved rejected exported"
+        int totalCents
         string rejectionReason
+        string decidedBy
         datetime submittedAt
         datetime decidedAt
-        string exportBatchId
+        string batchId FK
+    }
+    EXPENSE_LINE {
+        string id PK
+        string claimId FK
+        date expenseDate
+        string category
+        int amountCents
+        string description
     }
     EXPORT_BATCH {
-        string id
-        datetime exportedAt
-        string exportedBy
-        integer claimCount
+        string id PK
+        string createdBy
+        datetime createdAt
+    }
+    AUDIT_ENTRY {
+        string id PK
+        string claimId FK
+        string actorId
+        string action
+        datetime at
     }
 ```
 
-- **EMPLOYEE** — every signed-in user; `managerId` points at another
-  `EMPLOYEE` and defines the team a Manager reviews.
-- **EXPENSE_CLAIM** — `status` is one of `pending`, `approved`, `rejected`,
-  `withdrawn`. `rejectionReason` is set only when rejected. `exportBatchId` is
-  set once the claim is included in an export.
-- **EXPORT_BATCH** — one row per finance export; groups the claims exported
-  together so a claim is never exported twice.
+Categories are a fixed list served by the API. An employee record is created by the API itself: on every authenticated request it upserts an employee with `id` = the gateway assertion's `sub` and `name` = its username, and the web app calls `GET /me` at startup so each person is recorded on first open. The manager relation (`managerId`) is set by finance through the API, choosing from every recorded employee; it is not taken from the sign-in directory.

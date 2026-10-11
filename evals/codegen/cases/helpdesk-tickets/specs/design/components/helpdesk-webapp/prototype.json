@@ -11,29 +11,27 @@
     { "id": "state.default", "name": "Default" },
     { "id": "state.empty", "name": "Nothing to show" },
     { "id": "state.validation-error", "name": "Validation errors" },
-    { "id": "state.failed", "name": "Ticket feed failed" }
+    { "id": "state.failed", "name": "Help desk unavailable" }
   ],
   "screens": [
     { "id": "screen.my-tickets", "name": "My tickets", "roleIds": ["Employee"] },
-    { "id": "screen.ticket", "name": "Ticket detail", "roleIds": ["Employee"] },
-    { "id": "screen.queue", "name": "Ticket queue", "roleIds": ["Support Agent", "Team Lead"] },
-    { "id": "screen.ticket-workspace", "name": "Ticket workspace", "roleIds": ["Support Agent", "Team Lead"] },
+    { "id": "screen.new-ticket", "name": "Raise a ticket", "roleIds": ["Employee"] },
+    { "id": "screen.my-ticket", "name": "My ticket", "roleIds": ["Employee"] },
+    { "id": "screen.queue", "name": "Queue", "roleIds": ["Support Agent", "Team Lead"] },
+    { "id": "screen.ticket", "name": "Ticket", "roleIds": ["Support Agent", "Team Lead"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Support Agent", "Team Lead"] }
   ],
   "flows": [
-    { "id": "flow.raise-ticket", "name": "Raise a ticket", "roleId": "Employee", "screenIds": ["screen.my-tickets", "screen.ticket"] },
-    { "id": "flow.view-my-tickets", "name": "See my tickets and their status", "roleId": "Employee", "screenIds": ["screen.my-tickets"] },
-    { "id": "flow.comment-on-ticket", "name": "Comment on my ticket", "roleId": "Employee", "screenIds": ["screen.my-tickets", "screen.ticket"] },
-    { "id": "flow.reopen-ticket", "name": "Reopen a resolved ticket", "roleId": "Employee", "screenIds": ["screen.my-tickets", "screen.ticket"] },
-    { "id": "flow.view-sla-due", "name": "See the SLA due time", "roleId": "Employee", "screenIds": ["screen.my-tickets", "screen.ticket"] },
-    { "id": "flow.filter-queue", "name": "Filter the queue", "roleId": "Support Agent", "screenIds": ["screen.queue"] },
-    { "id": "flow.triage-ticket", "name": "Triage a ticket", "roleId": "Support Agent", "screenIds": ["screen.queue", "screen.ticket-workspace"] },
-    { "id": "flow.assign-ticket", "name": "Assign a ticket", "roleId": "Support Agent", "screenIds": ["screen.queue", "screen.ticket-workspace"] },
-    { "id": "flow.work-ticket", "name": "Work a ticket to resolution", "roleId": "Support Agent", "screenIds": ["screen.queue", "screen.ticket-workspace"] },
-    { "id": "flow.comment-as-agent", "name": "Comment as an agent", "roleId": "Support Agent", "screenIds": ["screen.queue", "screen.ticket-workspace"] },
-    { "id": "flow.watch-queue", "name": "Watch the queue for SLA breaches", "roleId": "Team Lead", "screenIds": ["screen.queue"] },
-    { "id": "flow.reassign-ticket", "name": "Reassign a ticket", "roleId": "Team Lead", "screenIds": ["screen.queue", "screen.ticket-workspace"] }
+    { "id": "flow.raise-ticket", "name": "Raise and track a ticket", "roleId": "Employee",
+      "screenIds": ["screen.my-tickets", "screen.new-ticket", "screen.my-ticket"] },
+    { "id": "flow.reopen-ticket", "name": "Reopen a resolved ticket", "roleId": "Employee",
+      "screenIds": ["screen.my-tickets", "screen.my-ticket"] },
+    { "id": "flow.handle-ticket", "name": "Triage, work and resolve a ticket", "roleId": "Support Agent",
+      "screenIds": ["screen.queue", "screen.ticket"] },
+    { "id": "flow.assign-ticket", "name": "Assign a ticket to an agent", "roleId": "Team Lead",
+      "screenIds": ["screen.queue", "screen.ticket"] },
+    { "id": "flow.monitor-queue", "name": "Monitor the queue and SLA breaches", "roleId": "Team Lead",
+      "screenIds": ["screen.queue"] }
   ]
 }

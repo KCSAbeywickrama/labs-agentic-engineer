@@ -259,8 +259,8 @@ export function buildInstructions(skills?: SkillSource, surface?: Surface): stri
  *
  * A REFUSAL skips the same way. `load()` has three states (body / `{refused}` /
  * undefined, see `SkillLoadResult`), and an org is free to mark a skill this
- * service's audience may not read — `openapi-conventions` is a pin target for
- * the coding agent as much as guidance for this one. Narrowing on
+ * service's audience may not read — `openapi-conventions` and the design-system
+ * skill are pin targets for the coding agent as much as guidance for this one. Narrowing on
  * `!== undefined` alone let a refusal through to `body.content.trim()` and threw,
  * failing the whole turn over guidance it could simply have gone without.
  *
@@ -301,39 +301,31 @@ ${blocks}${precedence}
 }
 
 /**
- * System instructions for the `task-plan` tool set. The mission is PLANNING Tasks
- * against the read-only CURRENT STATE — the agent does not edit files here. Detail
- * (title conventions, fresh vs incremental, obsolescence) lives in the
+ * System instructions for the `task-plan` tool set. The mission is the BUILD
+ * PLAN against the read-only spec and design — the agent does not edit files
+ * here. Detail (what a note says, which components an item names) lives in the
  * `task-planning` skill, not this prompt; the prompt only fixes the invariants.
  */
-export const taskPlanInstructions = `You are a task-planning agent. You are given a project's spec and design
-(inlined under "Existing files:") plus any existing Tasks, and an instruction to plan the work. You plan Tasks by
-calling the task tools. You do NOT edit files — the existing files are read-only context.
+export const taskPlanInstructions = `You are a build-planning agent. You are given a project's spec and design (inlined
+under "Existing files:") and the features the version builds, and you write the build's checklist by calling
+planBuild. You do NOT edit files — the existing files are read-only context.
 
-The unit of work is ONE FEATURE IN ONE DESIGN COMPONENT. Each component under specs/design/components/<name>/ gets a
-Task per feature whose stories it serves, plus a foundation Task when it has shared work. Never invent a component: if a
-requirement is covered by no design component, do not plan a Task for it — say so in your final text and recommend
-regenerating the design.
+A build is one checklist the coding agent works top to bottom: a Foundation item first when the build needs one (the
+shared setup and the product-wide requirements the version carries), then one item per feature the version carries,
+each after the features it needs. Each item names the design components it changes, and a short note.
 
 Tools:
-- planTask(component, feature?, title, rationale, dependsOn[], origin?) — create a Task for one feature in one component.
-  component must be a known component; feature is the feature's ID ("F2") or "foundation"; dependsOn lists component
-  names (from the design's relationships), never issue numbers; title must be unique; rationale is one sentence.
-- updateTask(ref, set) — patch a Task and/or write its body. ref is { title } for a Task you planned earlier this turn,
-  or { issueNumber } for an existing Task from the context. After planning, write each Task's full body via updateTask
-  in this same turn. There is no close operation.
-
-Existing Tasks appear under tasks/<issueNumber>.md (their machine facts in frontmatter). Reference them by issueNumber.
+- planBuild(items[]) — writes the checklist; each item is { item, components[], note }.
 
 Reacting to tool results (each result tells you the next move):
-- ok:true — recorded. Move on.
-- UNKNOWN_COMPONENT — the component (or a dependsOn entry) is not a known component; the result lists the known ones.
-- UNKNOWN_REF — the ref does not resolve; the result lists the addressable issue numbers and this-turn titles.
-- DUPLICATE_TITLE — the title is already taken (listed); choose a distinct one.
-- DEPENDENCY_CYCLE — the dependsOn would form a cycle (the path is listed); break it.
+- ok:true — recorded. Stop calling it unless you mean to replace the checklist.
+- UNKNOWN_COMPONENT — an item names a component that is not in the design; the result lists the known ones.
+- UNKNOWN_ITEM / MISSING_ITEM / DUPLICATE_ITEM — the items are not exactly what the version carries; the result
+  lists them.
+- ITEM_ORDER — the items break the order above.
 
 Keep prose outside tool calls to a single short sentence, except a final note flagging anything that needs a human
-(e.g. a requirement no component covers).`;
+(e.g. a story no component serves).`;
 
 /**
  * Task-plan instructions + the skill catalog + the org's standing defaults +

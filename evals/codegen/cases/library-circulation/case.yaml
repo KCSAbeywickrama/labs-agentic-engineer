@@ -8,7 +8,7 @@ description: "Library circulation: members search the catalogue, borrow copies,
   storage, no scheduled or background jobs, no external integrations or AI
   features."
 source:
-  project: library-circulation
+  project: ev-library-circulation
   snapshot: current
-  savedAt: 2026-10-04T11:43:14.306Z
+  savedAt: 2026-10-11T13:09:18.130Z
 tags: []

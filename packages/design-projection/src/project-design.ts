@@ -92,6 +92,9 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
+  // The prototype (manifest + screens) is a web-application's UI contract.
+  if (files[`${dir}/prototype.json`] !== undefined) artifacts.prototype = `${dir}/prototype.json`;
+  if (files[`${dir}/prototype.tsx`] !== undefined) artifacts.prototypeSource = `${dir}/prototype.tsx`;
 
   // exactOptionalPropertyTypes: omit absent keys instead of `key: undefined`.
   const build: ProjectDesignComponent["build"] = {};

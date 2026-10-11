@@ -49,7 +49,8 @@
 // two cycle loops that drift apart:
 //
 //	dev   work:    DevWork  — armed, kind ∈ development/bug/conflict
-//	      before:  provisionGates → planTasks (it owns the version it is filling)
+//	      before:  ProvisionGates → PlanMilestone, the planning turn that mints
+//	               the version's one build issue (it owns the version it is filling)
 //	      onEmpty: ASSERT the version is serving, mint its validation task →
 //	               settle succeeded, and LEAVE THE MILESTONE OPEN: the version is
 //	               deployed and unjudged. A version that is not serving settles

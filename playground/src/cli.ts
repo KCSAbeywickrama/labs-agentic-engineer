@@ -22,7 +22,9 @@
  *   pnpm play                                → print usage help (bare invocation)
  *   pnpm play menu                           → project picker → phase menu
  *   pnpm play <dir>                          → chat home (slash commands run phases; /menu for the dashboard)
- *   pnpm play <dir> requirements|design|chat → run one phase; exit code = result
+ *   pnpm play <dir> requirements|interview|design|chat → run one phase; exit code = result
+ *   pnpm play <dir> prototype [component]    → `/prototype`; --preview reviews (comments become drafts)
+ *   pnpm play <dir> address-comments         → send the review's drafts with `/address-comments`
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
  * Flags: --idea "<text>", --scope F<n>|design-review, --fresh, --silent, --restore, --yes,
@@ -39,17 +41,22 @@ import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
 import { loadDotenv } from "@aep/ae-design-agent/shared/env";
 import {
+  addressCommentsCommand,
   chatTurn,
   codeCommand,
   evalSaveCommand,
   logCommand,
   designCommand,
+  prototypeCommand,
   requirementsCommand,
+  interviewCommand,
   tasksCommand,
   undoCommand,
   type CodeOptions,
   type PhaseOptions,
   type PhaseOutcome,
+  type PrototypeOptions,
+  type TasksOptions,
 } from "./commands.js";
 import { checkProject } from "./engine/check.js";
 import { WIRE_EXIT } from "./engine/wire/failure.js";
@@ -68,7 +75,10 @@ import type { WireOptions } from "./engine/wire/session.js";
 
 const COMMANDS = new Set([
   "requirements",
+  "interview",
   "design",
+  "prototype",
+  "address-comments",
   "tasks",
   "code",
   "wire",
@@ -98,7 +108,13 @@ function printUsage(): void {
       "  pnpm play menu                            pick a project, then the phase menu",
       "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
       "  pnpm play <dir> requirements|design       generate or refine the spec",
-      "  pnpm play <dir> tasks|code|check|undo      run a later step of the impl plan",
+      "  pnpm play <dir> interview F<n>            write one feature's stories (headless /interview)",
+      "  pnpm play <dir> prototype [component]     generate or regenerate the web-application prototypes",
+      "  pnpm play <dir> prototype [c] --preview   review one in the browser; Save feedback writes draft comments",
+      "                                            to specs/design/review.json",
+      "  pnpm play <dir> address-comments          send the review's drafts and run /address-comments",
+      "  pnpm play <dir> tasks [--features F1,F3]  plan a version's build: one issues/<n>.md checklist",
+      "  pnpm play <dir> code|check|undo           run a later step of the impl plan",
       "  pnpm play <dir> wire                      run the generated app locally, as a role, in a browser",
       "  pnpm play <dir> log [--slow|--thinking]   read the last coding run in detail (developer view)",
       '  pnpm play <dir> chat "<message>"          one-shot headless chat turn',
@@ -115,7 +131,10 @@ function printUsage(): void {
       "  --host            (code) run the coding agent as a bare host process, not the runner image",
       '  --role "<name>"   (wire) enter as this role without the picker (empty = signed in, no grants)',
       "  --seed            (wire) seed data through the app once everything answers",
-      "  --no-open         (wire) print READY <url> instead of opening a browser",
+      "  --no-open         (wire, prototype --preview) print the URL instead of opening a browser",
+      "  --features <ids>  (tasks) the features this version builds, comma-separated; none = every feature",
+      "  --product-wide <ids>  (tasks) the product-wide items it builds, comma-separated",
+      "  --preview         (prototype) serve the review page until Ctrl-C",
       "  --no-triage       (wire) do not ask a model to read the logs when a service fails",
       "  --skip <dep>      (wire) start anyway with an unsupported dependency's env unset",
       "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
@@ -192,17 +211,32 @@ async function runHeadless(
   opts: CodeOptions,
   wireOptions: WireOptions,
   commandArg?: string,
+  prototypeOptions: Pick<PrototypeOptions, "preview" | "noOpen"> = {},
+  selection: Pick<TasksOptions, "features" | "productWide"> = {},
 ): Promise<number> {
   let outcome: PhaseOutcome;
   switch (command) {
     case "requirements":
       outcome = await requirementsCommand(projectDir, opts, process.stdin.isTTY ? askIdea : undefined);
       break;
+    case "interview":
+      if (!commandArg) {
+        output.write("usage: play <dir> interview F<n>\n");
+        return 1;
+      }
+      outcome = await interviewCommand(projectDir, opts, commandArg);
+      break;
     case "design":
       outcome = await designCommand(projectDir, opts);
       break;
+    case "prototype":
+      outcome = await prototypeCommand(projectDir, { ...opts, ...prototypeOptions }, commandArg);
+      break;
+    case "address-comments":
+      outcome = await addressCommentsCommand(projectDir, opts);
+      break;
     case "tasks":
-      outcome = await tasksCommand(projectDir, opts);
+      outcome = await tasksCommand(projectDir, { ...opts, ...selection });
       break;
     case "code":
       // One session works the whole project — the `aep` skill decides
@@ -336,6 +370,9 @@ async function main(): Promise<number> {
       seed: { type: "boolean" },
       "no-open": { type: "boolean" },
       "no-triage": { type: "boolean" },
+      preview: { type: "boolean" },
+      features: { type: "string" },
+      "product-wide": { type: "string" },
       skip: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
     },
@@ -373,6 +410,17 @@ async function main(): Promise<number> {
     ...(values["no-triage"] ? { noTriage: true } : {}),
     ...(values.skip ? { skip: values.skip } : {}),
     ...(values.yes ? { yes: true } : {}),
+  };
+
+  const prototypeOptions = {
+    ...(values.preview ? { preview: true } : {}),
+    ...(values["no-open"] ? { noOpen: true } : {}),
+  };
+
+  const idList = (raw: string | undefined): string[] => (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const selection = {
+    ...(values.features ? { features: idList(values.features) } : {}),
+    ...(values["product-wide"] ? { productWide: idList(values["product-wide"]) } : {}),
   };
 
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];
@@ -425,7 +473,7 @@ async function main(): Promise<number> {
   // Chat is the home surface: `play <dir>` drops straight in; `play menu` opens
   // the dashboard; any other verb runs headless.
   if (command === "menu") return runMenu(projectDir, opts, wireOptions);
-  if (command) return runHeadless(command, projectDir, opts, wireOptions, commandArg);
+  if (command) return runHeadless(command, projectDir, opts, wireOptions, commandArg, prototypeOptions, selection);
   return runChat(projectDir, opts, wireOptions);
 }
 
