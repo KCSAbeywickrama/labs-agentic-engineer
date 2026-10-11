@@ -19,8 +19,8 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { parseDesignCommand } from "@aep/contracts/commands";
-import { client } from "../../api/client";
 import { env } from "../../config/env";
+import { buildPreflightQuery } from "../builds/api/preflight";
 import { useProjectChat } from "../agent-chat/useProjectChat";
 import { useSpecDoc } from "../spec/collab/specDoc";
 import { useRoomFiles } from "../spec/collab/useRoomFiles";
@@ -71,17 +71,7 @@ export function useDesignModel(projectName: string) {
   const mocked = useMockDesignModel(projectName, mock);
   const files = useRoomFiles(useSpecDoc(projectName), DESIGN_FILES);
   const chat = useProjectChat(projectName);
-  const preflight = useQuery({
-    queryKey: ["projects", projectName, "build-preflight"],
-    queryFn: async () => {
-      const { data, error } = await client.GET("/projects/{projectName}/build/preflight", {
-        params: { path: { projectName } },
-      });
-      if (error || data === undefined) throw new Error("Couldn't read the design's dependencies");
-      return data;
-    },
-    enabled: !mock,
-  });
+  const preflight = useQuery({ ...buildPreflightQuery(projectName), enabled: !mock });
 
   const platform = useMemo((): DesignModel | undefined => {
     if (mock) return undefined;

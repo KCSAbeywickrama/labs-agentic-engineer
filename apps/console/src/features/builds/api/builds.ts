@@ -23,6 +23,7 @@ import { ApiRequestError, apiErrorMessage, retryAfterMs } from "../../../api/err
 import type { components } from "../../../generated/aep-api";
 import { useSpecFlush } from "../../spec/collab/specDoc";
 import { buildBody, fixBody, type BuildSelection } from "../buildSelection";
+import { buildPreflightQuery } from "./preflight";
 import { runKeys, useVersionLedger } from "./runs";
 import { refetchWhileAeStudioRestarts } from "../../ae-studio/model/unavailable";
 
@@ -168,7 +169,10 @@ export function refreshBuilds(queryClient: QueryClient, projectName: string): vo
 /**
  * Start a build of the selection; resolves with the version it cut ("v1").
  * The room's pending edits are committed first: the build tags HEAD, and an
- * edit still in the room would not be in the version.
+ * edit still in the room would not be in the version. The preflight is then
+ * read afresh, for the design as committed, and the build approves what it
+ * lists (buildSelection.ts). A preflight that cannot be read stops the build:
+ * one started without its approvals would provision nothing and fail at deploy.
  */
 export function useStartBuild(projectName: string) {
   const queryClient = useQueryClient();
@@ -176,9 +180,10 @@ export function useStartBuild(projectName: string) {
   return useMutation({
     mutationFn: async (selection: BuildSelection): Promise<string> => {
       await flush();
+      const preflight = await queryClient.fetchQuery({ ...buildPreflightQuery(projectName), staleTime: 0 });
       const { data, error } = await client.POST("/projects/{projectName}/build", {
         params: { path: { projectName } },
-        body: buildBody(selection),
+        body: buildBody(selection, preflight.items ?? []),
       });
       if (error || data === undefined) throw buildRefusal(error);
       return data.tag ?? "";

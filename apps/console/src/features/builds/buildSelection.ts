@@ -23,12 +23,21 @@ import type { components } from "../../generated/aep-api";
 // applies to. It rides the contract's `selection`; the server plans the rest
 // (what the picked features need) and refuses a feature that cannot be built.
 //
+// Starting a build is also the user's consent to what the build provisions:
+// the platform resources the design needs that are not provisioned yet, and
+// the cross-project endpoints it will ask for. The build preflight lists them,
+// and the body carries one approval per item (`inputs`); the platform
+// provisions a platform resource only from its approval, and refuses a build
+// that would deploy one nobody approved.
+//
 // A repair build (Fix on a failing scenario: v1.1 fixes v1) rides the
 // contract's `repair`, naming the version to fix; the server files the
 // scenarios that version's final validation failed as the repair's work.
 
 type BuildRequest = components["schemas"]["BuildRequest"];
 type BuildRepair = components["schemas"]["BuildRepair"];
+type BuildInputItem = components["schemas"]["BuildInputItem"];
+type PreflightItem = components["schemas"]["PreflightItem"];
 
 /** What goes into a build: features by ID ("F1"), and new product-wide items ("P5"). */
 export interface BuildSelection {
@@ -40,13 +49,50 @@ export interface BuildSelection {
 export type BuildBody = BuildRequest;
 
 /**
- * The request body that starts a build of this selection. No inputs and no
- * version: the platform names the version, as an untouched name field does
- * in the old console's Start build dialog.
+ * The approvals a build carries, one per preflight item it consents to (the
+ * classic console's `approvalInputsFor`):
+ *
+ *   - `platform-resource`: a resource the design needs that is not provisioned
+ *     yet. Its design-authored `parameters` ride along, since they are what
+ *     the provisioner reads.
+ *   - `org-service`: an unresolved cross-project endpoint.
+ *
+ * Every other kind carries no approval: an external dependency's values are
+ * collected while the build runs (the server ignores any it is sent), and a
+ * resolution blocker has no input to submit. The preflight lists only what is
+ * not provisioned or in flight, so a design whose resources are all ready
+ * approves nothing.
  */
-export function buildBody(selection: BuildSelection): BuildBody {
+export function approvalInputsFor(items: readonly PreflightItem[]): BuildInputItem[] {
+  return items.flatMap((item): BuildInputItem[] => {
+    const { component, dependency } = item;
+    switch (item.kind) {
+      case "platform-resource":
+        return [
+          {
+            component,
+            dependency,
+            kind: "platform-resource",
+            approved: true,
+            ...(item.parameters ? { parameters: item.parameters } : {}),
+          },
+        ];
+      case "org-service":
+        return [{ component, dependency, kind: "org-service", approved: true }];
+      default:
+        return [];
+    }
+  });
+}
+
+/**
+ * The request body that starts a build of this selection, approving what the
+ * current preflight lists. No version: the platform names the version, as an
+ * untouched name field does in the old console's Start build dialog.
+ */
+export function buildBody(selection: BuildSelection, preflight: readonly PreflightItem[]): BuildBody {
   return {
-    inputs: [],
+    inputs: approvalInputsFor(preflight),
     selection: { features: [...selection.features], productWide: [...selection.productWide] },
   };
 }
