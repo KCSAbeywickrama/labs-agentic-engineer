@@ -35,3 +35,7 @@ drift.
   file per feature. The tasks scenario of the same name plans from it with a
   v1 scope naming all three features, and the address-comments scenario
   reviews it.
+
+Both refreshed fixtures are as produced except their `prototype.tsx`, which
+carries the repository's license header, and, in expense-tracker's, one
+unused import (`Badge`) dropped for the lint.
