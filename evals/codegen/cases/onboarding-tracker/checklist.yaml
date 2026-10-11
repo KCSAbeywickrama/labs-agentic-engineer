@@ -26,42 +26,42 @@ items:
   - id: admin-creates-it-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: Click New template. Choose Department IT, Task name 'Provision laptop', Default due offset (days) -2. Click Create template.
     expect: The dialog closes and the table lists a row for department IT, task 'Provision laptop', offset -2. The empty state is gone.
     weight: 2
   - id: admin-creates-hr-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: Click New template. Choose Department HR, Task name 'Collect tax forms', Default due offset (days) 1. Click Create template.
     expect: The table lists a new row for department HR, task 'Collect tax forms', offset 1, alongside the IT row.
     weight: 1
   - id: admin-creates-facilities-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: Click New template. Choose Department Facilities, Task name 'Assign desk', Default due offset (days) 0. Click Create template.
     expect: The table lists a new row for department Facilities, task 'Assign desk', offset 0.
     weight: 1
   - id: admin-creates-extra-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: Click New template. Choose Department Facilities, Task name 'Parking pass', Default due offset (days) 3. Click Create template.
     expect: The table lists a row for department Facilities, task 'Parking pass', offset 3. The Standard tasks section count includes it.
     weight: 1
   - id: admin-edits-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: On the 'Provision laptop' row click Edit. Change Task name to 'Provision laptop and dock' and Default due offset (days) to -3. Click Save.
     expect: The dialog closes and the IT row now reads 'Provision laptop and dock' with offset -3. The row for 'Provision laptop' no longer appears.
     weight: 2
   - id: admin-removes-template
     role: Admin
     screen: Task templates
-    flow: "Story 12: manage templates"
+    flow: "Story F4.1: manage templates"
     steps: On the 'Parking pass' row (created in admin-creates-extra-template) click Remove.
     expect: The 'Parking pass' row disappears from the table. The other three templates remain.
     weight: 2
@@ -89,140 +89,140 @@ items:
   - id: hr-creates-onboarding
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 1 and 2: create onboarding"
+    flow: "Story F1.1, F1.2: create onboarding"
     steps: On the New onboarding screen enter New hire name 'Maya Fernando', Start date 2027-03-01. Click Create onboarding.
     expect: The Onboarding detail screen for Maya Fernando opens showing Start date 2027-03-01 and Status In progress. Under Tasks, the IT tab lists 'Provision laptop and dock', the HR tab lists 'Collect tax forms', the Facilities tab lists 'Assign desk' (and not 'Parking pass'), each with status Pending.
     weight: 2
   - id: hr-dashboard-lists-record
     role: HRCoordinator
     screen: Dashboard
-    flow: "Story 9: dashboard"
+    flow: "Story F3.1: dashboard"
     steps: Click the Dashboard breadcrumb.
     expect: The dashboard table lists a row for Maya Fernando with start date 2027-03-01, IT 0/1, HR 0/1, Facilities 0/1, Overdue No and status In progress. Active onboardings shows 1.
     weight: 2
   - id: hr-opens-detail-from-dashboard
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 9: dashboard"
+    flow: "Story F3.1: dashboard"
     steps: On the dashboard click the Maya Fernando row. Then click the HR tab, then the Facilities tab.
     expect: The Onboarding detail screen for Maya Fernando opens. Each tab shows that department's tasks only.
     weight: 1
   - id: hr-adds-task
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 3 and 4: add task"
+    flow: "Story F1.3, F1.4: add task"
     steps: Click Add task. Choose Department HR, Task name 'Schedule orientation', Due date 2027-03-03, Notes 'Room 4'. Click Add task in the dialog. Open the HR tab.
     expect: The dialog closes and the HR tab lists 'Schedule orientation' with due date 2027-03-03 and status Pending, next to 'Collect tax forms'.
     weight: 2
   - id: hr-adds-overdue-task
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 10: overdue flag"
+    flow: "Story F3.2: overdue flag"
     steps: Click Add task. Choose Department Facilities, Task name 'Issue badge', Due date 2026-01-01. Click Add task in the dialog. Open the Facilities tab.
     expect: "'Issue badge' is listed with due date 2026-01-01 and is visibly flagged Overdue. 'Assign desk' is not flagged Overdue."
     weight: 2
   - id: hr-edits-task
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 3 and 4: edit task"
+    flow: "Story F1.3, F1.4: edit task"
     steps: Open the HR tab. On the 'Collect tax forms' row click Edit. Change Task name to 'Collect tax and bank forms', Due date to 2027-03-05, Notes to 'Bring ID'. Click Save.
     expect: The dialog closes and the HR tab shows 'Collect tax and bank forms' with due date 2027-03-05.
     weight: 2
   - id: hr-removes-task
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 3: remove task"
+    flow: "Story F1.3: remove task"
     steps: On the HR tab click Remove on the 'Schedule orientation' row.
     expect: "'Schedule orientation' disappears from the HR tab. 'Collect tax and bank forms' remains."
     weight: 2
   - id: hr-dashboard-flags-overdue
     role: HRCoordinator
     screen: Dashboard
-    flow: "Story 10: overdue flag"
+    flow: "Story F3.2: overdue flag"
     steps: Click the Dashboard breadcrumb.
     expect: The Maya Fernando row shows Overdue Yes, and the Overdue tasks figure shows 1. The department counts now read IT 0/1, HR 0/1, Facilities 0/2.
     weight: 2
   - id: hr-cannot-complete-early
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 11: complete onboarding"
+    flow: "Story F1.5: complete onboarding"
     steps: Open the Maya Fernando row. Try to click Mark onboarding complete.
     expect: "Onboarding cannot be marked complete while tasks are still pending: the status stays In progress."
     weight: 1
   - id: it-lands-on-queue
     role: ITStaff
     screen: IT task queue
-    flow: "Story 5: IT task queue"
+    flow: "Story F2.1: IT task queue"
     steps: Look at the screen the app opened on.
     expect: The IT tasks screen is shown with an Overdue figure of 0 and a Status filter. The table lists a row for new hire Maya Fernando, task 'Provision laptop and dock', status Pending. No HR or Facilities tasks are listed.
     weight: 2
   - id: it-marks-in-progress
     role: ITStaff
     screen: IT task queue
-    flow: "Story 6: update IT task"
+    flow: "Story F2.2: update IT task"
     steps: On the 'Provision laptop and dock' row choose Mark in-progress.
     expect: The row's status changes to In progress.
     weight: 2
   - id: it-filters-by-status
     role: ITStaff
     screen: IT task queue
-    flow: "Story 5: IT task queue"
+    flow: "Story F2.1: IT task queue"
     steps: Set the Status filter to in-progress.
     expect: The table lists 'Provision laptop and dock' for Maya Fernando with status In progress.
     weight: 1
   - id: it-marks-complete
     role: ITStaff
     screen: IT task queue
-    flow: "Story 6: update IT task"
+    flow: "Story F2.2: update IT task"
     steps: Set the Status filter back to all. On the 'Provision laptop and dock' row choose Mark complete.
     expect: The row's status shows Complete.
     weight: 2
   - id: facilities-lands-on-queue
     role: FacilitiesStaff
     screen: Facilities task queue
-    flow: "Story 7: Facilities task queue"
+    flow: "Story F2.3: Facilities task queue"
     steps: Look at the screen the app opened on.
     expect: The Facilities tasks screen is shown with an Overdue figure of 1 and a Status filter. The table lists Maya Fernando's 'Assign desk' (Pending) and 'Issue badge' (flagged Overdue). No IT or HR tasks are listed.
     weight: 2
   - id: facilities-marks-in-progress
     role: FacilitiesStaff
     screen: Facilities task queue
-    flow: "Story 8: update Facilities task"
+    flow: "Story F2.4: update Facilities task"
     steps: On the 'Assign desk' row choose Mark in-progress.
     expect: The 'Assign desk' row's status changes to In progress.
     weight: 2
   - id: facilities-filters-by-status
     role: FacilitiesStaff
     screen: Facilities task queue
-    flow: "Story 7: Facilities task queue"
+    flow: "Story F2.3: Facilities task queue"
     steps: Set the Status filter to in-progress.
     expect: The table lists 'Assign desk' with status In progress.
     weight: 1
   - id: facilities-marks-complete
     role: FacilitiesStaff
     screen: Facilities task queue
-    flow: "Story 8: update Facilities task"
+    flow: "Story F2.4: update Facilities task"
     steps: Set the Status filter back to all. On 'Assign desk' choose Mark complete, then on 'Issue badge' choose Mark complete.
     expect: Both rows show Complete. The 'Issue badge' row is no longer flagged Overdue and the Overdue figure shows 0.
     weight: 2
   - id: hr-completes-own-task
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 11: complete onboarding"
+    flow: "Story F1.5: complete onboarding"
     steps: Open the Maya Fernando row from the dashboard. On the HR tab click Edit on 'Collect tax and bank forms', set Status to complete, click Save.
     expect: The HR tab shows 'Collect tax and bank forms' with status Complete.
     weight: 1
   - id: hr-marks-onboarding-complete
     role: HRCoordinator
     screen: Onboarding detail
-    flow: "Story 11: complete onboarding"
+    flow: "Story F1.5: complete onboarding"
     steps: With every task for Maya Fernando now complete, click Mark onboarding complete.
     expect: The Status in the record details reads Complete.
     weight: 2
   - id: hr-dashboard-shows-complete
     role: HRCoordinator
     screen: Dashboard
-    flow: "Story 9: dashboard"
+    flow: "Story F3.1: dashboard"
     steps: Click the Dashboard breadcrumb.
     expect: The Maya Fernando row shows IT 1/1, HR 1/1, Facilities 2/2, Overdue No and status Complete. Active onboardings shows 0.
     weight: 1

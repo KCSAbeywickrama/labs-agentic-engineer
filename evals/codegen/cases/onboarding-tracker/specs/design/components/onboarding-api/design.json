@@ -12,6 +12,6 @@
     { "kind": "platform-resource", "name": "onboarding-auth", "resourceType": "thunder-app" }
   ],
   "description": "Owns onboarding records, their tasks, and department task templates. Exposes CRUD for onboarding records, department-scoped task queues (IT, HR, Facilities), and template management for Admins. Computes an 'overdue' status on each task from its due date rather than storing it. Does not send email or push notifications, and does not store files or documents.",
-  "stories": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  "stories": ["F1.1", "F1.2", "F1.3", "F1.4", "F1.5", "F2.1", "F2.2", "F2.3", "F2.4", "F3.1", "F3.2", "F4.1"],
   "skillsPinned": ["openapi-conventions", "ballerina", "thunder-authentication", "api-management"]
 }

@@ -612,18 +612,14 @@ function Account() {
 }
 
 function Settings() {
-  const navigate = useNav();
-  const role = useRole();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go(homeScreen[role] ?? "screen.dashboard")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.compact-view" label="Use compact task lists" type="switch" defaultValue="off" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="Onboarding Tracker sends no email or notifications: overdue tasks are flagged in the app."
+      />
     </Shell>
   );
 }
