@@ -133,12 +133,22 @@ func TestCompleteDependencies_ProviderDocumentPathStaysInItsDirectory(t *testing
 	}
 }
 
-// The registry side gets the same guard: a record whose contract path's file
-// name is a traversal is not rendered.
-func TestRenderRegistryCopy_RefusesAnEscapingDocumentPath(t *testing.T) {
+// The registry side needs no such guard: the registry path never names the
+// landed file, which is always the canonical name for the contract's type,
+// so a traversal in the record stays on the provenance and reaches no path.
+func TestRenderRegistryCopy_LandsCanonicallyWhateverTheRegistryPath(t *testing.T) {
 	rec := registeredCurrency()
 	rec.Resource.Contract.Path = "currency-service/.."
-	if _, _, err := renderRegistryCopy(DependencyDefinition{Name: "currency-service"}, *rec, time.Now()); err == nil {
-		t.Fatal("want an error for a document path that is not a file in the dependency directory")
+	completed, files, err := renderRegistryCopy(DependencyDefinition{Name: "currency-service"}, *rec, time.Now())
+	if err != nil {
+		t.Fatalf("a registry path the project never uses must not refuse the copy: %v", err)
+	}
+	docPath := DesignDir + "/" + dependencyDirPrefix + "currency-service/openapi.yaml"
+	if len(files) != 1 || files[docPath] != rec.Document {
+		t.Fatalf("the document must land at %s only: %v", docPath, files)
+	}
+	def, err := parseDependencyDefinitionJSON("currency-service", completed)
+	if err != nil || def.Resource.Contract == nil || def.Resource.Contract.Path != "openapi.yaml" || def.Provenance == nil || def.Provenance.Registry != "currency-service/.." {
+		t.Fatalf("contract must read openapi.yaml with the registry path kept on the provenance: %+v %+v %v", def.Resource.Contract, def.Provenance, err)
 	}
 }

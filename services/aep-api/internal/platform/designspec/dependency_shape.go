@@ -86,6 +86,19 @@ var (
 	retiredDefinitionKeys = map[string]bool{"source": true, "provider": true, "style": true, "contract": true, "sdk": true, "config": true, "assumed": true, "candidates": true, "description": true}
 )
 
+// CanonicalContractFile is the file name a project holds a contract document
+// under, by type: the first of the names validateDependencyDesign accepts
+// (`openapi.yaml`, `schema.graphql`, `sdk.json`). "" for a type a project
+// cannot hold as a contract. The registry copy lands a document under this
+// name whatever the organization's record called it, since the project's
+// rule is the project's.
+func CanonicalContractFile(contractType string) string {
+	if names := contractFilesByType[contractType]; len(names) > 0 {
+		return names[0]
+	}
+	return ""
+}
+
 func validateDependencyDesign(content, dirName string) *shapeProblem {
 	var parsed any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {

@@ -260,8 +260,11 @@ var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 // `.cell` is the project-level cell-diagram DSL (design.cell) that drives the
 // live architecture diagram; `.tsx` is a web-application's prototype source (prototype.tsx, beside
 // its prototype.json), which the save gate checks, the build gate requires and
-// a revision turn reads back.
-var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".tsx"}
+// a revision turn reads back; `.graphql`/`.graphqls` is a dependency's GraphQL
+// contract (dependencies/<name>/schema.graphql), which the dependency gate
+// accepts and the read-time status counts only when the file is in the
+// bundle — left out, every GraphQL dependency read needs-contract forever.
+var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".tsx", ".graphql", ".graphqls"}
 
 func hasAllowedDesignExt(name string) bool { return hasExt(name, allowedDesignExts) }
 
