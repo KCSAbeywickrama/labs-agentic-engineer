@@ -35,6 +35,10 @@ set -euo pipefail
 
 echo "   OpenBao: aep-api write-only policy and Kubernetes-auth role"
 
+# helm --wait does not cover a first start: the pod can still be pulling its
+# image, and exec then fails with "container not found". Wait for Ready first.
+kubectl -n openbao wait --for=condition=Ready pod/openbao-0 --timeout="${OPENBAO_READY_TIMEOUT:-300s}"
+
 printf '%s' "${OPENBAO_ROOT_TOKEN:-root}" | kubectl -n openbao exec -i openbao-0 -- bao login -no-print -
 
 # The upstream values enable auth/kubernetes from the pod's start-up script; a
