@@ -72,6 +72,13 @@ Write a new file with ONE `addFile` of the whole file. Revise an existing one
 with `editFile` edits: the file is already in front of you, and an edit costs
 what it changes. Never write a partial file to finish later.
 
+Each write of `prototype.tsx` is type-checked alone. A change to a record type
+and its uses (a field that you add, rename or remove) cannot go in as one edit
+per line: the first edit leaves the other uses wrong, and the check refuses
+it (`TYPE_ERROR`, one finding for each wrong line). Write such a change, or
+any other change to many lines, in one write: `removeFile`, then ONE `addFile`
+of the whole corrected file, with each id as it was.
+
 This step writes only these two files. A screen can need a record, a field or
 a role that the data model or `security.json` does not have. Then change that
 file first (it comes earlier in the design), and write the screen after it.

@@ -392,13 +392,8 @@ it. When no comment is left to act on, say so and stop.
 5. **Change every place.** A comment that renames a field or a term changes
    each line that has the old name. Before you edit a file, find each of
    those lines in it, and change all of them. A new field goes in each
-   artifact that the change needs. The prototype gate type-checks
-   `prototype.tsx` on each write, so one edit of a rename leaves the other
-   uses stale and the gate refuses it (`TYPE_ERROR`, one finding for each
-   stale line). For a rename, or for any change to many lines of
-   `prototype.tsx`, write the whole corrected file in one write: remove it,
-   then add it again. When a write gets a `TYPE_ERROR`, fix every line that
-   the findings name in the next write.
+   artifact that the change needs. In `prototype.tsx`, write a rename in
+   one write, as the `prototype` skill says.
 6. **Answer each comment in `review.json`.** It is the last file that you
    write in the turn, in one write: write it only when every artifact write
    has succeeded (when you rewrite the prototype, after its `addFile`),
