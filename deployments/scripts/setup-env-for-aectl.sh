@@ -115,6 +115,36 @@
 #                           other way and must not silently pick this one up.
 
 set -euo pipefail
+set -o errtrace
+
+# CURRENT_STEP is the last banner printed, so a failure names the phase it was
+# in. Every phase is idempotent (helm upgrade --install, kubectl apply), so the
+# recovery is to re-run the same command.
+#
+# The ERR trap only records the failing command; the EXIT trap reports it, and
+# only when the script really exits non-zero. errtrace makes command
+# substitutions inherit ERR, so a tolerated miss such as
+# `[ "$(kubectl get cm ...)" != ... ]` fires it in a subshell; printing there
+# would announce a failure while setup carries on.
+CURRENT_STEP="(start)"
+FAILED_CMD=""
+FAILED_LINE=""
+step() { CURRENT_STEP="$1"; echo "$1"; }
+on_error() { FAILED_CMD="$BASH_COMMAND"; FAILED_LINE="${BASH_LINENO[0]}"; }
+on_exit() {
+  local code="${1:-$?}"
+  [ "$code" -eq 0 ] && return
+  {
+    echo ""
+    echo "❌ setup-env-for-aectl.sh failed (exit ${code})"
+    echo "   Phase:   ${CURRENT_STEP}"
+    [ -n "$FAILED_CMD" ] && echo "   Command: ${FAILED_CMD}"
+    [ -n "$FAILED_LINE" ] && echo "   Line:    ${BASH_SOURCE[0]}:${FAILED_LINE}"
+    echo "   Recover: re-run make dev-env (each phase is idempotent)"
+  } >&2
+}
+trap on_error ERR
+trap on_exit EXIT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================================
@@ -283,7 +313,7 @@ docker info >/dev/null 2>&1 || { echo "❌ Docker is not running"; exit 1; }
 # Step 1: Create the cluster (official page, Step 1; K3D_FIX_DNS=0 on Colima)
 # ============================================================================
 echo ""
-echo "1️⃣  Creating the k3d cluster"
+step "1️⃣  Creating the k3d cluster"
 if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
     # The one deviation in this step: on Colima, k3d's DNS fix points the node's
     # resolver at the VM gateway, whose DNAT to Docker's embedded DNS never
@@ -327,7 +357,7 @@ kubectl config use-context "${CLUSTER_CONTEXT}"
 # Step 2: Prerequisites (official page, Step 2 — unchanged)
 # ============================================================================
 echo ""
-echo "2️⃣  Prerequisites"
+step "2️⃣  Prerequisites"
 
 # COLD_PULL_TIMEOUT budgets the --wait installs below, which on a freshly
 # created cluster are waiting on image pulls into an empty containerd rather
@@ -339,11 +369,11 @@ echo "2️⃣  Prerequisites"
 # and a spuriously aborted one on a slow one.
 COLD_PULL_TIMEOUT="${COLD_PULL_TIMEOUT:-20m}"
 
-echo "   Gateway API CRDs"
+step "   Gateway API CRDs"
 kubectl apply --server-side \
   -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml
 
-echo "   cert-manager"
+step "   cert-manager"
 # config.enableGatewayAPI is what lets cert-manager solve an HTTP-01 challenge
 # on this cluster at all. It answers a challenge by starting a solver pod and
 # routing the challenge path to it — as an Ingress where an ingress controller
@@ -372,24 +402,24 @@ helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager \
   --set crds.enabled=true ${CERT_MANAGER_SET[@]+"${CERT_MANAGER_SET[@]}"} \
   --wait --timeout "${COLD_PULL_TIMEOUT}"
 
-echo "   External Secrets Operator"
+step "   External Secrets Operator"
 helm upgrade --install external-secrets oci://ghcr.io/external-secrets/charts/external-secrets \
   --namespace external-secrets --create-namespace --version 2.0.1 \
   --set installCRDs=true --wait --timeout "${COLD_PULL_TIMEOUT}"
 
-echo "   kgateway"
+step "   kgateway"
 helm upgrade --install kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds \
   --create-namespace --namespace openchoreo-control-plane --version v2.3.1
 helm upgrade --install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway \
   --namespace openchoreo-control-plane --create-namespace --version v2.3.1
 
-echo "   OpenBao"
+step "   OpenBao"
 helm upgrade --install openbao oci://ghcr.io/openbao/charts/openbao \
   --namespace openbao --create-namespace --version 0.25.6 \
   --values "${RAW}/install/k3d/common/values-openbao.yaml" \
   --wait --timeout "${COLD_PULL_TIMEOUT}"
 
-echo "   ClusterSecretStore"
+step "   ClusterSecretStore"
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ServiceAccount
@@ -418,9 +448,10 @@ EOF
 
 # aep-api's write-only policy and Kubernetes-auth role (no static token). Its
 # own script because `make dev-update` and the OpenBao wipe recovery re-run it.
+CURRENT_STEP="   OpenBao: aep-api policy and role"
 bash "${SCRIPT_DIR}/openbao-aep-api-auth.sh"
 
-echo "   CoreDNS rewrite"
+step "   CoreDNS rewrite"
 # The guide's own coredns-custom.yaml, with the suffix taken from AE_DOMAIN.
 # Applied from here rather than fetched because upstream's copy hardcodes
 # "openchoreo.localhost", which is the one thing that moves. For
@@ -488,7 +519,7 @@ fi
 # deployments/scripts/setup-environment-gateway.sh once that environment's own
 # Thunder exists, which is out of scope for this vanilla-OC script.
 echo ""
-echo "   WSO2 API Platform operator"
+step "   WSO2 API Platform operator"
 API_PLATFORM_OPERATOR_VERSION="0.11.0"
 API_PLATFORM_GATEWAY_CHART_VERSION="1.2.2"
 API_PLATFORM_GATEWAY_IMAGE_VERSION="1.2.1"
@@ -496,7 +527,8 @@ API_PLATFORM_GATEWAY_IMAGE_VERSION="1.2.1"
 API_PLATFORM_VALUES="$(mktemp)"
 BOOTSTRAP_DIR="$(mktemp -d)"
 UPSTREAM_VALUES_DIR="$(mktemp -d)"
-trap 'rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
+# Chained onto on_exit, not replacing it: a later `trap ... EXIT` would drop the failure report.
+trap 'code=$?; rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUES"; on_exit "$code"' EXIT
 
 # oc_values fetches one of the guide's own values files and re-domains it,
 # printing the path to the local copy. The guide hardcodes
@@ -690,9 +722,9 @@ echo "✅ WSO2 API Platform operator at gateway-operator-${API_PLATFORM_OPERATOR
 # see the header comment for why.
 # ============================================================================
 echo ""
-echo "3️⃣  Control Plane"
+step "3️⃣  Control Plane"
 
-echo "   backstage-secrets"
+step "   backstage-secrets"
 kubectl apply -f - <<EOF
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -723,7 +755,7 @@ EOF
 
 # ── 3b. ThunderID 1.0.0 (REPLACES the official page's asgardeo/thunder:0.28.0 step) ──
 echo ""
-echo "3️⃣.2  Installing ThunderID ${THUNDER_VERSION} (replaces the official 0.28.0 step)"
+step "3️⃣.2  Installing ThunderID ${THUNDER_VERSION} (replaces the official 0.28.0 step)"
 
 # Users + groups. `admin` is left to the chart's OWN built-in bootstrap
 # document (backend/cmd/server/bootstrap/01-default-resources.yaml, id
@@ -1404,7 +1436,7 @@ echo "✅ ThunderID ready at ${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT} (${THUN
 # so it is applied there, not here. See the "openchoreo-control-plane" section.
 
 echo ""
-echo "   Control Plane"
+step "   Control Plane"
 # WITH_OC_PORTAL=0 leaves OpenChoreo's Backstage portal out of the control
 # plane. Nothing in AEP reads it — aep-api talks to openchoreo-api, and the
 # platform ships its own console — so it is one more deployment to schedule
@@ -1608,7 +1640,7 @@ fi
 # Step 4: Default resources (official page, Step 4 — unchanged)
 # ============================================================================
 echo ""
-echo "4️⃣  Default resources"
+step "4️⃣  Default resources"
 kubectl label namespace default openchoreo.dev/control-plane=true --overwrite
 kubectl apply -f "${RAW}/samples/getting-started/all.yaml"
 
@@ -1616,7 +1648,7 @@ kubectl apply -f "${RAW}/samples/getting-started/all.yaml"
 # Step 5: Data Plane (official page, Step 5 — unchanged)
 # ============================================================================
 echo ""
-echo "5️⃣  Data Plane"
+step "5️⃣  Data Plane"
 kubectl create namespace openchoreo-data-plane --dry-run=client -o yaml | kubectl apply -f -
 kubectl wait -n openchoreo-control-plane --for=condition=Ready certificate/cluster-gateway-ca --timeout=120s
 CA_CRT=$(kubectl get secret cluster-gateway-ca -n openchoreo-control-plane -o jsonpath='{.data.ca\.crt}' | base64 -d)

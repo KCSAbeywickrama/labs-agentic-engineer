@@ -51,7 +51,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui eval-codegen typecheck license license-check check-image-names tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-images ae-studio-refs-check dev-update dev-runner ae-studio-check obs-park obs-unpark obs-status bal-library-tool e2e-walk
+.PHONY: install gen build dev test lint eval-ui eval-codegen typecheck license license-check check-image-names tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-images ae-studio-refs-check dev-update dev-runner dev-seed ae-studio-check obs-park obs-unpark obs-status bal-library-tool e2e-walk
 
 install:
 	$(PNPM) install
@@ -308,6 +308,11 @@ dev-env:
 	@if [ "$${WITH_OBSERVABILITY:-1}" = "1" ] && [ "$${WITH_SRE:-1}" != "1" ]; then \
 		bash deployments/scripts/park-observability.sh down; \
 	fi
+	@if [ "$${SKIP_DEV_SEED:-0}" = "1" ]; then \
+		echo "⏭️  Skipping dev-seed (SKIP_DEV_SEED=1)"; \
+	else \
+		$(MAKE) dev-seed || echo "⚠️  dev-seed failed; connect GitHub and the model in the console welcome step, or re-run: make dev-seed"; \
+	fi
 
 # Builds the six platform service images from this checkout and loads them
 # into the k3d cluster, tagged dev-local (skaffold.yaml — build-only). Shared
@@ -450,6 +455,13 @@ dev-runner:
 	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reset-then-reuse-values \
 		--set codingAgentRunner.image=aep-runner:dev \
 		--set codingAgentRunner.opencodeImage=aep-runner-opencode:dev
+
+# Local dev only: connects the org's GitHub PAT, Anthropic API key and Claude
+# Code OAuth token from deployments/.env through the console's own sign-in and
+# PATCH /api/v1/config (deployments/scripts/seed-dev.sh). Idempotent; SEED_FORCE=1
+# overwrites. Keys that are unset in .env are skipped.
+dev-seed:
+	AE_DOMAIN=$(AE_DOMAIN) bash deployments/scripts/seed-dev.sh
 
 # Read-only check of the live ae-studio Resource, pod and public hosts
 # (deployments/scripts/ae-studio-check.sh). CP_CONTEXT/DP_CONTEXT are separate
