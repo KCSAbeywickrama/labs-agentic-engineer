@@ -182,6 +182,14 @@ func answerRPC(ctx context.Context, req mcpsock.JSONRPCRequest, call func(contex
 // contract) to the outbox and answers 202; delivery to aep-api is the
 // outbox's (usage.Sender).
 func (s mcpSocketServer) PostTurnUsage(_ context.Context, req mcpsock.PostTurnUsageRequestObject) (mcpsock.PostTurnUsageResponseObject, error) {
+	// aep-api refuses a whole outbox batch for a focus without the area it
+	// narrows (storableTurnRecord), so the one record is refused here.
+	if req.Body.Focus != nil && req.Body.Area == "" {
+		return mcpsock.PostTurnUsage400ApplicationProblemPlusJSONResponse{ProblemApplicationProblemPlusJSONResponse: mcpsock.ProblemApplicationProblemPlusJSONResponse{
+			Type: "about:blank", Title: http.StatusText(http.StatusBadRequest), Status: http.StatusBadRequest,
+			Code: mcpSocketInvalidCode, Detail: "a focus is taken only with an area",
+		}}, nil
+	}
 	s.usage.Enqueue(turnRecord(*req.Body))
 	return mcpsock.PostTurnUsage202Response{}, nil
 }

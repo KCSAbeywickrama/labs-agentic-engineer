@@ -495,8 +495,9 @@ components:
   responses:
     BadChat:
       description: 'An area outside the enum, or a focus without an area, of a
-        kind the area does not declare, or without a positive integer id
-        (problem code: invalid_chat)'
+        kind the area does not declare, or without a positive integer id; a
+        retired view or issueNumber, or a focus key other than focus[kind] and
+        focus[id] (problem code: invalid_chat)'
       content:
         application/problem+json:
           schema:

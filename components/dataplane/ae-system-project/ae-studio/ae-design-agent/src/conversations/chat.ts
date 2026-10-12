@@ -70,19 +70,30 @@ export class ChatError extends Error {
 
 const FOCUS_ID_RE = /^[1-9][0-9]{0,8}$/;
 
+/** The query keys a chat was once named by (`?view=issues&issueNumber=7`), before areas and focuses. */
+const RETIRED_KEYS = ["view", "issueNumber"] as const;
+
+/** The focus's own keys; any other key starting `focus` is a malformed one. */
+const FOCUS_KEYS: ReadonlySet<string> = new Set(["focus[kind]", "focus[id]"]);
+
 /**
  * The chat a request's query names: no `area` is the main chat; `area` alone
  * that area's own chat; `area` with `focus[kind]` and `focus[id]` (the
  * contract's deepObject focus) the area narrowed to that entity. Refused
- * (`ChatError`): an area outside `profiles`, a focus without an area, a focus
- * of a kind the area's profile does not declare, and an id that is not a
- * positive integer.
+ * (`ChatError`): a retired `view` or `issueNumber` (a console tab older than
+ * this agent, told to reload), any other key starting `focus`, an area
+ * outside `profiles`, a focus without an area, a focus of a kind the area's
+ * profile does not declare, and an id that is not a positive integer.
  */
 export function chatFromQuery(query: Record<string, unknown>, profiles: Readonly<Record<AreaId, AreaProfile>> = AREAS): Chat {
+  for (const key of RETIRED_KEYS) {
+    if (Object.hasOwn(query, key)) throw new ChatError(`${key} no longer names a chat: this page is out of date, reload it`);
+  }
+  const stray = Object.keys(query).find((key) => key.startsWith("focus") && !FOCUS_KEYS.has(key));
+  if (stray !== undefined) throw new ChatError(`${JSON.stringify(stray)}: a focus is sent as focus[kind] and focus[id]`);
   const { area } = query;
   const kind = query["focus[kind]"];
   const id = query["focus[id]"];
-  if (query.focus !== undefined) throw new ChatError("focus is sent as focus[kind] and focus[id]");
   const focused = kind !== undefined || id !== undefined;
   if (area === undefined) {
     if (focused) throw new ChatError("a focus is taken only with an area");

@@ -133,8 +133,8 @@ handed-off request arrives as; a new focus kind is one more `FocusKind` there). 
 `hand_off({area, request})` (`src/agents/main/tools/hand-off.ts`), is built from the
 profiles with a `handOff`: its `area` enum is their ids and its description their
 sentences, so a hand-off target is a sentence in its profile, never code. The schema
-refuses a request shaped as an answer; the console sends the request on as the area's
-command (`/issue <request>`), never as an answer, and `handOffStop` ends the turn on an
+refuses a request shaped as an answer; the console's Open sends `AREAS[area].command`
+and the request (`/issue <request>` for Issues), never as an answer, and `handOffStop` ends the turn on an
 accepted call. Only the Issues area receives a hand-off and only its chat leaves the main chat a branch
 note; an area's sub-agent works on no spec, so its turn is a plain chat turn (a typed
 `/design` is words for it, not a flow), it joins no Room, takes no spec scope (a `400`),

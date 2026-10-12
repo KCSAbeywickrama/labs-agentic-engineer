@@ -27,7 +27,7 @@ import type { ProjectCard } from "../../shell/scope";
 import { useSpecModel } from "../../spec/useSpecWorkspace";
 import { interviewWriteUp, openQuestionId, userLineText, withFiledLast, type ChatItem, type NoteAction } from "../chatLog";
 import { chatIssue, MAIN_CHAT, type ChatRef } from "../chatRef";
-import { useOpenIssueChat } from "../useOpenIssuesChat";
+import { useOpenIssueChat } from "../useOpenAreaChat";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
 import { ActivityLine } from "./ActivityLine";
 import { HandOffCard } from "./HandOffCard";

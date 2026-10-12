@@ -23,7 +23,7 @@ import { useChatPanel } from "../../shell/chatPanel";
 import type { HandOffItem } from "../chatLog";
 import type { ChatRef } from "../chatRef";
 import { areaRequest, continueInArea, getHandOff, setHandOff, type HandOffState } from "../handOffState";
-import { useOpenAreaChat } from "../useOpenIssuesChat";
+import { useOpenAreaChat } from "../useOpenAreaChat";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
 
 /** How much of the request the card shows before Open <area> is chosen. */

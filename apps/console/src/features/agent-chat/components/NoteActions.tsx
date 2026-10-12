@@ -20,7 +20,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Box, Button } from "@wso2/oxygen-ui";
 import { useSpecModel } from "../../spec/useSpecWorkspace";
 import type { NoteAction } from "../chatLog";
-import { useOpenIssuesChat } from "../useOpenIssuesChat";
+import { useOpenIssuesChat } from "../useOpenAreaChat";
 import { useStartInterview } from "../useStartInterview";
 
 /**

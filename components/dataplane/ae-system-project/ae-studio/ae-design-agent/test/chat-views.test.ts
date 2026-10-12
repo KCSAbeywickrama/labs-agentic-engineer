@@ -108,8 +108,26 @@ test("chatFromQuery refuses an unknown area, a focus without an area, and a focu
     { area: "issues", "focus[kind]": "issue", "focus[id]": "07" },
     { area: "issues", "focus[kind]": "issue", "focus[id]": ["3", "4"] },
     { area: "issues", focus: "issue" },
+    { view: "issues" },
+    { view: "main" },
+    { area: "issues", view: "issues" },
+    { issueNumber: "7" },
+    { view: "issues", issueNumber: "7" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "7", issueNumber: "7" },
+    { area: "issues", "focus[kind]": "issue", "focus[id][]": "1" },
+    { "focus[id][]": "1" },
+    { "focus[ID]": "7" },
+    { area: "issues", "focus[Kind]": "issue", "focus[id]": "7" },
+    { focusKind: "issue" },
+    { "focus.kind": "issue" },
   ];
   for (const query of refused) assert.throws(() => chatFromQuery(query), ChatError, JSON.stringify(query));
+});
+
+test("chatFromQuery: a retired view or issueNumber is refused with a hint to reload the page", () => {
+  for (const query of [{ view: "issues" }, { issueNumber: "7" }]) {
+    assert.throws(() => chatFromQuery(query), (err: unknown) => err instanceof ChatError && /reload/i.test(err.message), JSON.stringify(query));
+  }
 });
 
 test("chatFromQuery takes a focus only with an area whose profile declares that kind", () => {
@@ -214,13 +232,24 @@ test("v1: an open issue's chat has a thread; a closed one is 409 issue_closed an
     assert.deepEqual(await json(refused), { code: "conversation_rotated" }, "the closed issue's thread is gone");
 
     assert.equal((await call(edge, `/v1/projects/${PROJECT}/conversations/current?area=issues&focus[kind]=issue&focus[id]=8`, tok)).status, 404);
-    for (const query of ["area=issues&focus[kind]=issue", "focus[kind]=issue&focus[id]=7", "area=issues&focus[kind]=issue&focus[id]=0", "area=issues&focus[kind]=board&focus[id]=7"]) {
+    for (const query of [
+      "area=issues&focus[kind]=issue",
+      "focus[kind]=issue&focus[id]=7",
+      "area=issues&focus[kind]=issue&focus[id]=0",
+      "area=issues&focus[kind]=board&focus[id]=7",
+      "view=issues",
+      "issueNumber=7",
+      "view=issues&issueNumber=7",
+      "area=issues&focus[kind]=issue&focus[id][]=1",
+      "focus[ID]=7",
+    ]) {
       const bad = await call(edge, `/v1/projects/${PROJECT}/conversations/current?${query}`, tok);
       assert.equal(bad.status, 400, query);
       assert.equal((await json<{ code: string }>(bad)).code, "invalid_chat", query);
     }
     assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?area=boards`, tok)).status, 400);
     assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?focus[kind]=issue&focus[id]=7`, tok)).status, 400);
+    assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?view=issues`, tok)).status, 400);
   }));
 
 test("Turn socket: removing an issue's thread is 204, and waits for a turn running on it", () => {

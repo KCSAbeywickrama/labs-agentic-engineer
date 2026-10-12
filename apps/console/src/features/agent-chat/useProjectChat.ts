@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
+import type { AreaId } from "@aep/agent-stream";
 import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { isDesignAgentReady, subscribeDesignAgentReady } from "../../api/aeStudio";
 import { designKey } from "../design/api/designModel";
@@ -132,11 +133,14 @@ export function forgetIssueChat(projectName: string, issueNumber: number): void 
   issueStores.get(issueNumber)?.forget(projectName);
 }
 
-/** The store of a project's chat: the main chat's, the Issues area's, or one issue's. */
+/** Each area's own chat store: an area without one is a compile error, never the main chat's. */
+const AREA_STORES = { issues: issuesChatStore } as const satisfies Record<AreaId, ChatStore>;
+
+/** The store of a project's chat: the main chat's, an area's, or one issue's. */
 export function chatStoreFor(chat: ChatRef): ChatStore {
   const issue = chatIssue(chat);
   if (issue !== undefined) return issueChatStore(issue);
-  return chat.area === "issues" ? issuesChatStore : chatStore;
+  return chat.area === undefined ? chatStore : AREA_STORES[chat.area];
 }
 
 /**

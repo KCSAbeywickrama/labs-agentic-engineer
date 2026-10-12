@@ -29,7 +29,7 @@ import type { ChatItem } from "../chatLog";
 import { turnScopeFor, type TurnScope } from "../turnScope";
 import { chatFor, chatIssue, chatKey, ISSUES_CHAT, MAIN_CHAT, sameChat, type ChatRef } from "../chatRef";
 import { useIssueThreadRemovedNote, useIssueThreadState, useOpenIssueThreads } from "../useIssueThread";
-import { useOpenIssueChat, useOpenIssuesChat } from "../useOpenIssuesChat";
+import { useOpenIssueChat, useOpenIssuesChat } from "../useOpenAreaChat";
 import { canSend, chatStoreFor, useProjectChat } from "../useProjectChat";
 import { Thread } from "./Thread";
 import { ThreadsMenu, type IssuesThread } from "./ThreadsMenu";

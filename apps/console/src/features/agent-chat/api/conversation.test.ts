@@ -84,6 +84,16 @@ describe("fetchCurrentConversationId", () => {
     );
     await expect(fetchCurrentConversationId("shop", issueChat(7))).rejects.toBeInstanceOf(IssueClosedError);
   });
+
+  it("carries the pod's words for a chat it no longer knows (400 invalid_chat), so a tab older than the pod is told to reload", async () => {
+    const detail = "view no longer names a chat: this page is out of date, reload it";
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ type: "about:blank", title: "Bad Request", status: 400, code: "invalid_chat", detail }, { status: 400 }),
+      ),
+    );
+    await expect(fetchCurrentConversationId("shop", ISSUES_CHAT)).rejects.toThrow(detail);
+  });
 });
 
 describe("fetchConversationMessages", () => {

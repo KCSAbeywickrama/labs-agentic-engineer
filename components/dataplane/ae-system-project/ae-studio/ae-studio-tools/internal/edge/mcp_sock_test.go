@@ -659,6 +659,9 @@ func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 		"a retired view":         strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","view":"issue"`, 1),
 		"a focus of no kind":     strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"board","id":7}`, 1),
 		"a focus id of 0":        strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"issue","id":0}`, 1),
+		// aep-api refuses a whole batch for a focus without its area, so the
+		// socket refuses the one record.
+		"a focus without an area": strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","focus":{"kind":"issue","id":7}`, 1),
 	} {
 		if c, out := s.post("/turn-usage", body); c != http.StatusBadRequest || !strings.Contains(out, "invalid_request") {
 			t.Fatalf("%s: POST /turn-usage = %d %s", name, c, out)
