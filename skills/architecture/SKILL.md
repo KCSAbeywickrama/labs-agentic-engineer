@@ -260,6 +260,17 @@ role, omit the entry and list the gap under **Needs your input** rather than
 coining a name: a `resourceType` that was not in this turn's
 `list_platform_resource_types` result fails Build.
 
+**Definitions already on disk.** A project recreated from existing code
+arrives with its upstreams defined before any design runs:
+`specs/design/dependencies/<name>/dependency.json` carrying
+`resource.provider`, with its contract file beside it. Such a definition is
+settled before this turn: reference it by its name, carry it into
+`declare_plan` as reused, and never rewrite, rename or remove it, nor coin a
+parallel `<capability>-service` for the same system. The "taken from this
+turn's `list_*` result" rule governs the externals you create this turn, not
+those on disk. A definition with no provider is an open need like any other
+and goes through the steps below.
+
 ```json
 "dependencies": [
   { "kind": "component", "name": "expense-api" },
@@ -374,7 +385,9 @@ writes it, never you).
 
 Work each one in order:
 
-1. **Reuse first.** Call `list_external_resources`. It lists the resources
+1. **Reuse first.** A definition already on disk with a provider is settled
+   (**Definitions already on disk** above): reference it and skip these
+   steps. Otherwise call `list_external_resources`. It lists the resources
    the ORGANIZATION registered — never one another project defined for
    itself. When a row fits, write the stub and nothing more:
    `{ "name": "<its exact name>", "resource": { "ref": "<its exact name>", "name": "<its exact name>" } }`.

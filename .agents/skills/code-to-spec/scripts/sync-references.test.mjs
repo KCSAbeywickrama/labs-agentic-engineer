@@ -12,7 +12,7 @@ const SYNC = "node .agents/skills/code-to-spec/scripts/sync-references.mjs";
 
 test("the bundled references are the platform contracts, verbatim", () => {
   const rendered = render();
-  assert.equal(rendered.length, 2);
+  assert.equal(rendered.length, 3);
   for (const { path, content } of rendered) {
     const committed = readFileSync(path, "utf8");
     assert.equal(

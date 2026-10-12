@@ -51,6 +51,24 @@ var prototypeFilePatterns = []string{
 	"specs/design/components/*/prototype.tsx",
 }
 
+// An external dependency's definition and the contract document beside it,
+// directly under specs/design/dependencies/<name>/. A project recreated from
+// existing code arrives with its upstreams defined before any design runs
+// (code-to-spec), and the design must see them to reference rather than
+// reinvent them; a later turn must read back a registry copy, whose contract
+// file is named after the organization's record, not the gate's fixed names.
+// So the contract is admitted by extension within that one directory level,
+// never crossing into a nested path. Room turns already see every file under
+// specs/; this keeps the snapshot (playground, evals, the Go fold) in step.
+var dependencyDefinitionPatterns = []string{
+	"specs/design/dependencies/*/dependency.json",
+	"specs/design/dependencies/*/*.graphql",
+	"specs/design/dependencies/*/*.graphqls",
+	"specs/design/dependencies/*/*.yaml",
+	"specs/design/dependencies/*/*.yml",
+	"specs/design/dependencies/*/*.json",
+}
+
 func isAdmittedSpecPath(p string) bool {
 	if ok, _ := path.Match(producedSpecPattern, p); ok {
 		return true
@@ -59,6 +77,11 @@ func isAdmittedSpecPath(p string) bool {
 		return true
 	}
 	for _, pattern := range prototypeFilePatterns {
+		if ok, _ := path.Match(pattern, p); ok {
+			return true
+		}
+	}
+	for _, pattern := range dependencyDefinitionPatterns {
 		if ok, _ := path.Match(pattern, p); ok {
 			return true
 		}

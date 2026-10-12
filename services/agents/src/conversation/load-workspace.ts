@@ -130,8 +130,25 @@ const CONSUMED_SPEC_RE = /^specs\/design\/components\/[^/]*\/dependencies\/[^/]*
  */
 const PROTOTYPE_FILE_RE = /^specs\/design\/components\/[^/]*\/prototype\.(?:json|tsx)$/;
 
+/**
+ * An external dependency's definition and the contract document beside it,
+ * directly under `specs/design/dependencies/<name>/`. A project recreated from
+ * existing code brings its upstreams before any design runs, and the design
+ * must see them to reference rather than reinvent them; a later turn reads
+ * back a registry copy, whose contract file is named after the organization's
+ * record rather than the gate's fixed names, so the contract is admitted by
+ * extension within that one level, never a nested path. Mirrors aep-api's
+ * `dependencyDefinitionPatterns`.
+ */
+const DEPENDENCY_DEFINITION_RE = /^specs\/design\/dependencies\/[^/]*\/[^/]*\.(?:graphql|graphqls|yaml|yml|json)$/;
+
 function isAdmittedSpecPath(path: string): boolean {
-  return PRODUCED_SPEC_RE.test(path) || CONSUMED_SPEC_RE.test(path) || PROTOTYPE_FILE_RE.test(path);
+  return (
+    PRODUCED_SPEC_RE.test(path) ||
+    CONSUMED_SPEC_RE.test(path) ||
+    PROTOTYPE_FILE_RE.test(path) ||
+    DEPENDENCY_DEFINITION_RE.test(path)
+  );
 }
 
 /**
@@ -160,7 +177,8 @@ const SECURITY_DESIGN_PATH = "specs/design/security.json";
  * keep agent-authored sources (`*.md`, `*.dsl`, `*.cell`, `*.feature`,
  * component `design.json`, the project security design
  * `specs/design/security.json`, the two OpenAPI contract shapes above, a
- * component's `prototype.json` and `prototype.tsx`) and drop
+ * component's `prototype.json` and `prototype.tsx`, an external dependency's
+ * definition and contract) and drop
  * everything else (derived `.excalidraw`/`*.gen.json` projections, code,
  * arbitrary `*.yaml` such as `workload.yaml`, …). `*.cell` is the
  * project-level cell-diagram DSL (design.cell) that drives the live

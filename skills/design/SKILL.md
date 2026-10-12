@@ -110,7 +110,9 @@ turn — apply them directly, and load one only if you find you do not have it.
    source of truth, and a design.json naming a node it lacks is refused. An
    external dependency is ALSO its own file, written before the component
    that references it: `specs/design/dependencies/<name>/dependency.json`
-   plus the contract slice beside it (`architecture` owns the shape).
+   plus the contract slice beside it (`architecture` owns the shape). A
+   definition already on disk with a provider — a project recreated from
+   code brings its upstreams — is settled: reference it, never rewrite it.
 3. **domain-model.md** — `specs/design/domain-model.md`: an H1 title, one
    or two sentences of intro, then exactly ONE mermaid `erDiagram` (entities,
    key fields, relations — these become the API schemas). Brief entity notes
@@ -185,7 +187,9 @@ in ONE step, not a step each.
 
 A design already exists → CONVERGE it to the current PRD, for the features
 this run designs: update what
-drifted, remove what the PRD no longer calls for, keep what holds. A legacy
+drifted, remove what the PRD no longer calls for, keep what holds. A tree
+holding only `domain-model.md` and `dependencies/` is not a design to
+converge: those are givens for a first design. A legacy
 `specs/design/design.md` (the retired single-file overview) is not part of
 the design any more — `removeFile` it and put its content where it now
 belongs (domain-model.md, flows/).

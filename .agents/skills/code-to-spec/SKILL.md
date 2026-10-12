@@ -26,9 +26,11 @@ skill restates neither, and a rule remembered instead of read drifts.
   the IDs, the `sources/` coverage file, what the requirements exclude.
 - `references/domain-model-shape.md` — the shape of
   `specs/design/domain-model.md`.
+- `references/dependency-shape.md` — the shape of
+  `specs/design/dependencies/<name>/dependency.json`.
 
-Both are the platform's own skills copied verbatim and pinned by a test in
-the platform repository, so what you read is the contract the platform
+All three are the platform's own skills copied verbatim and pinned by a test
+in the platform repository, so what you read is the contract the platform
 enforces. Never edit them here.
 
 ## What this writes, and what it never writes
@@ -39,16 +41,20 @@ enforces. Never edit them here.
 <out>/specs/requirements/features/F<n>-<slug>.md
 <out>/specs/requirements/sources/<module>.md      one per module, one per document
 <out>/specs/design/domain-model.md
-<out>/registrations/<name>.md                     one per upstream the recreate keeps calling, its derived contract beside it
+<out>/specs/design/dependencies/<name>/dependency.json   one per upstream the recreate keeps calling
+<out>/specs/design/dependencies/<name>/schema.graphql    its derived contract (or openapi.yaml)
+<out>/registrations/<name>.md                     what the definition cannot hold: instructions, fronts, used by
 <out>/.inventory/*.md                             working notes; never pushed
 ```
 
-Never `design.cell`, a `design.json`, `security.json`, `flows/`, `openapi.yaml`,
-`wireframes.dsl` or acceptance criteria. Each encodes a decision the platform
-makes from the requirements with catalog lookups and write gates you do not
-have here; written from legacy code they would hand `/design` a topology
-nobody chose. The as-is engineering is recorded, but in the coverage files,
-where it informs without becoming the design.
+Never `design.cell`, a `design.json`, `security.json`, `flows/`, a
+component's `openapi.yaml`, `wireframes.dsl` or acceptance criteria. Each
+encodes a decision the platform makes from the requirements with catalog
+lookups and write gates you do not have here; written from legacy code they
+would hand `/design` a topology nobody chose. The as-is engineering is
+recorded, but in the coverage files, where it informs without becoming the
+design. The one exception is a dependency definition: a fact about a system
+that exists, which `/design` references rather than decides.
 
 ## Arguments
 
@@ -167,7 +173,7 @@ the legacy construct:
 | The code has | The requirements say |
 |---|---|
 | a call to an LLM API for some task | a Decision naming what the agent does: "Skill recommendations: suggested by an agent." No provider, no model |
-| a client to a third-party SaaS or to another in-house service | a Decision naming the capability and the resource by its proposed registered name, with what it fronts: "Customers, opportunities and products: `sales-entity-service`, the organization's sales entity service, which fronts Salesforce." The name is the brief's (**Registration briefs**). A service that fronts another system also gets an Open Question on the product page: keep calling the service, or go to the system behind it |
+| a client to a third-party SaaS or to another in-house service | a Decision naming the capability and the resource by its proposed registered name, with what it fronts: "Customers, opportunities and products: `sales-entity-service`, the organization's sales entity service, which fronts Salesforce." The name is the definition's (**Dependency definitions**). A service that fronts another system also gets an Open Question on the product page: keep calling the service, or go to the system behind it |
 | sign-in via directory groups or an IdP | a P item: "Every user signs in through the organization's SSO." Roles as actors |
 | a runtime screen that edits role → privilege mappings | stories for what the screen does, and an Open Question whether editing privileges at runtime is a requirement or an artifact of the old directory, since the platform fixes scopes at design |
 | synthetic identities (pseudo-emails, service accounts standing in for people) | a Decision stating the need they serve, and an Open Question on how the recreate identifies those people |
@@ -229,52 +235,61 @@ The design agent reads every `.md` under `specs/` as context, so a coverage
 file is where `/design` learns the as-is shape — keep each line to one point
 and resist prose.
 
-## Registration briefs — `registrations/<name>.md`
+## Dependency definitions — `specs/design/dependencies/<name>/`
 
 The recreate keeps calling the systems the product calls today, and `/design`
-settles such a system only when the organization has registered it as an
-external resource, or when a Decision names a product. An in-house service
-named in words is neither: the design writes it as an open need with
-suggestions, and the build blocks on it. So for every outbound client to a
-system the recreate must keep talking to — in-house services and third-party
-SaaS alike — write one brief: everything the platform's registration form
-asks for, except the values. Not the product's own databases (the design
-introduces its own), not the LLM call (an agent decision), not the IdP (a P
-item).
+settles such a system only when a definition of it already exists: a
+resource the organization has registered, or a definition on disk with a
+provider. An in-house service named in words is neither; the design writes
+it as an open need with suggestions, and the build blocks on it. So for
+every outbound client to a system the recreate must keep talking to —
+in-house services and third-party SaaS alike — write its definition in the
+platform's own shape, which the design references and never rewrites. Not
+the product's own databases (the design introduces its own), not the LLM
+call (an agent decision), not the IdP (a P item).
 
-The briefs live outside `specs/` because they are the registering admin's
-input, not part of the project tree, and are never pushed. Registering is
-that admin's act, through the platform's form, with the credentials they
-hold; this skill sends nothing anywhere and holds no value.
-
-- **Name** — kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), naming the thing by
-  its own identity — the code's display label or client name,
-  `sales-entity-service` — not this product's use of it. The registered name
-  becomes the dependency directory and the cell node in every consumer, so
-  only a name a project can reference is worth proposing.
-- **Shape** — exactly `references/registration-brief.md`, field for field
-  the form. The description says what the resource is and what it fronts, in
-  the words the requirements use, since the design agent matches a registered
-  row by what it does, not by its name.
-- **Keys** — one set per record even when the legacy shares one credential
-  set across services; upper snake case, prefixed with the resource name
+- **Name** — kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`); the directory,
+  `name` and `resource.name` all equal; naming the thing by its own identity
+  — the code's display label or client name, `sales-entity-service` — not
+  this product's use of it. The name becomes the cell node and the
+  component's reference, and the organization's record if it is promoted.
+- **Shape** — `references/dependency-shape.md` is the platform's own
+  definition of the file. Write `name`, `resource.name`,
+  `resource.description` (what it is and what it fronts, in the requirements'
+  words), `resource.provider` (the concrete system: "the organization's
+  sales entity service, backed by Salesforce"), `resource.config` and
+  `resource.contract`. Never `ref`, `suggestions`, `provenance` or
+  `consumptionInstructions`: the first three are the platform's or the design
+  turn's to write, and the last is the organization's field, refused from a
+  project. Nothing else: the platform refuses unknown keys.
+- **Keys** — `resource.config`, one `{ "key", "description", "secret" }` per
+  key; one set per definition even when the legacy shares one credential set
+  across services; upper snake case, prefixed with the name
   (`SALES_ENTITY_SERVICE_CLIENT_SECRET`), because each key lands in the
-  consumer as an environment variable as-is. Every key gets a one-line "what
-  it is" and a secret flag. Key names come from the client's config record;
-  the value column is the admin's and stays empty.
-- **Consumption instructions** — from the client code, distinct from the
-  description: the auth style, the operations the product calls, envelopes
-  and quirks, what the service fronts.
-- **Contract** — derive one when the code supports it, beside the brief. A
-  GraphQL client yields `<name>.graphql`: an SDL holding only the operations
-  and fields the product uses, type names as the queries spell them, a
-  sibling service's record types read for field types only. A REST client
-  yields `<name>.openapi.yaml`: only the called paths and their record
-  shapes. The first line of either says it was derived from the product's
-  client code at the read commit and is not the service's published schema.
-  No `servers` entry, no URL, no example value from config or test data. When
-  nothing can be derived, the brief says `documentation` and "attach the
-  real document".
+  consumer as an environment variable as-is. Key names come from the client's
+  config record; values are never written anywhere — the platform collects
+  them per environment after the design.
+- **Contract** — derive one when the code supports it, beside the definition,
+  under the file name the platform fixes: `schema.graphql` for a GraphQL
+  client, `openapi.yaml` for a REST client, and `resource.contract` is
+  `{ "type": "graphql" | "openapi", "path": "<that file name>", "origin": "derived" }`.
+  The GraphQL file is an SDL holding only the operations and fields the
+  product uses, type names as the queries spell them, a sibling service's
+  record types read for field types only; the OpenAPI file holds only the
+  called paths and their record shapes. The first line of either says it was
+  derived from the product's client code at the read commit and is not the
+  service's published schema. No `servers` entry, no URL, no example value
+  from config or test data. When nothing can be derived, omit
+  `resource.contract`; the design then asks for the document.
+- **The brief** — `registrations/<name>.md`, in the shape
+  `references/registration-brief.md` fixes, holds what a definition cannot:
+  the consumption instructions a consumer follows (the auth style, the
+  operations, envelopes and quirks, what the service fronts), what it fronts,
+  and the stories that reach it. An organization pastes the instructions when
+  it promotes or registers the resource.
+
+Nothing is sent anywhere. The skill writes files; the platform collects the
+values from the person who holds them.
 
 ## `specs/design/domain-model.md`
 
@@ -300,13 +315,13 @@ Run these over `<out>/specs/`, and fix what they find:
 - **Arrows**: every coverage line ends in `→ <ID>` or `→ not used: <reason>`.
 - **Vocabulary**: `grep -rniwE 'http|https|sql|mysql|jwt|graphql|endpoint|token|json|regex' <out>/specs/requirements` — each hit is rewritten in product language or moved to a coverage file.
 - **Secrets**: `grep -rniE 'secret|password|api[-_ ]?key|bearer' <out>/specs <out>/registrations <out>/.inventory` — a hit may be a word in a sentence or a key name, never a value.
-- **Registrations**: one brief per client the recreate keeps calling; every field filled but the values; every name matches the kebab-case rule; every Decision that names a resource matches a brief's name exactly; `grep -rnE 'servers:|https?://' <out>/registrations` is empty.
-- **Design files**: nothing under `<out>/specs/design/` but `domain-model.md`.
+- **Definitions**: one per client the recreate keeps calling; each `dependency.json` parses, its `name` equals its directory and `resource.name`, `resource.config` is non-empty, a `resource.contract` names an allowed file that exists beside it with `origin` `derived`, and no `ref`, `suggestions`, `provenance` or `consumptionInstructions` appears; every Decision that names a resource has a definition directory of that name; `grep -rnE 'servers:|https?://' <out>/specs/design/dependencies` is empty.
+- **Design files**: nothing under `<out>/specs/design/` but `domain-model.md` and `dependencies/`.
 
 ## Close
 
 Report, in a few lines: the features by name, counts of stories, decisions,
-P items, assumed lines, open questions and registration briefs, the files
+P items, assumed lines, open questions and dependency definitions, the files
 written, and that the output is in `<out>`. Then point at `references/handoff.md` for how the tree
 enters an AEP project — the order matters there, and this skill does not
 perform it.

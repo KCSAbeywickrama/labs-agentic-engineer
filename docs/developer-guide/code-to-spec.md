@@ -13,11 +13,12 @@ the design agent cannot run it.
 specs/requirements/prd.md, product-wide.md, features/F<n>-<slug>.md   per the bundled prd-contract
 specs/requirements/sources/<module>.md                                 one coverage file per module and document
 specs/design/domain-model.md                                           one erDiagram from the code's types
-registrations/<name>.md (+ <name>.graphql | <name>.openapi.yaml)       one registration brief per upstream, for an org admin
+specs/design/dependencies/<name>/dependency.json (+ schema.graphql | openapi.yaml)  one definition per upstream, with its derived contract
+registrations/<name>.md                                                the consumption instructions and context a definition cannot hold
 .inventory/*.md                                                        working notes, not part of the spec
 ```
 
-It deliberately writes nothing else under `specs/design/`. The cell, the
+It deliberately writes nothing else under `specs/design/` but the dependency definitions. The cell, the
 components, roles, flows, contracts and acceptance criteria are derived by
 `/design` from the requirements with the org catalog and the write gates,
 so the recreate gets the platform's architecture rather than a translation
@@ -61,20 +62,24 @@ processes. Keep them in gitignored or private locations and never commit them
 to this repository as fixtures or examples. The skill copies configuration
 key names only, never values; check its output all the same.
 
-## Registering the upstreams
+## Defining the upstreams
 
-`/design` settles a system the product calls only when a requirements
-decision names a product, or when the organization has registered it as an
-external resource. An in-house service named in words is neither, so the
-design writes it as an open need with suggestions and every feature its
-component serves blocks on it. The skill therefore writes one registration
-brief per upstream the recreate keeps calling, under `registrations/`: the
-registration form's fields, filled from the client code, with the values left
-to the person who holds them, and a contract derived from the client code
-beside it where the code supports one (only the operations the product uses,
-labelled as such). An org admin enters each brief at Resources → New resource
-before the first `/design`; the design agent then reuses the record instead
-of inventing a need. The briefs stay outside `specs/` and are never pushed.
+`/design` settles a system the product calls only when a definition of it
+already exists: a resource the organization has registered, or a dependency
+definition on disk with a provider. An in-house service named in words is
+neither, so the design writes it as an open need with suggestions and every
+feature its component serves blocks on it. The skill therefore writes one
+definition per upstream the recreate keeps calling, under
+`specs/design/dependencies/<name>/`, in the platform's own shape: the name,
+provider, description, config keys with secret flags, and a contract derived
+from the client code beside it where the code supports one (only the
+operations the product uses, labelled as such). The `design` and
+`architecture` skills treat such a definition as settled and reference it
+rather than rewrite it. Values are never written: after the design, the
+Deploy page collects them per environment from whoever holds them, and the
+deploy waits until they arrive. A short brief under `registrations/` carries
+what a definition cannot, the consumption instructions, for the moment the
+organization promotes the resource for reuse across projects.
 
 ## Getting the tree into an AEP project
 

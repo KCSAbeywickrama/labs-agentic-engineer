@@ -13,16 +13,17 @@ Creating a project also fires `/start` on the server. The order below respects b
    shows the kickoff's `prd.md` committed. The kickoff may flush more than once.
 3. **Close every spec tab** for the project, in every browser, so the room unloads.
 4. **Push the generated files** to the project repository's default branch, on top of whatever is
-   there at that moment: replace `specs/requirements/` and add `specs/design/domain-model.md`.
-   Leave `specs/.agentic-engineer.toml` and `.claude/` as the platform wrote them. Push only the
-   requirements and the domain model; the rest of the design is `/design`'s to derive with the
+   there at that moment: replace `specs/requirements/`, add `specs/design/domain-model.md` and
+   `specs/design/dependencies/`. Leave `specs/.agentic-engineer.toml` and `.claude/` as the
+   platform wrote them. Push only those; the rest of the design is `/design`'s to derive with the
    organization's catalog.
 
    ```bash
    git clone <project repo url> recreate && cd recreate
    rm -rf specs/requirements && cp -R <out>/specs/requirements specs/requirements
    mkdir -p specs/design && cp <out>/specs/design/domain-model.md specs/design/
-   git add specs && git commit -m "Requirements and domain model from the existing codebase" && git push
+   cp -R <out>/specs/design/dependencies specs/design/dependencies
+   git add specs && git commit -m "Requirements, domain model and upstream definitions from the existing codebase" && git push
    ```
 5. **Reopen the spec view.** The room reseeds from git and shows the generated requirements. A
    tab left open at step 3 would have reverted the push on its next flush. Expect one more commit
@@ -31,19 +32,19 @@ Creating a project also fires `/start` on the server. The order below respects b
    platform's reader unescapes it. A diff that deletes feature files is the revert to watch for.
 6. **Settle the assumed lines and answer the open questions** in the console, or leave them; they
    hold nothing up. A feature with a `*blocking*` question stays undesigned until it is answered.
-7. **Register the upstreams.** An org admin opens Resources → New resource in the console and
-   enters each `registrations/<name>.md` field for field: the name, provider, description, the
-   keys with their secret flags, the consumption instructions; uploads the derived contract file
-   as the contract document; types the values per environment; saves. The Marketplace chat flow
-   takes a contract by URL only, so a derived file goes in through the form. Do this before the
-   first `/design`: the design agent reads the registry only when it first writes a dependency,
-   and a need already written as a suggestion cannot be switched to a registered name later. If
-   `/design` already ran, regenerate: remove `specs/design/` except `domain-model.md` by the same
-   git path as step 4, reopen, then `/design` again; safe while nothing is built.
-8. **Run `/design`.** It converges the domain model, derives the cell and components, and mints
-   the acceptance criteria. The registered upstreams come up as reused copies of the
-   organization's records; anything unregistered comes up as a need to settle. From here the
-   project is an ordinary AEP project.
+7. **Run `/design`.** It converges the domain model, derives the cell and components, and mints
+   the acceptance criteria. The dependency definitions come up referenced by the components, never
+   rewritten; a rewritten or duplicated one is a platform defect to report. A resource the
+   organization had already registered under the same name is reused from the registry instead.
+   If `/design` had already run before the definitions were pushed, regenerate: remove
+   `specs/design/` except `domain-model.md` and `dependencies/` by the same git path as step 4,
+   reopen, then `/design` again; safe while nothing is built.
+8. **Configure the upstreams.** After the design, each definition waits for its values: the
+   Deploy page's Configure card lists every key per environment. Type them there. The build does
+   not wait for them; the deploy does. To share a definition with other projects, open it on the
+   Resources page, choose Promote to organization, and paste the brief's consumption
+   instructions; values typed for the project carry over. From here the project is an ordinary
+   AEP project.
 
 With a checkout of the platform repository, the same `/design` can be tried locally first by
 pointing the playground at the output directory and running its design phase.

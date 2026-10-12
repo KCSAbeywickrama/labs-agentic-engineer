@@ -20,6 +20,9 @@ const PRD_CONTRACT = "skills/prd-contract/SKILL.md";
 const DESIGN = "skills/design/SKILL.md";
 const DOMAIN_MODEL_START = /^3\. \*\*domain-model\.md\*\*/;
 const DOMAIN_MODEL_END = /^4\. \*\*Key flows\*\*/;
+const ARCHITECTURE = "skills/architecture/SKILL.md";
+const DEPENDENCY_START = /^`dependency\.json` — ONE PROJECT'S USE OF A RESOURCE\./;
+const DEPENDENCY_END = /^Work each one in order:/;
 
 function stamp(sourcePath, body) {
   const hash = createHash("sha256").update(body).digest("hex").slice(0, 12);
@@ -63,9 +66,25 @@ export function render() {
     step +
     "\n";
 
+  const archSource = readFileSync(join(REPO_ROOT, ARCHITECTURE), "utf8");
+  const archLines = archSource.split("\n");
+  const depStart = anchor(archLines, DEPENDENCY_START, ARCHITECTURE);
+  const depEnd = anchor(archLines, DEPENDENCY_END, ARCHITECTURE);
+  if (depEnd <= depStart) throw new Error(`${ARCHITECTURE}: the dependency steps precede the dependency.json block`);
+  const depBlock = archLines.slice(depStart, depEnd).join("\n").trimEnd();
+  const depShape =
+    "# The shape of specs/design/dependencies/<name>/dependency.json\n\n" +
+    "The platform's architecture skill on the dependency definition, verbatim. The `ref`, `provenance`, " +
+    "`suggestions` and `accepted` parts are the platform's or the design turn's to write; a definition " +
+    "written from code carries `name`, `resource.name`, `description`, `provider`, `config` and a " +
+    "`derived` contract.\n\n" +
+    depBlock +
+    "\n";
+
   return [
     { path: join(SKILL_DIR, "references", "prd-contract.md"), content: stamp(PRD_CONTRACT, prdBody) + prdBody },
     { path: join(SKILL_DIR, "references", "domain-model-shape.md"), content: stamp(DESIGN, step) + shape },
+    { path: join(SKILL_DIR, "references", "dependency-shape.md"), content: stamp(ARCHITECTURE, depBlock) + depShape },
   ];
 }
 
