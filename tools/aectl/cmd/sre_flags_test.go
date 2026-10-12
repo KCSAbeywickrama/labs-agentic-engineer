@@ -41,3 +41,14 @@ func TestSreInstallFlags(t *testing.T) {
 		t.Errorf("obs-plane-version default = %q", got)
 	}
 }
+
+// --force-conflicts never goes without --server-side=true on Helm 4, and
+// neither reaches Helm 3, which rejects both.
+func TestServerSideApplyFlags(t *testing.T) {
+	if got := strings.Join(serverSideApplyFlags(4), " "); got != "--server-side=true --force-conflicts" {
+		t.Fatalf("v4: %q", got)
+	}
+	if got := serverSideApplyFlags(3); got != nil {
+		t.Fatalf("v3: %q", got)
+	}
+}

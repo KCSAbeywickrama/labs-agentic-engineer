@@ -387,6 +387,13 @@ skaffold/defaults.yaml>`; `ae_studio.webhook_relay.enabled`,
 `ae_studio.jev.*`). The runner images `make dev-runner` sets are dropped too:
 run `make dev-runner` again after `make dev-env`.
 
+**`UPGRADE FAILED: ... forceConflicts enabled when serverSideApply disabled`.**
+Helm 4's `--server-side=auto` reuses a release's previous apply method, so a
+release a Helm 3 run left client-side refused `--force-conflicts`
+(`amp-platform-resources` in `setup-agent-manager.sh`, the observability plane
+in `aectl sre install`). Both now pass `--server-side=true` with it; re-run
+`make dev-env`.
+
 **Secrets and their holders drift (`failed SASL auth`, `invalid_client`).**
 ESO refreshes an ExternalSecret hourly, and running pods keep the env they
 started with, so a changed `aep/*` key breaks only the NEXT pod start: an
