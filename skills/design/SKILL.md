@@ -112,7 +112,8 @@ turn — apply them directly, and load one only if you find you do not have it.
    that references it: `specs/design/dependencies/<name>/dependency.json`
    plus the contract slice beside it (`architecture` owns the shape). A
    definition already on disk with a provider — a project recreated from
-   code brings its upstreams — is settled: reference it, never rewrite it.
+   code brings its upstreams — is settled: reference it, never rewrite it
+   unless the user asks to reconsider it.
 3. **domain-model.md** — `specs/design/domain-model.md`: an H1 title, one
    or two sentences of intro, then exactly ONE mermaid `erDiagram` (entities,
    key fields, relations — these become the API schemas). Brief entity notes

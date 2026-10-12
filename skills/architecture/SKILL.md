@@ -266,10 +266,13 @@ arrives with its upstreams defined before any design runs:
 `resource.provider`, with its contract file beside it. Such a definition is
 settled before this turn: reference it by its name, carry it into
 `declare_plan` as reused, and never rewrite, rename or remove it, nor coin a
-parallel `<capability>-service` for the same system. The "taken from this
-turn's `list_*` result" rule governs the externals you create this turn, not
-those on disk. A definition with no provider is an open need like any other
-and goes through the steps below.
+parallel `<capability>-service` for the same system — unless the user asks
+to reconsider it (**Resolving or reconsidering a named dependency on
+request**, below). One no component references any longer stays on disk,
+inert; removing it is the user's act. The "taken from this turn's `list_*`
+result" rule governs the externals you create this turn, not those on disk.
+A definition with no provider is an open need like any other and goes
+through the steps below.
 
 ```json
 "dependencies": [
