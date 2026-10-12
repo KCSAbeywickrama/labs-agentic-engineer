@@ -53,7 +53,7 @@ import { handOffTools } from "./hand-off.js";
 import { askQuestionTool, askQuestionsTool } from "./questions.js";
 import { buildSkillTools } from "./skill-tools.js";
 import { WriteLedger, type WriteOp } from "./write-ledger.js";
-import type { SkillSource } from "../skill-source.js";
+import { designSkills, type SkillSource } from "../skill-source.js";
 
 export const ADD_FILE = "addFile" as const;
 export const EDIT_FILE = "editFile" as const;
@@ -221,7 +221,7 @@ export function buildFileToolSet(
     [DECLARE_PLAN_TOOL]: declarePlanTool,
   };
 
-  return { tools: { ...tools, ...buildSkillTools(skills) }, writes };
+  return { tools: { ...tools, ...buildSkillTools(skills && designSkills(skills)) }, writes };
 }
 
 export const DRAFT_EXTERNAL_RESOURCE_TOOL = "draftExternalResource" as const;

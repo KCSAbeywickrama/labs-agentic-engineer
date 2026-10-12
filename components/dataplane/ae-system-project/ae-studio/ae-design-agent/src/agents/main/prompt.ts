@@ -18,6 +18,7 @@
 
 import { SURFACES, type Surface } from "@aep/agent-stream";
 import {
+  designSkills,
   EMPTY_SKILL_SOURCE,
   SERVICE_AUDIENCE,
   type LoadedSkillBody,
@@ -112,7 +113,12 @@ const UNCATALOGUED_SKILLS: readonly string[] = [ORG_DEFAULTS_SKILL, ...SURFACES]
  * byte-identical to a skill-free turn.
  */
 export function buildSkillCatalog(skills: SkillSource | undefined): string {
-  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog().filter((e) => !UNCATALOGUED_SKILLS.includes(e.name));
+  // The design agent's view (`designSkills`): a chat-only skill (an area
+  // chat's, `src/areas/`) is no guidance for this agent and nothing a
+  // component pins, so it has no row here at all.
+  const entries = designSkills(skills ?? EMPTY_SKILL_SOURCE)
+    .catalog()
+    .filter((e) => !UNCATALOGUED_SKILLS.includes(e.name));
   if (entries.length === 0) return "";
   // Audience split (ADR-0013): `loadable` is this service's own (design) rows —
   // the catalog and reference note below are built from those ONLY, so a
@@ -120,11 +126,8 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   // to the pre-audience catalog. `pinOnly` rows still get a line — the design
   // agent has to NAME a coding skill to pin it onto a component's design.json —
   // just no loadSkill invitation, appended as a separate block.
-  // A chat-only skill (an area chat's, `src/areas/`) is neither: it is no
-  // guidance for this agent and nothing a component pins.
   const loadable = entries.filter((e) => e.audience.includes(SERVICE_AUDIENCE));
-  const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE) && e.audience.includes("coding"));
-  if (loadable.length === 0 && pinOnly.length === 0) return "";
+  const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE));
 
   // Emitted ONLY when something is pin-only, so a design-only library keeps the
   // exact prompt text (and cached prefix) it had before audiences existed.

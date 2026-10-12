@@ -155,11 +155,16 @@ func mirrorChanges(desired map[string][]byte, entries []repo.Entry) ([]repo.Comm
 
 // desiredMirror is the `.claude/skills/` tree for one project: every enabled
 // coding-audience skill, plus every pinned one (a pin overrides both the
-// audience and the enabled flag). Paths are `.claude/skills/<name>/SKILL.md`
-// and each reference at `.claude/skills/<name>/<refPath>`.
+// audience and the enabled flag). A chat-only skill is never mirrored, pinned
+// or not: it is an area chat's guidance, and no component's build reads it.
+// Paths are `.claude/skills/<name>/SKILL.md` and each reference at
+// `.claude/skills/<name>/<refPath>`.
 func desiredMirror(lib []Skill, pinned map[string]bool) map[string][]byte {
 	out := map[string][]byte{}
 	for _, sk := range lib {
+		if audienceIsChatOnly(sk.Audience) {
+			continue
+		}
 		if !(sk.Enabled && audienceIncludesCoding(sk.Audience)) && !pinned[sk.Name] {
 			continue
 		}
@@ -170,6 +175,18 @@ func desiredMirror(lib []Skill, pinned map[string]bool) map[string][]byte {
 		}
 	}
 	return out
+}
+
+// audienceIsChatOnly reports whether audience names neither the design nor
+// the coding agent: a skill only an area chat reads. An empty list is every
+// audience, so it is not chat-only.
+func audienceIsChatOnly(audience []string) bool {
+	for _, a := range audience {
+		if a == AudienceDesign || a == AudienceCoding {
+			return false
+		}
+	}
+	return len(audience) > 0
 }
 
 // audienceIncludesCoding reports whether audience names the coding agent; an

@@ -32,7 +32,7 @@ import { tool } from "ai";
 import type { Tool } from "ai";
 import { PLAN_BUILD, buildPlanInputSchema, type BuildPlanResult } from "@aep/agent-stream";
 import { buildSkillTools } from "./skill-tools.js";
-import type { SkillSource } from "../skill-source.js";
+import { designSkills, type SkillSource } from "../skill-source.js";
 import type { BuildPlan } from "../task-plan-accumulator.js";
 
 /**
@@ -52,5 +52,5 @@ export function buildTaskPlanTools(plan: BuildPlan, skills?: SkillSource): Recor
     }),
   };
 
-  return { ...tools, ...buildSkillTools(skills) };
+  return { ...tools, ...buildSkillTools(skills && designSkills(skills)) };
 }

@@ -95,16 +95,22 @@ function areaBlock(scope: ResolvedScope, project: string | undefined): string {
   return `\n\n${lines.join("\n")}`;
 }
 
-/** The scope's skills, inlined in order; one the library lacks is left out. */
+/**
+ * The scope's skills, inlined in order. One the library lacks (an org may
+ * disable a platform skill, ADR-0015) is left out with a warning: the chat
+ * still answers, without that procedure.
+ */
 function inlinedSkills(scope: ResolvedScope, skills: SkillSource | undefined): string {
   if (skills === undefined) return "";
   const chat = chatSkills(skills);
   return scope.skills
     .map((name) => {
       const body = chat.load(name);
-      return body !== undefined && "content" in body && body.content.trim() !== ""
-        ? `\n\n# Skill: ${name}\n\n${body.content.trim()}`
-        : "";
+      if (body !== undefined && "content" in body && body.content.trim() !== "") {
+        return `\n\n# Skill: ${name}\n\n${body.content.trim()}`;
+      }
+      console.warn(`[areas] the ${scope.area.label} chat's skill ${name} is missing from the skill library or empty; its prompt goes without it`);
+      return "";
     })
     .join("");
 }

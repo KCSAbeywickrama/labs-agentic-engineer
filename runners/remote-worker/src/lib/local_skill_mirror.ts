@@ -73,6 +73,14 @@ export function skillAudience(skillMd: string): string[] {
   return audience.length > 0 ? audience : [AUDIENCE_DESIGN, AUDIENCE_CODING];
 }
 
+/**
+ * Whether a skill is only an area chat's: it names neither the design nor the
+ * coding agent. Such a skill is never mirrored, pinned or not.
+ */
+function audienceIsChatOnly(audience: string[]): boolean {
+  return audience.length > 0 && !audience.includes(AUDIENCE_DESIGN) && !audience.includes(AUDIENCE_CODING);
+}
+
 /** Whether a skill's guidance is written for the coding agent. */
 export function audienceIncludesCoding(audience: string[]): boolean {
   return audience.length === 0 || audience.includes(AUDIENCE_CODING);
@@ -82,14 +90,16 @@ export interface MirrorSelection {
   /** Skill names the rule admits into the project's `.claude/skills/`. */
   copied: string[];
   /** Names withheld, with why — logged so a local run explains its own mirror. */
-  skipped: Array<{ name: string; reason: "not-coding" | "disabled" }>;
+  skipped: Array<{ name: string; reason: "chat-only" | "not-coding" | "disabled" }>;
 }
 
 /**
  * Apply the copy rule to a working-tree library. `pinned` overrides BOTH axes:
  * a component that pinned a skill needs it whatever its audience or
  * availability says, which is the drift guard production carries too — an
- * admin toggle must not break a build already designed against a skill.
+ * admin toggle must not break a build already designed against a skill. A
+ * chat-only skill is the one exception: it is an area chat's guidance, never
+ * a build's, so no pin mirrors it (production's mirror refuses it too).
  */
 export function selectMirroredSkills(
   library: Array<{ name: string; skillMd: string }>,
@@ -99,6 +109,11 @@ export function selectMirroredSkills(
   const copied: string[] = [];
   const skipped: MirrorSelection["skipped"] = [];
   for (const { name, skillMd } of library) {
+    const audience = skillAudience(skillMd);
+    if (audienceIsChatOnly(audience)) {
+      skipped.push({ name, reason: "chat-only" });
+      continue;
+    }
     if (pinned.has(name)) {
       copied.push(name);
       continue;
@@ -107,7 +122,7 @@ export function selectMirroredSkills(
       skipped.push({ name, reason: "disabled" });
       continue;
     }
-    if (!audienceIncludesCoding(skillAudience(skillMd))) {
+    if (!audienceIncludesCoding(audience)) {
       skipped.push({ name, reason: "not-coding" });
       continue;
     }

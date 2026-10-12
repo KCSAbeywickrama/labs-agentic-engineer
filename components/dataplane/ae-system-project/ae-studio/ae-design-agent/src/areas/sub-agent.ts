@@ -35,7 +35,7 @@ import { buildToolLoopAgent, type AgentRunSettings, type TurnAgent } from "../ag
 import type { McpTransport } from "../shared/mcp-client.js";
 import { gateConfirmations } from "../tools/gate.js";
 import { registeredTool } from "../tools/registry.js";
-import type { ResolvedScope } from "./profiles.js";
+import { assertScopeHolds, type ResolvedScope } from "./profiles.js";
 import { buildSubAgentInstructions } from "./prompt.js";
 import { cataloguedSkills, chatSkills } from "./skills.js";
 
@@ -71,6 +71,10 @@ function scopeTools(scope: ResolvedScope, ctx: SubAgentContext): ToolSet {
 }
 
 export function buildSubAgent(scope: ResolvedScope, ctx: SubAgentContext, run: AgentRunSettings): TurnAgent {
+  // `scopeFor` checked it already; checked again here because the gate below
+  // only holds a write the registry gives a confirmation, so a scope built
+  // another way must not reach the model with an unconfirmed one.
+  assertScopeHolds(scope);
   // Every write refuses until the user's own answer to its question, and then
   // makes only the change its card showed: the prompt asks for the same, and
   // this is what holds when text the model read tries to talk it past the

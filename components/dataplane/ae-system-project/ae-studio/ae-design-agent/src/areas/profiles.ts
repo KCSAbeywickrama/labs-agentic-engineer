@@ -125,10 +125,16 @@ export function scopeProblems(scope: AreaScope, registry: Readonly<Record<string
   });
 }
 
+/** Throws when `scope` names an unknown tool or an unconfirmed write (`scopeProblems`). */
+export function assertScopeHolds(scope: ResolvedScope): void {
+  const problems = scopeProblems(scope);
+  if (problems.length > 0) throw new Error(`area ${scope.area.id}: ${problems.join("; ")}`);
+}
+
 /**
  * The scope of `area`'s chat, narrowed to `focus` when given: the focus's
  * scope over the base, field by field. A scope that names an unknown tool or
- * an unconfirmed write is refused (`scopeProblems`).
+ * an unconfirmed write is refused (`assertScopeHolds`).
  */
 export function scopeFor(area: AreaId, focus?: Focus): ResolvedScope {
   const profile = AREAS[area];
@@ -139,7 +145,6 @@ export function scopeFor(area: AreaId, focus?: Focus): ResolvedScope {
     area: profile,
     ...(focus !== undefined ? { focus } : {}),
   };
-  const problems = scopeProblems(scope);
-  if (problems.length > 0) throw new Error(`area ${area}: ${problems.join("; ")}`);
+  assertScopeHolds(scope);
   return scope;
 }

@@ -18,6 +18,8 @@ reads this tree directly; a cluster picks up edits after `make dev-update`.
 - An area chat's sub-agent inlines its scope's chat skills (`issue-triage` in
   the Issues chat, `issue-work` in an issue's chat; the area profiles in
   `ae-design-agent/src/areas/profiles.ts`) and lists its other chat skills.
+  Editing `issue-*` changes the design agent's prompt snapshots: run its tests
+  with `UPDATE_PROMPT_SNAPSHOTS=1`.
 - Everything else loads on demand from its `description`.
 
 ## Frontmatter

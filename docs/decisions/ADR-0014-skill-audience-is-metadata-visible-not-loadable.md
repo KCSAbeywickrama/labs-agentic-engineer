@@ -104,3 +104,22 @@ The `wireframes` skill is retired
 Where this ADR names it as the `[design, coding]` skill, read `prototype`: the
 design agent writes the prototype from its body, and the coding run builds
 against its `references/implementing.md`.
+
+## Amendment 2026-10-13 — the `chat` audience
+
+`metadata.aep.audience` gains a third value, `chat`: an area chat's sub-agent
+(the Issues chats, `ae-design-agent/src/areas/`). The `issue-triage` and
+`issue-work` skills are `[chat]`.
+
+- `chat` is opt-in only. An unmarked skill stays `[design, coding]`; it is never
+  a chat's.
+- A chat-only skill is not the design agent's and not the coding agent's. The
+  design agent does not see it at all: it is not in the catalog, not in the
+  pin-only block, and `loadSkill` answers it as an unknown name, not with a
+  refusal (a refusal's pin advice would point it at a coding run).
+- A chat-only skill is not pinnable. The project mirror (`ae-studio-tools`
+  `desiredMirror`, and the remote-worker's local mirror) never writes it to
+  `.claude/skills/`, even when a component's `skillsPinned` names it. This is
+  the one exception to "a pin overrides the audience".
+- A chat reads only the skills whose audience includes `chat`; any other name
+  is unknown to it.

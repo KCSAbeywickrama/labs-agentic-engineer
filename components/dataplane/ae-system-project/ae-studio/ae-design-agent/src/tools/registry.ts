@@ -52,7 +52,7 @@ export interface BuiltInContext {
 interface Entry {
   /** True when the tool changes nothing the user can see. */
   readOnly: boolean;
-  /** The go-ahead a write waits for; every write has one (`profileProblems`). */
+  /** The go-ahead a write waits for; every write has one (`scopeProblems`). */
   confirm?: ToolConfirmation;
 }
 

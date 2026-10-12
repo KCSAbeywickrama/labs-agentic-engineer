@@ -33,6 +33,10 @@ import { loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
 import { buildSkillTools } from "../src/agents/main/tools/skill-tools.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
 import { UNMARKED_AUDIENCES } from "../src/agents/main/skill-source.js";
+import { buildFileToolSet } from "../src/agents/main/tools/files.js";
+import { buildTaskPlanTools } from "../src/agents/main/tools/task-plan.js";
+import { BuildPlan } from "../src/agents/main/task-plan-accumulator.js";
+import { FileBundle } from "@aep/agent-stream";
 
 /**
  * A `_skills` snapshot holding the given `<name>/SKILL.md` files, optionally
@@ -188,6 +192,51 @@ test("the design catalog never lists a chat-only skill, not even to pin", () => 
   assert.equal(text.includes("skillsPinned"), false);
   // Nothing but chat skills: no catalog at all.
   assert.equal(buildSkillCatalog(sourceOf(entry("triage", ["chat"]))), "");
+});
+
+type LoadSkillExec = (
+  input: { names: string[] },
+  options: unknown,
+) => Promise<{ ok: boolean; error?: string; refused?: string[]; missing?: string[]; available?: string[]; skills: { name: string }[] }>;
+type LoadReferenceExec = (
+  input: { name: string; path: string },
+  options: unknown,
+) => Promise<{ ok: boolean; error?: string; available?: string[] }>;
+
+test("the design agent's loadSkill treats a chat-only skill as unknown: not listed, never pin advice", async () => {
+  const dir = snapshotWith({ triage: md("triage", "[chat]"), go: md("go", "[coding]"), planning: md("planning", "[design]") });
+  mkdirSync(join(dir, "skills", "triage", "references"));
+  writeFileSync(join(dir, "skills", "triage", "references", "steps.md"), "STEPS");
+  const source = loadSkillsFromSnapshot(dir);
+  const sets = {
+    files: buildFileToolSet(new FileBundle({}), source).tools,
+    "task-plan": buildTaskPlanTools(new BuildPlan({}), source),
+  };
+  for (const [set, tools] of Object.entries(sets)) {
+    const res = await (tools.loadSkill!.execute as unknown as LoadSkillExec)({ names: ["triage"] }, {});
+    assert.equal(res.ok, false, set);
+    assert.deepEqual(res.missing, ["triage"], set);
+    assert.equal(res.refused, undefined, set);
+    assert.equal(res.error!.includes("skillsPinned"), false, set);
+    assert.deepEqual(res.available, ["go", "planning"], set);
+    // A chat skill's references are no more addressable than its body.
+    assert.equal(tools.loadSkillReference, undefined, set);
+  }
+});
+
+test("the design agent's loadSkillReference does not list a chat-only skill", async () => {
+  const dir = snapshotWith({ triage: md("triage", "[chat]"), planning: md("planning", "[design]") });
+  for (const name of ["triage", "planning"]) {
+    mkdirSync(join(dir, "skills", name, "references"));
+    writeFileSync(join(dir, "skills", name, "references", "steps.md"), "STEPS");
+  }
+  const tools = buildFileToolSet(new FileBundle({}), loadSkillsFromSnapshot(dir)).tools;
+  const res = await (tools.loadSkillReference!.execute as unknown as LoadReferenceExec)(
+    { name: "triage", path: "references/steps.md" },
+    {},
+  );
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.available, ["planning"]);
 });
 
 // --- Disabled skills (ADR-0014) -----------------------------------------------

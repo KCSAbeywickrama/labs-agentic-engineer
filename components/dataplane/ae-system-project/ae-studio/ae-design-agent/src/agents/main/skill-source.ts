@@ -132,6 +132,23 @@ export interface SkillSource {
   loadReference(name: string, path: string): LoadedReference;
 }
 
+/**
+ * `skills` as the design agent reads it: the rows it may load (design) or pin
+ * onto a component (coding). Every other row (a chat-only skill, an area
+ * chat's: `src/areas/skills.ts`) is unknown here: not in the catalog, not in a
+ * loader's `available` echo, and `load` answers `undefined` rather than a
+ * refusal, whose pin advice would point a chat skill at a coding run.
+ */
+export function designSkills(skills: SkillSource): SkillSource {
+  const entries = skills.catalog().filter((e) => e.audience.includes(SERVICE_AUDIENCE) || e.audience.includes("coding"));
+  const names = new Set(entries.map((e) => e.name));
+  return {
+    catalog: () => entries,
+    load: (name, audience) => (names.has(name) ? skills.load(name, audience) : undefined),
+    loadReference: (name, path) => (names.has(name) ? skills.loadReference(name, path) : undefined),
+  };
+}
+
 /** The skill-free source (empty catalog, no loaders) consumers default to. */
 export const EMPTY_SKILL_SOURCE: SkillSource = {
   catalog: () => [],

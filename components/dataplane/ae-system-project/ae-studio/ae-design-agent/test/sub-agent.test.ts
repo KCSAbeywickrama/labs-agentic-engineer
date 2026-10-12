@@ -247,3 +247,22 @@ test("the prompt appends the surface's narration policy, and without skills it h
   assert.equal(buildSubAgentInstructions(ISSUES, { skills }), bare);
   assert.equal(bare.includes("# Skills"), false);
 });
+
+test("a profile skill the org's library lacks is left out with a warning, and the prompt is still built", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  // An org may disable a platform skill (ADR-0015): issue-triage is not in this library.
+  const skills = testSkillSource([{ name: "issue-work", description: "work on one issue", content: "WORK BODY", audience: ["chat"] }]);
+  const out = buildSubAgentInstructions(ISSUES, { project: "acme-shop", skills });
+  assert.equal(out.includes("# Skill: issue-triage"), false);
+  assert.match(out, /# Area: Issues/);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0]!.arguments[0]), /issue-triage.*Issues|Issues.*issue-triage/);
+  // Its own skill present: nothing to warn about.
+  buildSubAgentInstructions(ISSUE_42, { skills });
+  assert.equal(warn.mock.callCount(), 1);
+});
+
+test("the factory re-checks its scope: one built by hand with an unknown or unconfirmed tool is refused", () => {
+  const bad: ResolvedScope = { ...ISSUES, tools: [...ISSUES.tools, "delete_repo"] };
+  assert.throws(() => build(bad, mcpTools(["delete_repo"]).tools), /delete_repo: not a registered tool/);
+});
