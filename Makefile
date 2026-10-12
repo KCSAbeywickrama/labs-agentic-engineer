@@ -274,6 +274,15 @@ workflow-skill:
 # config file carrying the same suffix (deployments/README.md).
 AE_DOMAIN ?= localhost
 
+# The aectl config dev-env imports. The install derives every Helm value it
+# owns from it and resets the rest, so a toggle set by hand (`helm upgrade
+# --set`, `platform update --set`) is gone after the next dev-env: turn such a
+# toggle on in a copy of this file (e.g. ae_studio.jev.enabled) and pass it,
+#   make dev-env AECTL_CONFIG=~/.aectl/dev.yaml
+# or import it once (`aectl-skaffold platform config import --config <file>`)
+# before a `make dev-update`. Its URLs must stay localhost (see AE_DOMAIN).
+AECTL_CONFIG ?= skaffold/defaults.yaml
+
 dev-env:
 	@if [ "$(AE_DOMAIN)" != "localhost" ]; then \
 		echo "❌ dev-env is the localhost flow: it imports skaffold/defaults.yaml, whose URLs are localhost." >&2; \
@@ -285,7 +294,7 @@ dev-env:
 	AE_DOMAIN=$(AE_DOMAIN) WITH_SKAFFOLD_CLIENT=1 bash deployments/scripts/setup-env-for-aectl.sh
 	$(MAKE) dev-images
 	$(MAKE) ae-studio-refs-check
-	./tools/aectl/aectl-skaffold platform config import --config skaffold/defaults.yaml
+	./tools/aectl/aectl-skaffold platform config import --config $(AECTL_CONFIG)
 	ANTHROPIC_API_KEY=none AEP_THUNDER_ADMIN_CLIENT_SECRET=ae-install-client-secret \
 		./tools/aectl/aectl-skaffold platform install --addons=all --platform-version=latest --platform-chart=deployments/helm-charts/platform --image-tag=dev-local \
 		--ae-studio-image-design-agent="$(call ae_studio_ref,ae-design-agent)" \
@@ -456,6 +465,8 @@ dev-update:
 # skills, bal-library-tool). Like dev-update, --reset-then-reuse-values keeps
 # aectl's settings on the current chart's defaults; the image values change, so
 # Helm rolls aep-api by itself.
+# `make dev-env` re-installs the release and drops these images: run this
+# again after it.
 dev-runner:
 	FORCE=1 bash deployments/scripts/build-runner.sh
 	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reset-then-reuse-values \

@@ -283,6 +283,35 @@ func TestHelmUpgradeArgs_WebhookRelay(t *testing.T) {
 	}
 }
 
+// The Jev switch and endpoint come from the aectl config on install and on
+// every update, both ways, so neither a `make dev-env` (a helm install that
+// resets values) nor a later update drops a Jev an operator turned on.
+func TestAEStudioOverrides_JevFollowsConfig(t *testing.T) {
+	for _, tc := range []struct {
+		enabled bool
+		url     string
+	}{{true, "https://jev.example/v1"}, {false, ""}} {
+		t.Run(fmt.Sprintf("enabled=%t", tc.enabled), func(t *testing.T) {
+			setValidUpdateConfig(t)
+			viper.Set("ae_studio.jev.enabled", tc.enabled)
+			viper.Set("ae_studio.jev.url", tc.url)
+			got, err := helmUpgradeArgs(updateConfigFromFlags())
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(got, "\x00")
+			for _, want := range []string{
+				fmt.Sprintf("--set\x00aeStudio.jev.enabled=%t", tc.enabled),
+				"--set\x00aeStudio.jev.url=" + tc.url,
+			} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("args lack %q: %v", want, got)
+				}
+			}
+		})
+	}
+}
+
 // Missing or partial aectl config must fail loudly, not derive http/empty
 // values the upgrade would write over a working install. platformUpdate runs
 // this check first, for `platform update` and `sre install` alike.

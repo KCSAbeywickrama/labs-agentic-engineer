@@ -196,6 +196,11 @@ func aeStudioOverrides(platformNamespace string) []string {
 	// Always set, so update (which reuses the previous release's values)
 	// follows the config both ways. The relay image is the chart's own default.
 	args = append(args, "--set", fmt.Sprintf("aeStudio.webhookRelay.enabled=%t", webhookRelayEnabled()))
+	// Always set too: `platform install` (every `make dev-env`) resets the
+	// release's values, so a Jev turned on by hand would silently go off.
+	args = append(args,
+		"--set", fmt.Sprintf("aeStudio.jev.enabled=%t", viper.GetBool("ae_studio.jev.enabled")),
+		"--set", "aeStudio.jev.url="+viper.GetString("ae_studio.jev.url"))
 	return append(args, "--set-json", "aeStudio.extraEgress="+aeStudioExtraEgress(platformNamespace))
 }
 

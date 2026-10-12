@@ -136,6 +136,9 @@ func TestWritePlatformSecrets_RestoresFromClusterBeforeGenerating(t *testing.T) 
 	if got, _ := kv.get("aep/postgres-password"); got != "pg-synced" {
 		t.Fatal("postgres password not restored from the cluster Secret")
 	}
+	if _, ok := kv.get("aep/jev-api-key"); ok {
+		t.Error("an imported key with no cluster copy must stay absent")
+	}
 	if len(seeded) != len(generatedPlatformSecrets()) {
 		t.Fatalf("seeded %d of %d", len(seeded), len(generatedPlatformSecrets()))
 	}
@@ -329,5 +332,23 @@ func TestSyncExternalSecretsNow(t *testing.T) {
 	skip := clientsReadingUnsynced(unsynced)
 	if skip["aep-api-client"] == "" || skip["aep-console-client"] != "" {
 		t.Fatalf("skip = %v", skip)
+	}
+}
+
+// An imported key (the Jev key) is restored from the cluster after an OpenBao
+// restart, so it need not be imported again.
+func TestWritePlatformSecrets_RestoresImportedKey(t *testing.T) {
+	kv, s := newFakeKV(t, nil)
+	recover := func(path string) (string, string, error) {
+		if path == "aep/jev-api-key" {
+			return "jev-synced", "wso2-aep/aep-jev", nil
+		}
+		return "", "", nil
+	}
+	if _, err := writePlatformSecrets(context.Background(), s, nil, recover); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := kv.get("aep/jev-api-key"); got != "jev-synced" {
+		t.Fatal("Jev key not restored")
 	}
 }

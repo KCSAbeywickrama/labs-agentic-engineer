@@ -51,10 +51,18 @@ import (
 // generate a new one, which turns an OpenBao restart into a no-op for every
 // holder above.
 
-// generatedSecret is one platform secret aectl generates.
+// generatedSecret is one platform secret aectl generates. generate is nil
+// for a key an operator imports (`platform secret import`): seeding then only
+// restores it from the cluster, and leaves it absent when nothing holds it.
 type generatedSecret struct {
 	path     string
 	generate func() (string, error)
+}
+
+// importedPlatformSecrets are keys an operator imports that the platform reads
+// through ESO, restored like the generated ones after an OpenBao restart.
+var importedPlatformSecrets = []generatedSecret{
+	{path: "aep/jev-api-key"},
 }
 
 // generatedThunderClientSecrets are the Thunder clients' generated secrets.
@@ -126,6 +134,9 @@ func seedGeneratedSecrets(secrets []generatedSecret, st seedStore) ([]seededSecr
 				return seeded, fmt.Errorf("read the cluster's copy of %s: %w", g.path, err)
 			}
 		}
+		if value == "" && g.generate == nil {
+			continue
+		}
 		if value == "" {
 			if value, err = g.generate(); err != nil {
 				return seeded, fmt.Errorf("generate %s: %w", g.path, err)
@@ -166,7 +177,7 @@ func writePlatformSecrets(ctx context.Context, s *openBaoSession, inputs []platf
 			return nil, fmt.Errorf("write %s: %w", in.path, err)
 		}
 	}
-	return seedGeneratedSecrets(generatedPlatformSecrets(), s.seedStore(ctx, recover))
+	return seedGeneratedSecrets(append(generatedPlatformSecrets(), importedPlatformSecrets...), s.seedStore(ctx, recover))
 }
 
 // externalSecretAPIVersion is the ESO API the chart's ExternalSecrets use.

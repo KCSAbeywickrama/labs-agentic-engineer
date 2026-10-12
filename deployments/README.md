@@ -171,8 +171,20 @@ turn it on:
 
 ```sh
 ./tools/aectl/aectl-skaffold platform secret import --path aep/jev-api-key --value-file <file>
-./tools/aectl/aectl-skaffold platform update --set aeStudio.jev.enabled=true   # optionally --set aeStudio.jev.url=<endpoint>
+# in your aectl config (a copy of skaffold/defaults.yaml):
+#   ae_studio:
+#     jev:
+#       enabled: true
+#       url: ""            # optional endpoint; "" is Jev's default
+./tools/aectl/aectl-skaffold platform config import --config <your config>
+make dev-update            # or: make dev-env AECTL_CONFIG=<your config>
 ```
+
+The switch lives in the aectl config, not in a `--set`: `aectl platform
+install` (every `make dev-env`) resets the release's values and re-derives
+`aeStudio.jev.*` from the config, as `platform update` does. A local
+OpenBao restart keeps the key: the next `make dev-env` restores it from
+`aep-jev`.
 
 aep-api reads the key from the ESO Secret `aep-jev` (optional: it boots,
 classifying nothing, before the import) at start; ESO refreshes it hourly, so
@@ -365,6 +377,15 @@ breaks. It never rewrites a generated key the store still has, so a re-run on
 an intact OpenBao rotates nothing. Then follow steps 3 to 5 of
 [Local OpenBao wipe recovery](#local-openbao-wipe-recovery) for what the
 install does not own (environment bindings, org secrets, aep-api's access).
+
+**`make dev-env` drops Helm values set by hand.** Its `aectl platform install`
+is a `helm upgrade --install` that resets the release to the chart's defaults
+plus the values aectl derives from its config. A toggle set with `helm upgrade
+--set` or `platform update --set` is therefore gone after a re-run. Set it in
+the aectl config instead (`make dev-env AECTL_CONFIG=<your copy of
+skaffold/defaults.yaml>`; `ae_studio.webhook_relay.enabled`,
+`ae_studio.jev.*`). The runner images `make dev-runner` sets are dropped too:
+run `make dev-runner` again after `make dev-env`.
 
 **Secrets and their holders drift (`failed SASL auth`, `invalid_client`).**
 ESO refreshes an ExternalSecret hourly, and running pods keep the env they
