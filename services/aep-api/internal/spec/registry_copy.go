@@ -47,6 +47,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 )
 
 // RegisteredResource is one org registry record as the design write path
@@ -220,9 +222,15 @@ func renderRegistryCopy(stub DependencyDefinition, rec RegisteredResource, now t
 		// documentation record lands its block without one, and the dependency
 		// reads needs-contract — the truth, since nothing here is a contract
 		// the coding agent could build a client from.
-		file := path.Base(rec.Resource.Contract.Path)
-		if file == "" || file == "." || file == "/" {
-			return "", nil, fmt.Errorf("registry contract path %q names no file", rec.Resource.Contract.Path)
+		//
+		// The file lands under the project's canonical name for its type, not
+		// the registry's: an uploaded document keeps whatever name the admin
+		// gave it in the org record, and the project gate accepts only
+		// `openapi.yaml`, `schema.graphql` and `sdk.json`. The registry path
+		// stays on the provenance.
+		file := designspec.CanonicalContractFile(rec.Resource.Contract.Type)
+		if file == "" {
+			return "", nil, fmt.Errorf("registry contract type %q names no file a project can hold", rec.Resource.Contract.Type)
 		}
 		def.Resource.Contract = &ResourceContract{Type: rec.Resource.Contract.Type, Path: file, Origin: DependencyContractOriginRegistry}
 		sum := sha256.Sum256([]byte(rec.Document))
