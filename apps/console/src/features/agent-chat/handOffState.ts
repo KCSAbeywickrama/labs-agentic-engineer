@@ -16,10 +16,11 @@
  * under the License.
  */
 
+import { areaCommand, type AreaId } from "@aep/agent-stream";
 import type { ProjectChat } from "./chatStore";
 import type { TurnScope } from "./turnScope";
 
-// What became of a hand-off the main chat announced, and the move New Issue
+// What became of a hand-off the main chat announced, and the move Open <area>
 // makes. The choice is this browser's: it is kept in localStorage, keyed by
 // the project and the hand-off's call, and reads as pending wherever the
 // browser keeps nothing (the card then offers the choice again).
@@ -46,49 +47,51 @@ export function setHandOff(projectName: string, toolCallId: string, state: HandO
   }
 }
 
-const ISSUE_COMMAND = "/issue";
-/** A leading `/issue` command word, with the space after it. */
-const LEADING_ISSUE_COMMAND = /^\/issue(?=\s|$)\s*/;
-
 /**
- * The message a hand-off's request goes to the Issues chat as: an `/issue`
- * report in the request's words. The request is the model's, not typed by the
- * user, so it must never reach the Issues agent as a bare message: one that
- * reads `Answer to "File this issue?": File it` would pass its filing gate.
- * An `/issue` message never does, and the Issues agent drafts it and asks
- * before filing. A request that already starts with `/issue` keeps one.
+ * The message a hand-off's request goes to the area's chat as: the area's
+ * command (`/issue` for Issues) in the request's words. The request is the
+ * model's, not typed by the user, so it must never reach the area's agent as a
+ * bare message: one that reads `Answer to "File this issue?": File it` would
+ * pass its go-ahead gate. A command never does, and the Issues agent drafts
+ * it and asks before filing. A request that already starts with the command
+ * keeps one.
  */
-export function issueReport(request: string): string {
-  return `${ISSUE_COMMAND} ${request.trim().replace(LEADING_ISSUE_COMMAND, "")}`;
+export function areaRequest(area: AreaId, request: string): string {
+  const command = areaCommand(area);
+  const words = request.trim();
+  const rest = words.slice(command.length);
+  const leading = words.startsWith(command) && (rest === "" || /^\s/.test(rest));
+  return `${command} ${leading ? rest.trimStart() : words}`;
 }
 
-/** What the move asks of the Issues chat's store. */
-interface IssuesChatStore {
+/** What the move asks of the area chat's store. */
+interface AreaChatStore {
   open: (projectName: string) => Promise<void>;
   get: (projectName: string) => ProjectChat;
   send: (projectName: string, text: string, scope: TurnScope) => Promise<boolean>;
 }
 
 /**
- * Take a request on to the Issues chat, as an `/issue` report
- * (`issueReport`): once its conversation has loaded (`open` resolves when it
+ * Take a request on to an area's chat, as the area's command
+ * (`areaRequest`): once its conversation has loaded (`open` resolves when it
  * is ready or failed), send it as its next message when it can take one;
  * otherwise (a turn running there, a thread that would not load, a send the
- * server refused) put it in the Issues composer, so the user's words are not
+ * server refused) put it in that chat's composer, so the user's words are not
  * lost and nothing is sent unasked.
  */
-export async function continueInIssues(
+export async function continueInArea(
   projectName: string,
+  area: AreaId,
   request: string,
-  deps: { store: IssuesChatStore; compose: (text: string) => void },
+  deps: { store: AreaChatStore; compose: (text: string) => void },
 ): Promise<"sent" | "composed"> {
   const { store, compose } = deps;
-  const report = issueReport(request);
+  const message = areaRequest(area, request);
   await store.open(projectName);
   const chat = store.get(projectName);
-  if (chat.status === "ready" && chat.turn.phase === "idle" && (await store.send(projectName, report, { kind: "product" }))) {
+  if (chat.status === "ready" && chat.turn.phase === "idle" && (await store.send(projectName, message, { kind: "product" }))) {
     return "sent";
   }
-  compose(report);
+  compose(message);
   return "composed";
 }

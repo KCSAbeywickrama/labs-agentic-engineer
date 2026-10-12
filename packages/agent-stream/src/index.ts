@@ -73,6 +73,7 @@ export type {
   Toolset,
   Surface,
   View,
+  AreaId,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
 export {
@@ -86,10 +87,12 @@ export {
   isQuestionTool,
   isErrorToolOutput,
   ASK_QUESTIONS_TOOL,
-  HAND_OFF_TO_ISSUES,
-  HAND_OFF_TOOLS,
+  HAND_OFF_TOOL,
   isHandOffTool,
-  handOffView,
+  AREAS,
+  isAreaId,
+  areaLabel,
+  areaCommand,
   DECLARE_PLAN_TOOL,
   ANSWER_PREFIX,
   ANSWERS_PREFIX,

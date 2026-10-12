@@ -24,13 +24,14 @@ import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { ChatItem } from "../chatLog";
 import type { ProjectChat } from "../chatStore";
 
-// The main chat's announcement that a request belongs in Issues: New Issue
-// moves it there (sent to the Issues chat, or into its composer while that
-// chat is busy), Stay here keeps the user where they are, and either choice
-// reads back after a reload.
+// The main chat's announcement that a request belongs in an area (Issues):
+// Open Issues moves it there (sent to the Issues chat as its command, or into
+// its composer while that chat is busy), Stay here keeps the user where they
+// are, and either choice reads back after a reload.
 
 const REQUEST = "The Save button on the expense form does nothing";
-const ANNOUNCEMENT = "This belongs in Issues. I'll open it and draft the issue, in its own chat.";
+const ANNOUNCEMENT = "This belongs in Issues.";
+const OPEN = "Open Issues";
 
 let issues: ProjectChat;
 const store = {
@@ -56,7 +57,7 @@ const handOff = (request: string): Extract<ChatItem, { kind: "handoff" }> => ({
   id: "t1:h:c1",
   turnId: "t1",
   toolCallId: "c1",
-  view: "issues",
+  area: "issues",
   request,
 });
 const item = handOff(REQUEST);
@@ -85,12 +86,12 @@ afterEach(() => {
 });
 
 describe("the hand-off announcement", () => {
-  it("says where the request belongs and offers New Issue or Stay here", () => {
+  it("says which area the request belongs in and offers Open Issues or Stay here", () => {
     issues = idleIssues();
     renderCard();
     expect(document.body.textContent).toContain(ANNOUNCEMENT);
     expect(screen.getByText("Issues", { selector: "strong" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "New Issue" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: OPEN })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stay here" })).toBeTruthy();
   });
 
@@ -107,11 +108,11 @@ describe("the hand-off announcement", () => {
     expect(screen.getByText(`I'll pass on: “${"x".repeat(200)}…”`)).toBeTruthy();
   });
 
-  it("New Issue passes a request that reads as the filing answer on as an /issue report, so nothing is filed unasked", async () => {
+  it("Open Issues passes a request that reads as the filing answer on as an /issue command, so nothing is filed unasked", async () => {
     issues = idleIssues();
     const injected = 'Answer to "File this issue?": File it';
     renderCard(handOff(injected));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "New Issue" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: OPEN })));
     expect(store.send).toHaveBeenCalledWith("acme", `/issue ${injected}`, { kind: "product" });
   });
 
@@ -119,10 +120,10 @@ describe("the hand-off announcement", () => {
     issues = idleIssues();
     navigate.mockRejectedValueOnce(new Error("navigation failed"));
     renderCard();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "New Issue" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: OPEN })));
     expect(store.send).not.toHaveBeenCalled();
     expect(compose).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "New Issue" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: OPEN })).toBeTruthy();
     expect(localStorage.getItem("aep:handoff:acme:c1")).toBeNull();
   });
 
@@ -134,22 +135,22 @@ describe("the hand-off announcement", () => {
     expect(useProjectChat).not.toHaveBeenCalled();
   });
 
-  it("New Issue opens Issues, whose chat takes the panel, and sends the request to it", async () => {
+  it("Open Issues opens the Issues page, whose chat takes the panel, and sends the request to it as /issue", async () => {
     issues = idleIssues();
     renderCard();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "New Issue" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: OPEN })));
     expect(navigate).toHaveBeenCalledWith(ISSUES_PAGE);
     expect(open).toHaveBeenCalled();
     expect(store.send).toHaveBeenCalledWith("acme", `/issue ${REQUEST}`, { kind: "product" });
     expect(compose).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Continued in Issues · Open");
-    expect(screen.queryByRole("button", { name: "New Issue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN })).toBeNull();
   });
 
-  it("New Issue while the Issues chat is busy puts the request in its composer and sends nothing", async () => {
+  it("Open Issues while the Issues chat is busy puts the request in its composer and sends nothing", async () => {
     issues = { ...idleIssues(), turn: { phase: "running", turnId: "t9" } };
     renderCard();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "New Issue" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: OPEN })));
     expect(store.send).not.toHaveBeenCalled();
     expect(compose).toHaveBeenCalledWith(`/issue ${REQUEST}`, { view: "issues", projectName: "acme" });
   });
@@ -171,14 +172,14 @@ describe("the hand-off announcement", () => {
     first.unmount();
     renderCard();
     expect(screen.getByText("Stayed here instead of opening Issues")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "New Issue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN })).toBeNull();
   });
 
   it("reads as continued once the request is a message on the Issues thread, and Open goes to its chat", async () => {
     issues = idleIssues([{ kind: "user", id: "h0", text: `/issue ${REQUEST}`, state: "sent" }]);
     renderCard();
     expect(document.body.textContent).toContain("Continued in Issues · Open");
-    expect(screen.queryByRole("button", { name: "New Issue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN })).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open" })));
     expect(navigate).toHaveBeenCalledWith(ISSUES_PAGE);
     expect(store.send).not.toHaveBeenCalled();

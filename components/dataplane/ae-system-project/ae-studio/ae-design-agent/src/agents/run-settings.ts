@@ -83,7 +83,7 @@ export function questionStop(): StopCondition<ToolSet> {
 
 /**
  * Stop when the last step carries a hand-off tool-call the schema ACCEPTED
- * (`hand_off_to_issues`): the turn waits for the user to take the hand-off or
+ * (`hand_off`): the turn waits for the user to take the hand-off or
  * stay. An invalid call is skipped, as in `questionStop`, so the model can retry.
  */
 export function handOffStop(): StopCondition<ToolSet> {
@@ -94,7 +94,7 @@ export function handOffStop(): StopCondition<ToolSet> {
 /**
  * True when the turn ended on a HITL question tool-call (`ask_question` or
  * `ask_questions`, console ADR-0012 / #270) or a hand-off tool-call
- * (`hand_off_to_issues`) that RESOLVED — its placeholder
+ * (`hand_off`) that RESOLVED — its placeholder
  * result is on the transcript and is not an error. Scans only the messages
  * appended THIS turn; `questionStop` guarantees an accepted call is the last
  * step, so a match means the turn is awaiting the user's answer. A call the

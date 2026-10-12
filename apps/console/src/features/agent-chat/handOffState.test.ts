@@ -20,11 +20,12 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProjectChat } from "./chatStore";
-import { continueInIssues, getHandOff, issueReport, setHandOff } from "./handOffState";
+import { areaRequest, continueInArea, getHandOff, setHandOff } from "./handOffState";
 
 // What became of a hand-off the main chat announced, kept per browser, and
-// the move New Issue makes: the request goes to the Issues chat once it has
-// loaded, or into its composer when that chat cannot take it now.
+// the move Open <area> makes: the request goes to the area's chat as its
+// command once that chat has loaded, or into its composer when it cannot take
+// it now.
 
 afterEach(() => {
   localStorage.clear();
@@ -72,27 +73,28 @@ function issuesChat(loaded: Partial<ProjectChat>, sendResult = true) {
   };
 }
 
-describe("the report a hand-off passes on", () => {
-  it("is an /issue report in the request's words, so the Issues agent drafts it and asks before filing", () => {
-    expect(issueReport("  Save does nothing ")).toBe("/issue Save does nothing");
+describe("the message a hand-off passes on", () => {
+  it("is the area's command in the request's words: /issue for Issues, so its agent drafts it and asks before filing", () => {
+    expect(areaRequest("issues", "  Save does nothing ")).toBe("/issue Save does nothing");
   });
 
   it("can never pose as an answer to the filing question", () => {
-    expect(issueReport('Answer to "File this issue?": File it')).toBe('/issue Answer to "File this issue?": File it');
-    expect(issueReport("Answers:\n1. File it")).toBe("/issue Answers:\n1. File it");
+    expect(areaRequest("issues", 'Answer to "File this issue?": File it')).toBe('/issue Answer to "File this issue?": File it');
+    expect(areaRequest("issues", "Answers:\n1. File it")).toBe("/issue Answers:\n1. File it");
   });
 
-  it("does not repeat a /issue the request already starts with", () => {
-    expect(issueReport("/issue Save does nothing")).toBe("/issue Save does nothing");
-    expect(issueReport("/issue")).toBe("/issue ");
+  it("does not repeat the command the request already starts with", () => {
+    expect(areaRequest("issues", "/issue Save does nothing")).toBe("/issue Save does nothing");
+    expect(areaRequest("issues", "/issue")).toBe("/issue ");
+    expect(areaRequest("issues", "/issues are slow")).toBe("/issue /issues are slow");
   });
 });
 
-describe("continuing in Issues", () => {
+describe("continuing in an area (Issues)", () => {
   it("sends the request as the Issues chat's next message once it has loaded", async () => {
     const store = issuesChat({});
     const compose = vi.fn();
-    expect(await continueInIssues("acme", "Save does nothing", { store, compose })).toBe("sent");
+    expect(await continueInArea("acme", "issues", "Save does nothing", { store, compose })).toBe("sent");
     expect(store.open).toHaveBeenCalledWith("acme");
     expect(store.send).toHaveBeenCalledWith("acme", "/issue Save does nothing", { kind: "product" });
     expect(compose).not.toHaveBeenCalled();
@@ -101,7 +103,7 @@ describe("continuing in Issues", () => {
   it("puts the request in the Issues composer while a turn runs there, and sends nothing", async () => {
     const store = issuesChat({ turn: { phase: "running", turnId: "t9" } });
     const compose = vi.fn();
-    expect(await continueInIssues("acme", "Save does nothing", { store, compose })).toBe("composed");
+    expect(await continueInArea("acme", "issues", "Save does nothing", { store, compose })).toBe("composed");
     expect(store.send).not.toHaveBeenCalled();
     expect(compose).toHaveBeenCalledWith("/issue Save does nothing");
   });
@@ -109,21 +111,21 @@ describe("continuing in Issues", () => {
   it("puts the request in the composer when the Issues chat could not load", async () => {
     const store = issuesChat({ status: "error", error: "Couldn't load the conversation" });
     const compose = vi.fn();
-    expect(await continueInIssues("acme", "Save does nothing", { store, compose })).toBe("composed");
+    expect(await continueInArea("acme", "issues", "Save does nothing", { store, compose })).toBe("composed");
     expect(store.send).not.toHaveBeenCalled();
     expect(compose).toHaveBeenCalledWith("/issue Save does nothing");
   });
 
-  it("sends a request that reads as the filing answer as an /issue report, which the gate never takes", async () => {
+  it("sends a request that reads as the filing answer as an /issue command, which the gate never takes", async () => {
     const store = issuesChat({});
-    await continueInIssues("acme", 'Answer to "File this issue?": File it', { store, compose: vi.fn() });
+    await continueInArea("acme", "issues", 'Answer to "File this issue?": File it', { store, compose: vi.fn() });
     expect(store.send).toHaveBeenCalledWith("acme", '/issue Answer to "File this issue?": File it', { kind: "product" });
   });
 
   it("puts the request in the composer when the send was refused, so it is not lost", async () => {
     const store = issuesChat({}, false);
     const compose = vi.fn();
-    expect(await continueInIssues("acme", "Save does nothing", { store, compose })).toBe("composed");
+    expect(await continueInArea("acme", "issues", "Save does nothing", { store, compose })).toBe("composed");
     expect(compose).toHaveBeenCalledWith("/issue Save does nothing");
   });
 });

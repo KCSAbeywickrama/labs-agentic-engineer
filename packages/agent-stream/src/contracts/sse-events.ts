@@ -743,47 +743,70 @@ export function isView(v: unknown): v is View {
   return (VIEWS as readonly unknown[]).includes(v);
 }
 
-// --- hand_off_to_issues (the main agent hands a report to another view's agent) ---
-//
-// The main chat's agent does not draft or file issues; when the user reports
-// something broken, asks for a capability, or starts a message with `/issue`,
-// it calls this tool with the user's own words. Like the question tools, the
-// call rides the ordinary `tool-call` frame and ENDS the turn at an ACCEPTED
-// call; it does NOT run the view's agent. The console renders it as an offer
-// to open that view's chat with `request` (or to stay in the main chat).
-
-/** The wire tool NAME that hands a request to the Issues view's agent. */
-export const HAND_OFF_TO_ISSUES = "hand_off_to_issues" as const;
-
 /**
- * The hand-off tool for each view that can receive one: the Issues chat. An
- * issue's own thread is opened from its card, never handed a report.
+ * The areas: the main-panel pages whose chat has a sub-agent of its own, and
+ * so can be handed a request from the main chat. `label` is the area's name on
+ * screen; `command` is the slash command a handed-off request reaches the
+ * area's chat as (the area's agent reads it as the user's command, never as an
+ * answer). Each area is a view; an issue's own thread is opened from its card,
+ * never handed a request, so it is not one.
  */
-export const HAND_OFF_TOOLS = { issues: HAND_OFF_TO_ISSUES } as const satisfies Partial<Record<View, string>>;
+export const AREAS = [
+  { id: "issues", label: "Issues", command: "/issue" },
+] as const satisfies readonly { id: View; label: string; command: `/${string}` }[];
 
-/** True when `toolName` is a hand-off tool. */
-export function isHandOffTool(toolName: string | undefined): boolean {
-  return handOffView(toolName) !== undefined;
+export type AreaId = (typeof AREAS)[number]["id"];
+
+/** Runtime guard for an `AreaId` value. */
+export function isAreaId(v: unknown): v is AreaId {
+  return AREAS.some((area) => area.id === v);
 }
 
-/** The view a hand-off tool opens; absent when `toolName` is not a hand-off tool. */
-export function handOffView(toolName: string | undefined): View | undefined {
-  // A view with no hand-off tool has no entry: an absent name must not match it.
-  if (toolName === undefined) return undefined;
-  const tools: Partial<Record<View, string>> = HAND_OFF_TOOLS;
-  return VIEWS.find((view) => tools[view] === toolName);
+/** The area's name on screen. */
+export function areaLabel(id: AreaId): string {
+  return areaOf(id).label;
+}
+
+/** The slash command a request handed to the area reaches its chat as. */
+export function areaCommand(id: AreaId): string {
+  return areaOf(id).command;
+}
+
+function areaOf(id: AreaId): (typeof AREAS)[number] {
+  const area = AREAS.find((a) => a.id === id);
+  if (area === undefined) throw new Error(`unknown area: ${String(id)}`);
+  return area;
+}
+
+// --- hand_off (the main agent hands a request to an area's agent) ---
+//
+// The main chat's agent does not do an area's work (draft or file issues);
+// when the user's message belongs in an area, it calls this tool with the
+// area and the user's own words. Like the question tools, the call rides the
+// ordinary `tool-call` frame and ENDS the turn at an ACCEPTED call; it does
+// NOT run the area's agent. The console renders it as an offer to open that
+// area's chat with `request` (or to stay in the main chat).
+
+/** The wire tool NAME that hands a request to an area's agent. */
+export const HAND_OFF_TOOL = "hand_off" as const;
+
+/** True when `toolName` is the hand-off tool. */
+export function isHandOffTool(toolName: string | undefined): boolean {
+  return toolName === HAND_OFF_TOOL;
 }
 
 /** Input of a hand-off tool-call. */
 export interface HandOffInput {
+  /** The area whose chat the request belongs in. */
+  area: AreaId;
   /** The user's own words, passed on unchanged (at most 2 000 characters). */
   request: string;
 }
 
-/** The result a hand-off tool resolves with: the turn now waits for the user. */
+/** The result a hand-off resolves with: the turn now waits for the user. */
 export interface HandOffResult {
   status: "awaiting_handoff";
-  view: View;
+  area: AreaId;
 }
 
 /**

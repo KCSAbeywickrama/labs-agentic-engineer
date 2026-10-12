@@ -17,8 +17,8 @@
  */
 
 import {
-  handOffView,
   isFileMutationTool,
+  isHandOffTool,
   isQuestionTool,
   opForTool,
   parseSseFrames,
@@ -26,11 +26,11 @@ import {
   toChange,
   type AskQuestionInput,
   type Op,
+  type HandOffInput,
   type StreamPart,
-  type View,
 } from "@aep/agent-stream";
 import { TurnStreamAttachError, isTurnStreamNotFound, isTurnStreamReplayTruncated, type TurnRead } from "./api/turns";
-import { filedIssueNumber, handOffRequest, isCreateIssueTool } from "./chatLog";
+import { filedIssueNumber, isCreateIssueTool, readHandOff } from "./chatLog";
 import { turnFailureText, type TurnFailure } from "./lib/turnFailure";
 import { extractStreamingQuestions, parseQuestionsInput } from "./questionCards";
 
@@ -57,8 +57,8 @@ export interface TurnSink {
   }) => void;
   question: (question: { toolCallId: string; questions: AskQuestionInput[]; streaming: boolean }) => void;
   withdrawQuestion: (toolCallId: string) => void;
-  /** The agent handed the user's request to another view's chat: the turn ends waiting for the user. */
-  handoff: (handOff: { toolCallId: string; view: View; request: string }) => void;
+  /** The agent handed the user's request to an area's chat: the turn ends waiting for the user. */
+  handoff: (handOff: { toolCallId: string } & HandOffInput) => void;
   /** The Issues agent filed an issue: its `create_issue` result names the new one. */
   filed: (filed: { toolCallId: string; issueNumber: number }) => void;
   /** A file write the bundle accepted: its `tool-result`, carrying the call's input. */
@@ -195,10 +195,9 @@ export async function foldTurn(input: {
       }
       case "tool-call": {
         // A hand-off: its complete call is the announcement.
-        const view = handOffView(part.toolName);
-        if (view) {
-          const request = handOffRequest(part.input);
-          if (part.toolCallId && !part.invalid && request !== null) sink.handoff({ toolCallId: part.toolCallId, view, request });
+        if (isHandOffTool(part.toolName)) {
+          const handOff = readHandOff(part.input);
+          if (part.toolCallId && !part.invalid && handOff !== null) sink.handoff({ toolCallId: part.toolCallId, ...handOff });
           break;
         }
         // ask_question / ask_questions (ADR-0012): the complete call is the

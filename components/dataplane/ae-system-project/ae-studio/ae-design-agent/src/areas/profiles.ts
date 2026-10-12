@@ -26,9 +26,8 @@
  * scope (`./sub-agent.ts`); no area has agent code of its own.
  */
 
+import type { AreaId } from "@aep/agent-stream";
 import { TOOLS, type RegisteredTool } from "../tools/registry.js";
-
-export type AreaId = "issues";
 
 export type FocusKind = "issue";
 
@@ -58,7 +57,10 @@ export interface AreaProfile {
   id: AreaId;
   /** The area's name on screen, and wherever the platform names its chat to another. */
   label: string;
-  /** A hand-off target: when the main agent passes the user's words here. */
+  /**
+   * A hand-off target: when the main agent passes the user's words here. The
+   * sentence completes "when …" in the `hand_off` tool's description.
+   */
   handOff?: { sentence: string };
   /** The area's own chat. */
   base: AreaScope;
@@ -66,6 +68,7 @@ export interface AreaProfile {
   focus?: Partial<Record<FocusKind, Partial<AreaScope>>>;
 }
 
+/** One profile per wire area (`@aep/agent-stream` `AREAS`), keyed by its id. */
 export const AREAS: Readonly<Record<AreaId, AreaProfile>> = {
   issues: {
     id: "issues",
@@ -73,7 +76,9 @@ export const AREAS: Readonly<Record<AreaId, AreaProfile>> = {
     handOff: {
       sentence:
         "the user reports something broken in the app, asks for a capability the app lacks, as a work item, " +
-        "wants an issue filed or found, or starts a message with `/issue`",
+        "wants an issue filed or found, or starts a message with `/issue` — to record or find a work item " +
+        "(a bug, a missing capability, an improvement); never draft or file an issue yourself, and do not " +
+        "search for issues",
     },
     base: {
       tools: ["ask_question", "ask_questions", "classify_report", "search_issues", "create_issue"],

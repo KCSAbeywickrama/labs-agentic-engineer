@@ -18,15 +18,17 @@
 
 import {
   ANSWER_PREFIX,
-  handOffView,
+  isAreaId,
   isErrorToolOutput,
+  isHandOffTool,
   isFileMutationTool,
   isQuestionTool,
   opForTool,
+  type AreaId,
   type AskQuestionInput,
+  type HandOffInput,
   type Op,
   type QuestionAnswer,
-  type View,
 } from "@aep/agent-stream";
 import { parseDesignCommand, parseInterviewCommand, parsePrototypeCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { ConversationMessage } from "./api/conversation";
@@ -101,14 +103,14 @@ export type ChatItem =
     }
   | {
       /**
-       * The agent handing the user's request to another view's chat: the turn
+       * The agent handing the user's request to an area's chat: the turn
        * ends on it, waiting for the user to go there or stay.
        */
       kind: "handoff";
       id: string;
       turnId: string;
       toolCallId: string;
-      view: View;
+      area: AreaId;
       /** The user's words, passed on unchanged. */
       request: string;
     }
@@ -197,7 +199,7 @@ export function upsertQuestion(
 export function upsertHandOff(
   items: ChatItem[],
   turnId: string,
-  handOff: Pick<HandOffItem, "toolCallId" | "view" | "request">,
+  handOff: Pick<HandOffItem, "toolCallId" | "area" | "request">,
 ): ChatItem[] {
   return upsert(items, { kind: "handoff", id: `${turnId}:h:${handOff.toolCallId}`, turnId, ...handOff });
 }
@@ -226,10 +228,10 @@ export function withFiledLast(items: ChatItem[]): ChatItem[] {
   return [...out, ...held];
 }
 
-/** The request a hand-off call carries; null when it carries none. */
-export function handOffRequest(input: unknown): string | null {
-  const request = (input as { request?: unknown } | undefined)?.request;
-  return typeof request === "string" && request.trim() ? request : null;
+/** The area and request a hand-off call carries; null when it names no known area or carries no request. */
+export function readHandOff(input: unknown): HandOffInput | null {
+  const { area, request } = (input ?? {}) as { area?: unknown; request?: unknown };
+  return isAreaId(area) && typeof request === "string" && request.trim() ? { area, request } : null;
 }
 
 /** Record a card's answers (read-only from then on), or clear them (answerable again). */
@@ -407,7 +409,7 @@ export const HISTORY_TURN = "history";
  * The server's history as chat items, in order: user rows, the agent's prose,
  * a line for each file it wrote, a card for each question it asked (so a
  * question still waiting survives a reload and stays answerable), and the
- * announcement of a hand-off to another view, and the issue a `create_issue`
+ * announcement of a hand-off to an area, and the issue a `create_issue`
  * call filed (from its result). A call the SDK rejected, and a write the
  * bundle refused, drop out; any other tool call shows nothing.
  *
@@ -475,12 +477,11 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
           path,
           state: "done",
         });
-      } else {
-        const view = handOffView(p.toolName);
-        const request = handOffRequest(p.input);
-        if (!view || request === null) continue;
+      } else if (isHandOffTool(p.toolName)) {
+        const handOff = readHandOff(p.input);
+        if (handOff === null) continue;
         flush();
-        out.push({ kind: "handoff", id: `h${out.length}`, turnId: "history", toolCallId, view, request });
+        out.push({ kind: "handoff", id: `h${out.length}`, turnId: "history", toolCallId, ...handOff });
       }
     }
     flush();

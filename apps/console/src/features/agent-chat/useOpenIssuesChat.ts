@@ -18,17 +18,33 @@
 
 import { useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import type { AreaId } from "@aep/agent-stream";
+
+/** Each area's page: its chat takes the chat panel there. */
+const AREA_PAGES = { issues: "/projects/$projectName/issues" } as const satisfies Record<AreaId, string>;
 
 /**
- * Go to the Issues page, whose chat then takes the chat panel: what Reopen,
- * the threads menu and a hand-off's Open do. Rejects when the move does not
+ * Go to the Issues page, whose chat then takes the chat panel: what Reopen
+ * and the threads menu do. Rejects when the move does not
  * happen.
  */
 export function useOpenIssuesChat(projectName: string): () => Promise<void> {
+  const openArea = useOpenAreaChat(projectName);
+  return useCallback(() => openArea("issues"), [openArea]);
+}
+
+/**
+ * Go to an area's page, whose chat then takes the chat panel: what a
+ * hand-off's Open <area> does. Rejects when the move does not happen.
+ */
+export function useOpenAreaChat(projectName: string): (area: AreaId) => Promise<void> {
   const navigate = useNavigate();
-  return useCallback(async () => {
-    await navigate({ to: "/projects/$projectName/issues", params: { projectName } });
-  }, [navigate, projectName]);
+  return useCallback(
+    async (area: AreaId) => {
+      await navigate({ to: AREA_PAGES[area], params: { projectName } });
+    },
+    [navigate, projectName],
+  );
 }
 
 /**

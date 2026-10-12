@@ -96,7 +96,7 @@ holds one thread, the page's (ADR-0003): with no card open (`chatViewFor`
 reads the Page and Card as the `issues` view) that is the Issues agent's
 chat, in place of the main chat. Its breadcrumb reads **<org> › <Project> ›
 Issues**; the project crumb goes back to the overview and the main chat.
-Create Issue, a hand-off's New Issue, Reopen and the threads menu all go to
+Create Issue, a hand-off's Open Issues, Reopen and the threads menu all go to
 the page. When the user leaves the Issues page the main chat gets its From
 Issues note. The Issues chat's thread and running turn are its alone, about
 "the project's issues", with no spec room and no Turn scope (the composer's

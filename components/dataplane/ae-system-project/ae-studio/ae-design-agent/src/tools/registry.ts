@@ -32,7 +32,7 @@
 import { ASK_QUESTION_TOOL, ASK_QUESTIONS_TOOL } from "@aep/agent-stream";
 import type { Tool } from "ai";
 import { describeArgs, type ChangeLayout, type Confirmation } from "../agents/confirmation.js";
-import { askQuestionTool, askQuestionsTool } from "../agents/main/tools/files.js";
+import { askQuestionTool, askQuestionsTool } from "../agents/main/tools/questions.js";
 import type { McpTransport } from "../shared/mcp-client.js";
 import { buildClassifyReportTool, CLASSIFY_REPORT } from "./classify-report.js";
 

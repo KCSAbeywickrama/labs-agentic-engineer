@@ -127,9 +127,14 @@ go-ahead discipline, the rules), the area block (project, area label, focus: "is
 #N"), the scope's skills inlined, the catalog of the other chat skills, the confirmation
 table generated from the scope's writes, and the surface's narration policy. Adding an
 area is a profile, its tools in the registry and its skills in `skills/` with `audience:
-[chat]`, one entry in `VIEWS`, and, for a hand-off target, one entry each in
-`HAND_OFF_TOOLS` and `HAND_OFF_DESCRIPTIONS` (`src/agents/main/tools/hand-off.ts`).
-Only the Issues view receives a hand-off and only its chat leaves the main chat a branch
+[chat]`, one entry in `VIEWS` and one in `AREAS` (`@aep/agent-stream`: id, label, the
+command a handed-off request arrives as). The main agent's one hand-off tool,
+`hand_off({area, request})` (`src/agents/main/tools/hand-off.ts`), is built from the
+profiles with a `handOff`: its `area` enum is their ids and its description their
+sentences, so a hand-off target is a sentence in its profile, never code. The schema
+refuses a request shaped as an answer; the console sends the request on as the area's
+command (`/issue <request>`), never as an answer, and `handOffStop` ends the turn on an
+accepted call. Only the Issues area receives a hand-off and only its chat leaves the main chat a branch
 note; a view's agent works on no spec, so its turn is a plain chat turn (a typed
 `/design` is words for it, not a flow), it joins no Room, takes no spec scope (a `400`),
 gets no web search and no eager skills, and its prompt is the user's message alone, with

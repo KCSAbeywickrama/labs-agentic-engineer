@@ -21,7 +21,7 @@ import {
   ANSWERS_PREFIX,
   ASK_QUESTION_TOOL,
   ASK_QUESTIONS_TOOL,
-  HAND_OFF_TO_ISSUES,
+  HAND_OFF_TOOL,
   type AskQuestionInput,
   type HandOffInput,
   type HandOffResult,
@@ -510,12 +510,12 @@ export function scriptTurn(req: TurnRequest): ScriptedTurn {
   // agent hands it over, in the user's words, and the turn ends waiting for the user to go there.
   const issueRequest = issueCommandRequest(text);
   if (issueRequest !== null || readsBroken(text)) {
-    const input: HandOffInput = { request: (issueRequest ?? text).slice(0, 2000) };
-    const output: HandOffResult = { status: "awaiting_handoff", view: "issues" };
+    const input: HandOffInput = { area: "issues", request: (issueRequest ?? text).slice(0, 2000) };
+    const output: HandOffResult = { status: "awaiting_handoff", area: "issues" };
     const s = new Script()
       .pause(500)
       .say("That sounds like a problem report.")
-      .call(`${turnKey}-handoff`, HAND_OFF_TO_ISSUES, input, output);
+      .call(`${turnKey}-handoff`, HAND_OFF_TOOL, input, output);
     return { display: text, ...s.end(), progress };
   }
 

@@ -55,14 +55,14 @@ test("buildFileToolSet omits loadSkill when no skills are supplied (skill-free =
   // The file-mutation tools plus the always-registered UI tools, in
   // declaration order: the HITL questions (console ADR-0012 / #270) and the
   // fire-and-forget plan declaration (ADR-0022 / #576), with the hand-off to
-  // the Issues agent after the questions.
+  // an area's agent after the questions.
   assert.deepEqual(Object.keys(tools), [
     "addFile",
     "editFile",
     "removeFile",
     "ask_question",
     "ask_questions",
-    "hand_off_to_issues",
+    "hand_off",
     "declare_plan",
   ]);
 });

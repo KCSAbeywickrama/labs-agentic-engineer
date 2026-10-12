@@ -101,31 +101,34 @@ describe("historyItems", () => {
   });
 });
 
-describe("a hand-off to another view's chat", () => {
+describe("a hand-off to an area's chat", () => {
   it("reads back from the history as its announcement, and no other unknown tool call shows", () => {
     const items = historyItems([
       {
         role: "assistant",
         content: [
           { type: "text", text: "That sounds like a problem report." },
-          { type: "tool-call", toolCallId: "h1", toolName: "hand_off_to_issues", input: { request: "Save does nothing" } },
+          { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issues", request: "Save does nothing" } },
           { type: "tool-call", toolCallId: "x1", toolName: "some_other_tool", input: { request: "no" } },
         ],
       },
     ]);
     expect(items).toEqual([
       { kind: "agent", id: "h0", turnId: "history", text: "That sounds like a problem report." },
-      { kind: "handoff", id: "h1", turnId: "history", toolCallId: "h1", view: "issues", request: "Save does nothing" },
+      { kind: "handoff", id: "h1", turnId: "history", toolCallId: "h1", area: "issues", request: "Save does nothing" },
     ]);
   });
 
-  it("drops a hand-off the SDK rejected, or one with no request", () => {
+  it("drops a hand-off the SDK rejected, or one with no request or no known area", () => {
     const items = historyItems([
       {
         role: "assistant",
         content: [
-          { type: "tool-call", toolCallId: "bad", toolName: "hand_off_to_issues", input: { request: "x" } },
-          { type: "tool-call", toolCallId: "empty", toolName: "hand_off_to_issues", input: {} },
+          { type: "tool-call", toolCallId: "bad", toolName: "hand_off", input: { area: "issues", request: "x" } },
+          { type: "tool-call", toolCallId: "empty", toolName: "hand_off", input: { area: "issues" } },
+          { type: "tool-call", toolCallId: "nowhere", toolName: "hand_off", input: { request: "x" } },
+          { type: "tool-call", toolCallId: "unknown", toolName: "hand_off", input: { area: "issue", request: "x" } },
+          { type: "tool-call", toolCallId: "old", toolName: "hand_off_to_issues", input: { request: "x" } },
         ],
       },
       { role: "tool", content: [{ type: "tool-result", toolCallId: "bad", output: { type: "error-text", value: "invalid input" } }] },
@@ -135,11 +138,11 @@ describe("a hand-off to another view's chat", () => {
 
   it("is a turn's output: placed once by its call, and cleared before a replay", () => {
     let items: ChatItem[] = [{ kind: "user", id: "u1", text: "Save does nothing", state: "sent", turnId: "t1" }];
-    items = upsertHandOff(items, "t1", { toolCallId: "c1", view: "issues", request: "Save does nothing" });
-    items = upsertHandOff(items, "t1", { toolCallId: "c1", view: "issues", request: "Save does nothing" });
+    items = upsertHandOff(items, "t1", { toolCallId: "c1", area: "issues", request: "Save does nothing" });
+    items = upsertHandOff(items, "t1", { toolCallId: "c1", area: "issues", request: "Save does nothing" });
     expect(items).toEqual([
       { kind: "user", id: "u1", text: "Save does nothing", state: "sent", turnId: "t1" },
-      { kind: "handoff", id: "t1:h:c1", turnId: "t1", toolCallId: "c1", view: "issues", request: "Save does nothing" },
+      { kind: "handoff", id: "t1:h:c1", turnId: "t1", toolCallId: "c1", area: "issues", request: "Save does nothing" },
     ]);
     expect(dropTurnOutput(items, "t1").map((i) => i.id)).toEqual(["u1"]);
   });

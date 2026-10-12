@@ -153,12 +153,12 @@ describe("a turn's lifecycle", () => {
   it("shows a hand-off the turn ends on as its announcement", async () => {
     const { store, streams, chat } = setup();
     await store.open(PROJECT);
-    const input = { request: "Save does nothing" };
+    const input = { area: "issues", request: "Save does nothing" };
     streams.set(
       "t1",
       sse([
-        { type: "tool-call", toolCallId: "c1", toolName: "hand_off_to_issues", input },
-        { type: "tool-result", toolCallId: "c1", toolName: "hand_off_to_issues", input, output: { status: "awaiting_handoff", view: "issues" } },
+        { type: "tool-call", toolCallId: "c1", toolName: "hand_off", input },
+        { type: "tool-result", toolCallId: "c1", toolName: "hand_off", input, output: { status: "awaiting_handoff", area: "issues" } },
         { type: "turn-completed" },
       ]),
     );
@@ -169,7 +169,7 @@ describe("a turn's lifecycle", () => {
       id: "t1:h:c1",
       turnId: "t1",
       toolCallId: "c1",
-      view: "issues",
+      area: "issues",
       request: "Save does nothing",
     });
   });

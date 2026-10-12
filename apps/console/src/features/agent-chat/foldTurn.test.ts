@@ -122,29 +122,38 @@ describe("foldTurn", () => {
 
   it("announces a hand-off from its complete call, and nothing for another tool it does not know", async () => {
     const { of, calls } = await fold([
-      { type: "tool-input-start", id: "h1", toolName: "hand_off_to_issues" },
-      { type: "tool-input-delta", id: "h1", delta: '{"request":"Save does nothing"}' },
+      { type: "tool-input-start", id: "h1", toolName: "hand_off" },
+      { type: "tool-input-delta", id: "h1", delta: '{"area":"issues","request":"Save does nothing"}' },
       { type: "tool-input-end", id: "h1" },
-      { type: "tool-call", toolCallId: "h1", toolName: "hand_off_to_issues", input: { request: "Save does nothing" } },
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issues", request: "Save does nothing" } },
       {
         type: "tool-result",
         toolCallId: "h1",
-        toolName: "hand_off_to_issues",
-        input: { request: "Save does nothing" },
-        output: { status: "awaiting_handoff", view: "issues" },
+        toolName: "hand_off",
+        input: { area: "issues", request: "Save does nothing" },
+        output: { status: "awaiting_handoff", area: "issues" },
       },
       { type: "tool-call", toolCallId: "x1", toolName: "some_other_tool", input: { request: "no" } },
       { type: "turn-completed" },
     ]);
-    expect(of("handoff")).toEqual([{ toolCallId: "h1", view: "issues", request: "Save does nothing" }]);
+    expect(of("handoff")).toEqual([{ toolCallId: "h1", area: "issues", request: "Save does nothing" }]);
     expect(calls.map(([k]) => k)).toEqual(["handoff", "ended"]);
   });
 
   it("announces no hand-off the SDK rejected", async () => {
     const { of } = await fold([
-      { type: "tool-call", toolCallId: "h1", toolName: "hand_off_to_issues", input: { request: "x" }, invalid: true },
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issues", request: "x" }, invalid: true },
     ]);
     expect(of("handoff")).toEqual([]);
+  });
+
+  it("announces no hand-off to an area it does not know", async () => {
+    const { of, calls } = await fold([
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issue", request: "x" } },
+      { type: "tool-call", toolCallId: "h2", toolName: "hand_off", input: { request: "x" } },
+    ]);
+    expect(of("handoff")).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("withdraws a question the SDK rejected", async () => {

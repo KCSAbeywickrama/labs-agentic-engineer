@@ -55,23 +55,23 @@ describe("the mock main agent's hand-off", () => {
       turnKey: "t1",
     });
   const handOffs = (instruction: string) =>
-    product(instruction).frames.filter((f) => f.part.type === "tool-call" && f.part.toolName === "hand_off_to_issues");
+    product(instruction).frames.filter((f) => f.part.type === "tool-call" && f.part.toolName === "hand_off");
 
   it("hands a report of something broken to Issues, in the user's words, and ends there", () => {
     const report = "The Save button on the expense form does nothing";
     const turn = product(report);
-    expect(handOffs(report).map((f) => f.part.input)).toEqual([{ request: report }]);
+    expect(handOffs(report).map((f) => f.part.input)).toEqual([{ area: "issues", request: report }]);
     expect(turn.frames.find((f) => f.part.type === "tool-result")?.part.output).toEqual({
       status: "awaiting_handoff",
-      view: "issues",
+      area: "issues",
     });
     expect(turn.frames.at(-1)?.part.type).toBe("turn-completed");
     expect(turn.frames.filter((f) => f.part.type === "text-delta").length).toBeGreaterThan(0);
     expect(turn.reply[0]?.content).toContainEqual({
       type: "tool-call",
       toolCallId: "t1-handoff",
-      toolName: "hand_off_to_issues",
-      input: { request: report },
+      toolName: "hand_off",
+      input: { area: "issues", request: report },
     });
   });
 
@@ -83,12 +83,12 @@ describe("the mock main agent's hand-off", () => {
   });
 
   it("hands an /issue message to Issues too, with the words after the command as the request", () => {
-    expect(handOffs("/issue Save does nothing").map((f) => f.part.input)).toEqual([{ request: "Save does nothing" }]);
-    expect(handOffs("/issue   Export is slow").map((f) => f.part.input)).toEqual([{ request: "Export is slow" }]);
+    expect(handOffs("/issue Save does nothing").map((f) => f.part.input)).toEqual([{ area: "issues", request: "Save does nothing" }]);
+    expect(handOffs("/issue   Export is slow").map((f) => f.part.input)).toEqual([{ area: "issues", request: "Export is slow" }]);
   });
 
   it("hands a bare /issue off as it is, and leaves other commands and /issuesomething alone", () => {
-    expect(handOffs("/issue").map((f) => f.part.input)).toEqual([{ request: "/issue" }]);
+    expect(handOffs("/issue").map((f) => f.part.input)).toEqual([{ area: "issues", request: "/issue" }]);
     expect(handOffs("/issues are great")).toHaveLength(0);
     expect(handOffs("/interview F4")).toHaveLength(0);
   });

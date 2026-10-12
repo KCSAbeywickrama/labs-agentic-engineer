@@ -18,26 +18,27 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HAND_OFF_TO_ISSUES, HAND_OFF_TOOLS, handOffView, isHandOffTool, VIEWS } from "../src/contracts/sse-events.js";
+import { AREAS, areaCommand, areaLabel, HAND_OFF_TOOL, isAreaId, isHandOffTool, VIEWS } from "../src/contracts/sse-events.js";
 
-test("the hand-off tool is named per view and recognised by name", () => {
-  assert.equal(HAND_OFF_TO_ISSUES, "hand_off_to_issues");
-  assert.equal(isHandOffTool("hand_off_to_issues"), true);
+test("one hand-off tool, recognised by name", () => {
+  assert.equal(HAND_OFF_TOOL, "hand_off");
+  assert.equal(isHandOffTool("hand_off"), true);
+  assert.equal(isHandOffTool("hand_off_to_issues"), false);
   assert.equal(isHandOffTool("ask_question"), false);
   assert.equal(isHandOffTool(undefined), false);
 });
 
-test("handOffView maps the tool name to the view it opens", () => {
-  assert.equal(handOffView("hand_off_to_issues"), "issues");
-  assert.equal(handOffView("ask_question"), undefined);
-  // The issue view has no hand-off tool; its missing entry matches nothing.
-  assert.equal(handOffView(undefined), undefined);
+test("the areas: Issues, by id and label, reached by its /issue command", () => {
+  assert.deepEqual(AREAS, [{ id: "issues", label: "Issues", command: "/issue" }]);
+  assert.equal(areaLabel("issues"), "Issues");
+  assert.equal(areaCommand("issues"), "/issue");
 });
 
-test("only the Issues view receives a hand-off; an issue's own thread has none", () => {
-  assert.deepEqual(Object.keys(HAND_OFF_TOOLS), ["issues"]);
-  for (const view of Object.keys(HAND_OFF_TOOLS)) assert.ok((VIEWS as readonly string[]).includes(view), view);
-  assert.equal("issue" in HAND_OFF_TOOLS, false);
-  // No view's name is mistaken for a hand-off tool.
-  for (const view of VIEWS) assert.equal(isHandOffTool(view), false, view);
+test("every area is a view; an issue's own thread is not an area", () => {
+  for (const area of AREAS) assert.ok((VIEWS as readonly string[]).includes(area.id), area.id);
+  assert.equal(isAreaId("issues"), true);
+  assert.equal(isAreaId("issue"), false);
+  assert.equal(isAreaId(undefined), false);
+  // No area's name is mistaken for the hand-off tool.
+  for (const area of AREAS) assert.equal(isHandOffTool(area.id), false, area.id);
 });

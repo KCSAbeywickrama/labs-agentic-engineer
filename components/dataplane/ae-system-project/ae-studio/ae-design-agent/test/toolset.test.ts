@@ -42,7 +42,7 @@ test("files tool set (no skills) is the file tools + the UI and hand-off tools",
     "removeFile",
     "ask_question",
     "ask_questions",
-    "hand_off_to_issues",
+    "hand_off",
     "declare_plan",
   ]);
 });
@@ -59,7 +59,7 @@ test("files tool set with skills adds only the skill loader", () => {
     "removeFile",
     "ask_question",
     "ask_questions",
-    "hand_off_to_issues",
+    "hand_off",
     "declare_plan",
     "loadSkill",
   ]);

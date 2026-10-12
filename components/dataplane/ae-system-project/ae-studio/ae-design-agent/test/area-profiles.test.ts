@@ -27,6 +27,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { AREAS as WIRE_AREAS } from "@aep/agent-stream";
 import { AREAS, scopeFor, scopeProblems, type AreaScope } from "../src/areas/profiles.js";
 import { describeChange, registeredTool, TOOLS } from "../src/tools/registry.js";
 import { loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
@@ -108,6 +109,14 @@ test("every skill a profile inlines ships in skills/ for the chat audience only"
       assert.equal(body.content.includes(entry.confirm.question), false, `${skill} restates "${entry.confirm.question}"`);
     }
   }
+});
+
+test("each profile is a wire area, under the wire's id and label", () => {
+  assert.deepEqual(
+    Object.values(AREAS).map((a) => ({ id: a.id, label: a.label })),
+    WIRE_AREAS.map((a) => ({ id: a.id, label: a.label })),
+  );
+  for (const [key, area] of Object.entries(AREAS)) assert.equal(area.id, key);
 });
 
 test("a hand-off target says when to hand off", () => {
