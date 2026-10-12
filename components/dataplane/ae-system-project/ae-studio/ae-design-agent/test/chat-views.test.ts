@@ -208,3 +208,53 @@ test("Turn socket: removing an issue's thread is 204, and waits for a turn runni
     assert.equal(await removeOnSocket(edge, `/projects/${PROJECT}/issues/7/thread?before=never`), 400);
   });
 });
+
+test("ThreadBook: a deferred removal whose thread already went drops the turn's stored messages and its pending entry", async () => {
+  const store = new InMemoryConversationStore();
+  const threads = new ThreadBook({ store });
+  const old = threads.current("greeter", "Ann", { view: "issue", issueNumber: 7 }).conversationId;
+  threads.deferIssueRemoval("greeter", 7, old, new Date(Date.now() + 60_000));
+  // The thread goes another way (rotated full) while its turn still runs; the turn then saves.
+  threads.noteContextTokens("greeter", old, 900);
+  assert.equal(await threads.admit("greeter", old, 1000), "rotated");
+  const at = new Date();
+  await store.save({ id: old, messages: [{ role: "user", content: "late" }], turns: [], status: "done", createdAt: at, updatedAt: at });
+  await threads.turnEnded("greeter", old);
+  assert.equal(await store.get(old), null, "no orphaned store entry");
+});
+
+test("v1: an issue closed while its turn runs keeps its thread until the turn ends; then nothing of it is stored", () => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
+  return withEdge({ models: [mockModel([{ kind: "text", text: "working" }], { hold })], issues: { 7: { state: "open" } } }, async (edge) => {
+    const tok = await edge.token();
+    const seven = await current(edge, tok, "?view=issue&issueNumber=7");
+    const turn = await json<{ turnId: string }>(await send(edge, tok, seven, "summarise it"));
+    edge.tools.setIssueState(7, "closed");
+    const closed = await call(edge, `/v1/projects/${PROJECT}/conversations/current?view=issue&issueNumber=7`, tok);
+    assert.equal(closed.status, 409);
+    assert.equal((await json<{ code: string }>(closed)).code, "issue_closed");
+    assert.equal((await send(edge, tok, seven, "again")).status, 409);
+    assert.notEqual(edge.threads.chatOf(PROJECT, seven), null, "the running turn keeps its thread");
+    release();
+    await streamOf(edge, tok, turn.turnId);
+    await until(() => edge.threads.chatOf(PROJECT, seven) === null, "the removal at the turn's end");
+    for (let i = 0; i < 50 && (await edge.store.get(seven)) !== null; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(await edge.store.get(seven), null, "no orphaned store entry");
+  });
+});
+
+test("v1: a main turn refused at its launch leaves the Issues chat's notes for the next main turn", () =>
+  withEdge({ models: [] }, async (edge) => {
+    const tok = await edge.token();
+    const main = await current(edge, tok);
+    edge.threads.noteOutcome(PROJECT, "Filed #3: Save fails");
+    const held = edge.tools.holdLookups();
+    const before = edge.tools.lookups.length;
+    const sent = send(edge, tok, main, "what happened?");
+    await until(() => edge.tools.lookups.length === before + 1, "the start to reach its lookup");
+    edge.turns.refuse();
+    held.release();
+    assert.equal((await sent).status, 503);
+    assert.deepEqual(edge.threads.takeBranchNotes(PROJECT), [{ view: "issues", turns: 1, outcome: "Filed #3: Save fails" }]);
+  }));

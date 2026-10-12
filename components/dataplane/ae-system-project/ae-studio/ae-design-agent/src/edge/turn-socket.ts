@@ -42,7 +42,7 @@ import type { components } from "../generated/turn-socket.js";
 import { ReplayTruncatedError, type ReplayFrame, type ReplayPart, type TurnEndPart } from "../turns/replay-buffer.js";
 import type { TurnDesk, TurnStatus } from "../turns/turn-desk.js";
 import { isProjectName, TurnStartError, type ServerTurnRequest, type TurnStarter } from "../turns/start-turn.js";
-import { chatKey } from "../conversations/chat.js";
+import { removeIssueThread } from "../turns/issue-thread-removal.js";
 import type { ThreadBook } from "../conversations/thread-book.js";
 import { notFound, sendProblem, sendTurnStartError } from "./http.js";
 
@@ -257,17 +257,6 @@ const internalError: ErrorRequestHandler = (_err, _req, res, next) => {
 };
 
 const ISSUE_NUMBER_RE = /^[1-9][0-9]{0,8}$/;
-
-/**
- * Remove issue `number`'s chat thread of `project`, bounded by `before`: now
- * when no turn runs on it, else when that turn ends, so its save never
- * brings the thread back. Idempotent.
- */
-async function removeIssueThread(deps: TurnSocketDeps, project: string, number: number, before: Date): Promise<void> {
-  const active = deps.desk.active({ kind: "project", project, chat: chatKey({ view: "issue", issueNumber: number }) });
-  if (active) deps.threads.deferIssueRemoval(project, number, active.conversationId, before);
-  else await deps.threads.removeIssueThread(project, number, before);
-}
 
 /** The Turn socket's app: `POST /turns` and `DELETE /projects/{p}/issues/{n}/thread`. */
 export function createTurnSocketApp(deps: TurnSocketDeps): Express {

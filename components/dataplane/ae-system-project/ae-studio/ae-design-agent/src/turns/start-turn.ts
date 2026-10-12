@@ -83,6 +83,7 @@ import { connectionHost, type ModelConnection } from "../shared/model.js";
 import { projectSnapshotDir, skillsSnapshotDir } from "../shared/snapshot-path.js";
 import type { ConversationStore } from "../store/conversation-store.js";
 import { ToolsSocketError, type ProjectSnapshot, type ToolsSocket } from "../tools-socket/client.js";
+import { removeIssueThread } from "./issue-thread-removal.js";
 import { designFeaturesOf, savesItsEnd, startTurnSummary, turnSpecFor } from "./start-spec.js";
 import {
   DeskClosedError,
@@ -242,8 +243,11 @@ interface Launch {
   roomProject?: string;
   /** The project chat the turn runs in (the main chat for every turn but an Issues or issue chat's). */
   chat: Chat;
-  /** A main-chat browser turn: what the Issues chat came to meanwhile. */
-  branchNotes?: BranchNote[];
+  /**
+   * A main-chat browser turn: told what the Issues chat came to meanwhile,
+   * taken once the desk accepted the turn (a refused start leaves them).
+   */
+  takesBranchNotes?: true;
   route: "project" | "marketplace";
   /** A one-shot conversation (Plan): no earlier turn's facts, dropped from the store at the end. */
   throwaway?: boolean;
@@ -300,15 +304,15 @@ export class TurnStarter {
       ...(this.deps.room && chat.view === undefined ? { roomProject: req.project } : {}),
       route: "project",
       chat,
-      ...(chat.view === undefined ? { branchNotes: this.deps.threads.takeBranchNotes(req.project) } : {}),
+      ...(chat.view === undefined ? { takesBranchNotes: true } : {}),
     }).turnId;
   }
 
   /**
    * Refuse an issue's chat unless the issue is open: `404 issue_unknown` for
    * no such issue, `409 issue_closed` for a closed one, whose thread is then
-   * removed (a close the pod was not told of included). The issue tools not
-   * answering is `503 tools_unavailable`.
+   * removed (a close the pod was not told of included), at its running turn's
+   * end when one runs. The issue tools not answering is `503 tools_unavailable`.
    */
   async checkIssueOpen(project: string, issueNumber: number): Promise<void> {
     if (!isProjectName(project)) throw new TurnStartError(404, "project_unknown", "no such project");
@@ -320,7 +324,7 @@ export class TurnStarter {
     }
     if (state === "unknown") throw new TurnStartError(404, "issue_unknown", "no such issue");
     if (state === "closed") {
-      await this.deps.threads.removeIssueThread(project, issueNumber, new Date());
+      await removeIssueThread(this.deps, project, issueNumber, new Date());
       throw new TurnStartError(409, "issue_closed", "the issue is closed");
     }
   }
@@ -628,6 +632,8 @@ export class TurnStarter {
     const m = l.material;
     const author = authorOf(l.credit);
     return async (emit, signal): Promise<TurnOutcome> => {
+      // Taken before the first await: the desk calls the run as it accepts the turn.
+      const branchNotes: BranchNote[] = l.takesBranchNotes ? deps.threads.takeBranchNotes(projectOf(l.scope)) : [];
       let contextTokens: number | undefined;
       const onEvent = (part: StreamPart): void => {
         contextTokens = stepContextOf(part) ?? contextTokens;
@@ -667,7 +673,7 @@ export class TurnStarter {
             ...(wantsRegisterDraftTool(l.spec, l.route) ? { registerDraft: true } : {}),
             ...(viewMcp ? { mcp: viewMcp } : catalogTurn(gates) ? { mcp: deps.tools } : {}),
             ...(chat.view === "issue" ? { issueNumber: chat.issueNumber } : {}),
-            ...(l.branchNotes?.length ? { branchNotes: l.branchNotes } : {}),
+            ...(branchNotes.length ? { branchNotes } : {}),
             webSearch: chat.view === undefined && designOrRoomTurn(gates),
             ...(eager.length ? { eagerSkills: eager } : {}),
             ...(deps.surface ? { surface: deps.surface } : {}),

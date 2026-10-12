@@ -267,13 +267,21 @@ export class ThreadBook {
     this.pendingRemovals.set(key, { conversationId, before: bound });
   }
 
-  /** A turn on `conversationId` ended: a removal waiting for it runs now. */
+  /**
+   * A turn on `conversationId` ended: a removal waiting for it runs now. When
+   * that thread already went another way, the removal is dropped, and so are
+   * the messages the turn's save stored again (no current thread names them).
+   */
   async turnEnded(project: string, conversationId: string): Promise<void> {
     for (const [key, pending] of this.pendingRemovals) {
       if (pending.conversationId !== conversationId) continue;
       const thread = this.threads.get(key);
-      if (thread?.project !== project || thread.chat.view !== "issue") continue;
-      await this.removeIssueThread(project, thread.chat.issueNumber, pending.before);
+      if (thread?.id === conversationId && thread.project === project && thread.chat.view === "issue") {
+        await this.removeIssueThread(project, thread.chat.issueNumber, pending.before);
+        continue;
+      }
+      this.pendingRemovals.delete(key);
+      if (!this.byId.has(conversationId)) await this.store.delete(conversationId);
     }
   }
 
