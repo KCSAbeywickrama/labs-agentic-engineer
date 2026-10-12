@@ -35,14 +35,22 @@ export function issueMcpPath(project: string, issueNumber: number): string {
 }
 
 /**
+ * The `get_issue` error codes (aep-api's `_meta["aep/code"]`) that are a
+ * verdict: the repository holds no such issue (a pull request's number
+ * included), or the project has no repository to hold one.
+ */
+const NO_SUCH_ISSUE = new Set(["issue_not_found", "repo_not_found"]);
+
+/**
  * `open` or `closed` as the issue's `get_issue` says, `unknown` when the
- * project has no such issue. Throws when the tools could not answer (the
- * socket, aep-api or GitHub down): no verdict on the issue.
+ * project has no such issue (by the tool error's code, never its words).
+ * Throws when the tools could not answer (the socket, aep-api or GitHub down,
+ * or an error without such a code): no verdict on the issue.
  */
 export async function issueState(tools: McpTransport, project: string, issueNumber: number): Promise<"open" | "closed" | "unknown"> {
-  const { text, isError } = await callMcpTool(mcpRoute(tools, issueMcpPath(project, issueNumber)), "get_issue");
+  const { text, isError, code } = await callMcpTool(mcpRoute(tools, issueMcpPath(project, issueNumber)), "get_issue");
   if (isError) {
-    if (/not found/i.test(text)) return "unknown";
+    if (code !== undefined && NO_SUCH_ISSUE.has(code)) return "unknown";
     throw new Error("get_issue failed");
   }
   let state: unknown;

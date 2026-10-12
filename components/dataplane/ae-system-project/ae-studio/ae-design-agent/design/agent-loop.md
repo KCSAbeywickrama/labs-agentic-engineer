@@ -124,21 +124,25 @@ status reads past it.
 **Branch notes.** An Issues turn's result carries its `outcome` (`src/agents/issues/
 outcome.ts`: `Filed #N: <title>` when it filed, else its last reply, one line, at most 400
 characters); the `ThreadBook` counts them per project (`noteOutcome`), and the main chat's
-next browser turn takes them (`takeBranchNotes`, once: a main turn that fails does not hand
-them on) and opens its prompt with one quoted, labelled `Meanwhile in Issues (N turns): …`
+next browser turn takes them as the desk accepts it (`takeBranchNotes`, once: a start the
+pod refuses leaves them, a main turn that fails does not hand them on) and opens its prompt with one quoted, labelled `Meanwhile in Issues (N turns): …`
 line (`branchNotesNote`).
 
 An **issue's thread** (`view: "issue"`) is the chat on one filed issue's card;
 `createIssueAgent` names its issue number in its prompt. It exists only while the issue is
 open: opening its thread and starting a turn on it first read the issue through its own
 route's `get_issue` (`conversations/issue-state.ts`), and a closed issue is `409
-issue_closed` (its thread is removed), an unknown one `404 issue_unknown`. aep-api removes
+issue_closed` (its thread is removed), an unknown one `404 issue_unknown`. Unknown is read
+from the tool error's code (`_meta["aep/code"]`: `issue_not_found`, which a pull request's
+number also is, or `repo_not_found`), never its words; any other failure is `503
+tools_unavailable`. aep-api removes
 the thread when it sees the issue closed or reopened (the issue agent's `close_issue`,
 GitHub's `issues.closed`/`issues.reopened`) through ae-studio-tools and the Turn socket's
 `DELETE /projects/{p}/issues/{n}/thread?before=`: only threads created before the event go,
 so a reopened issue's fresh thread stays, and a thread whose turn is running goes when that
 turn ends (`deferIssueRemoval`, run by the desk's `finishedTurnSink`), so the turn's own
-save never brings it back. Its tools are the question tools and,
+save never brings it back. The start path finding the issue closed removes it the same way
+(`turns/issue-thread-removal.ts` is the one removal both use). Its tools are the question tools and,
 from the turn's MCP block, the issue's own tools by contract name (`get_issue`,
 `list_components`, `comment_issue`, `edit_issue`, `close_issue`, `reopen_issue`,
 `hand_to_coding_agent`); anything else the server lists is left out. The route names the

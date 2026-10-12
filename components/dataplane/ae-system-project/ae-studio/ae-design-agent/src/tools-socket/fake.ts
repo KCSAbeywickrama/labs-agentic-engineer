@@ -216,7 +216,7 @@ export class FakeToolsSocket implements ToolsSocket {
       const issue = this.issues[number];
       if (!issue) {
         const text = "the issue was not found on the project's repository; nothing was done";
-        return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text }], isError: true } });
+        return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text }], isError: true, _meta: { "aep/code": "issue_not_found" } } });
       }
       const text = JSON.stringify({ number, title: issue.title ?? `Issue ${number}`, state: issue.state });
       return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text }] } });

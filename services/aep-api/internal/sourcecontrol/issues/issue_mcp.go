@@ -122,7 +122,7 @@ type issueCall struct {
 func (c issueCall) fail(text string) { mcprpc.WriteToolError(c.w, c.id, text) }
 
 func (c issueCall) failed(action string, err error) {
-	c.fail(userIssueFailure(c.r, action, err))
+	writeIssueFailure(c.w, c.r, c.id, action, err)
 }
 
 func (c issueCall) done(text string) { mcprpc.WriteToolText(c.w, c.id, text) }

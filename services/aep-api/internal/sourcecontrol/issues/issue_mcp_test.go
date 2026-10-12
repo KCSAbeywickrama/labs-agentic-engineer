@@ -228,6 +228,37 @@ func TestIssueMCPGetIssueNotFoundIsAToolError(t *testing.T) {
 	}
 }
 
+// A failed issue tool names why in _meta["aep/code"], so a caller (the design
+// agent's open check) branches on a code, never on the model's words.
+func TestIssueMCPToolErrorsCarryTheirCode(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{fmt.Errorf("get: %w", sourcecontrol.ErrIssueNotFound), "issue_not_found"},
+		{fmt.Errorf("get: %w", sourcecontrol.ErrRepoNotFound), "repo_not_found"},
+		{errors.New("github down"), "unavailable"},
+	} {
+		r := newIssueRig()
+		r.issues.err = tc.err
+		w := rpcAs(t, issues.NewUserMCPHandler(r.issues, issues.IssueAgentPorts{}), &issueScope, map[string]any{
+			"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "get_issue"},
+		})
+		var resp struct {
+			Result struct {
+				IsError bool              `json:"isError"`
+				Meta    map[string]string `json:"_meta"`
+			} `json:"result"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.Result.IsError || resp.Result.Meta["aep/code"] != tc.code {
+			t.Errorf("%v: result = %+v, want a tool error coded %q", tc.err, resp.Result, tc.code)
+		}
+	}
+}
+
 func TestIssueMCPListComponents(t *testing.T) {
 	r := newIssueRig()
 	text, isErr := r.call(t, issueScope, "list_components", nil)

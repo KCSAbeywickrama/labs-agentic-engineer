@@ -138,3 +138,14 @@ func TestIssuesUpstreams_PostToTheirRoute(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A tool error's result comes back as aep-api answered it, its
+// _meta["aep/code"] included: the design agent's open check reads that code.
+func TestIssuesServer_ToolErrorKeepsItsCode(t *testing.T) {
+	result := `{"content":[{"type":"text","text":"gone"}],"isError":true,"_meta":{"aep/code":"issue_not_found"}}`
+	f := &fakeIssuesCaller{reply: `{"jsonrpc":"2.0","id":1,"result":` + result + `}`}
+	out, err := IssuesServer{}.Call(context.Background(), NewIssuesUpstreams(f).Issue("shop", 3), IssueTools, "tools/call", json.RawMessage(`{"name":"get_issue"}`))
+	if err != nil || string(out) != result {
+		t.Fatalf("tools/call = %s, err %v", out, err)
+	}
+}

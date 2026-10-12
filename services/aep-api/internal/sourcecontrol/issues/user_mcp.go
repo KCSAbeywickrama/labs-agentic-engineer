@@ -140,7 +140,7 @@ func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.I
 		}
 		found, err := issues.ListIssues(ctx, scope.OrgID, scope.ProjectID, nil)
 		if err != nil {
-			mcprpc.WriteToolError(w, req.ID, userIssueFailure(r, "search issues", err))
+			writeIssueFailure(w, r, req.ID, "search issues", err)
 			return
 		}
 		inState := make([]sourcecontrol.IssueInfo, 0, len(found))
@@ -176,7 +176,7 @@ func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.I
 			Labels: []string{args.Kind, userReportLabel},
 		})
 		if err != nil {
-			mcprpc.WriteToolError(w, req.ID, userIssueFailure(r, "file the issue", err))
+			writeIssueFailure(w, r, req.ID, "file the issue", err)
 			return
 		}
 		mcprpc.WriteToolText(w, req.ID, mcprpc.MustJSON(struct {
@@ -185,6 +185,33 @@ func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.I
 		}{issue.Number, issue.URL}))
 	default:
 		mcprpc.WriteToolError(w, req.ID, "unknown tool: "+call.Name)
+	}
+}
+
+// Issue tool error codes (_meta "aep/code"): why a source-control call failed.
+const (
+	codeIssueNotFound = "issue_not_found"
+	codeRepoNotFound  = "repo_not_found"
+	codeUnavailable   = "unavailable"
+)
+
+// writeIssueFailure answers a failed source-control call as a tool error: the
+// short text the agent reads (userIssueFailure) and the code a program
+// branches on (issueFailureCode).
+func writeIssueFailure(w http.ResponseWriter, r *http.Request, id json.RawMessage, action string, err error) {
+	mcprpc.WriteToolErrorCode(w, id, issueFailureCode(err), userIssueFailure(r, action, err))
+}
+
+// issueFailureCode is err's tool error code: the repository holds no such
+// issue, the project has no repository, or anything else (no verdict).
+func issueFailureCode(err error) string {
+	switch {
+	case errors.Is(err, sourcecontrol.ErrIssueNotFound):
+		return codeIssueNotFound
+	case errors.Is(err, sourcecontrol.ErrRepoNotFound):
+		return codeRepoNotFound
+	default:
+		return codeUnavailable
 	}
 }
 

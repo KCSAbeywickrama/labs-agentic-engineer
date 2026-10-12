@@ -68,7 +68,15 @@ interface McpToolContent {
 interface McpToolCallResult {
   content?: McpToolContent[];
   isError?: boolean;
+  _meta?: Record<string, unknown>;
 }
+
+/**
+ * The `_meta` key under which aep-api's issue tools name why a call failed
+ * (`issue_not_found`, `repo_not_found`, `unavailable`): the code a caller
+ * branches on, where the text is the model's to read.
+ */
+const TOOL_ERROR_CODE_KEY = "aep/code";
 
 let nextRpcId = 1;
 
@@ -185,16 +193,17 @@ export function mcpRoute(socket: McpTransport, path: string): McpTransport {
 }
 
 /**
- * One `tools/call` the pod makes itself, not the model: the tool's text and
- * whether the server flagged it an error. Throws when the socket, HTTP or
- * JSON-RPC fails, so a caller can tell "the tool said no" from "no answer".
+ * One `tools/call` the pod makes itself, not the model: the tool's text,
+ * whether the server flagged it an error and, for an error, the code it named
+ * (`_meta["aep/code"]`), if any. Throws when the socket, HTTP or JSON-RPC
+ * fails, so a caller can tell "the tool said no" from "no answer".
  */
 export async function callMcpTool(
   socket: McpTransport,
   name: string,
   args: Record<string, unknown> = {},
   options: { timeoutMs?: number } = {},
-): Promise<{ text: string; isError: boolean }> {
+): Promise<{ text: string; isError: boolean; code?: string }> {
   const result = (await rpc(socket.mcpFetch, "tools/call", { name, arguments: args }, options.timeoutMs ?? RPC_TIMEOUT_MS)) as
     | McpToolCallResult
     | undefined;
@@ -202,5 +211,6 @@ export async function callMcpTool(
     .filter((c) => c?.type === "text" && typeof c.text === "string")
     .map((c) => c.text)
     .join("\n");
-  return { text, isError: result?.isError === true };
+  const code = result?._meta?.[TOOL_ERROR_CODE_KEY];
+  return { text, isError: result?.isError === true, ...(typeof code === "string" ? { code } : {}) };
 }
