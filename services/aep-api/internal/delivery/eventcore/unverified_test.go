@@ -19,6 +19,7 @@ package eventcore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -78,6 +79,26 @@ func TestUnverifiedCleanupFailureDoesNotBlockMergeOutcome(t *testing.T) {
 	require.Equal(t, []string{"cycle-1:abc123def456789"}, h.cycles.closed)
 	require.Len(t, h.sup.named(delivery.SigRunPRMerged), 1)
 	require.Len(t, h.builds.triggeredFor("order-service"), 1)
+}
+
+// notAnIssue answers every GetIssue as the host does for a number that is no
+// issue: one it never had, or a pull request's.
+type notAnIssue struct{ *unverifiedIssues }
+
+func (notAnIssue) GetIssue(context.Context, string, string, int) (*sourcecontrol.IssueInfo, error) {
+	return nil, fmt.Errorf("get issue: %w", sourcecontrol.ErrIssueNotFound)
+}
+
+// "Resolves #N" naming no issue (a pull request, say) has nothing to keep
+// open: it is skipped, not an error that replays the delivery forever.
+func TestUnverifiedMergeSkipsAResolvedNumberThatIsNoIssue(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	issues := notAnIssue{&unverifiedIssues{adoptionIssues: &adoptionIssues{fakeIssues: h.issues}}}
+	h.events.p.Issues, h.events.p.Writer = issues, delivery.NewIssueWriter(issues)
+	require.NoError(t, h.deliver(t, "pull_request", prBody("closed", "aep/m7-c1", "Resolves #40\nConfidence: low", 42, false, true, "merged")))
+	require.Empty(t, issues.writes)
+	require.Empty(t, h.issues.commented)
 }
 
 func TestHighConfidenceSREFixClosesNormally(t *testing.T) {

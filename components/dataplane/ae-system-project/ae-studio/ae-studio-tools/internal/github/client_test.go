@@ -19,6 +19,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -83,6 +84,16 @@ func TestRecurrenceStateReasonReads(t *testing.T) {
 				t.Errorf("detail closure identity = %q", issue.ClosedAt)
 			}
 		})
+	}
+}
+
+// GitHub's issues API answers a pull request's number too; GetIssue reads it
+// as no such issue, so nothing that takes an issue (an issue's chat, its
+// tools, adoption) can be pointed at a pull request.
+func TestGetIssue_PullRequestIsNotFound(t *testing.T) {
+	client, _ := newFake(t, http.StatusOK, `{"number":42,"state":"open","pull_request":{"url":"https://api.github.com/repos/acme/repo/pulls/42"}}`)
+	if _, err := client.GetIssue(context.Background(), "acme", "repo", 42); !errors.Is(err, ErrIssueNotFound) {
+		t.Fatalf("err = %v, want ErrIssueNotFound", err)
 	}
 }
 

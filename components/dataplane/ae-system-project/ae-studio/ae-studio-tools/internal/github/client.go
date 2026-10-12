@@ -470,7 +470,9 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, labels []st
 	return issues, nil
 }
 
-// GetIssue answers one issue by number; a 404 is ErrIssueNotFound.
+// GetIssue answers one issue by number; a 404 is ErrIssueNotFound, and so
+// is a pull request's number (GitHub's issues API answers those too), as
+// ListIssues drops them: nothing that takes an issue can target a PR.
 func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (*IssueInfo, error) {
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
 	var raw issueWire
@@ -479,6 +481,9 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 			return nil, ErrIssueNotFound
 		}
 		return nil, err
+	}
+	if raw.PullRequest != nil {
+		return nil, ErrIssueNotFound
 	}
 	info := raw.info()
 	return &info, nil

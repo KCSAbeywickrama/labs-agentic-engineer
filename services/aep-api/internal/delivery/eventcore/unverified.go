@@ -18,6 +18,7 @@ package eventcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -38,6 +39,10 @@ func (e *Events) keepUnverifiedIssuesOpen(ctx context.Context, orgID, projectID 
 	}
 	for _, number := range resolves {
 		issue, err := e.p.Issues.GetIssue(ctx, orgID, projectID, number)
+		if errors.Is(err, sourcecontrol.ErrIssueNotFound) {
+			// A number that is no issue (a pull request's included) has nothing to keep open.
+			continue
+		}
 		if err != nil {
 			return err
 		}
