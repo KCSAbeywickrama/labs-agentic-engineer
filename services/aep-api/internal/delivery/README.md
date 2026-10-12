@@ -431,7 +431,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 - **Every wait has something behind its signal.** The gate has `waitPollInterval`, the build wait has
   `buildPollInterval`, and the LANDING wait — the one with no poll at all — has `CycleFacts.Ended`, read on
   every wake-up. That is why a dead agent is told (`run-agent-died`) rather than waited out, and why losing
-  that signal costs one `cycleLandingTimeout` and not the verdict. A cycle the watcher has CLOSED also ends
+  that signal costs one landing timeout and not the verdict. The landing timeout is
+  `AgentDeadlines.LandingTimeout` (the longest cycle deadline + 1h), snapshotted on `RunInput` at start, so
+  it only ever fires on an agent Kubernetes has already stopped. A cycle the watcher has CLOSED also ends
   the dispatch loop rather than spending the re-dispatch budget: `NoteDispatch` and `FinishAgentFailed` are
   both fenced on `ended_at IS NULL`, so a second attempt on a closed cycle can be neither recorded nor
   watched. Measured before this: a pod that OOMed at 20m41s settled its run 4h00m later.

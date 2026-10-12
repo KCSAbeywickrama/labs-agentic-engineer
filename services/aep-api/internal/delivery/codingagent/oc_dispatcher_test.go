@@ -332,7 +332,9 @@ func TestDispatch_EnsuresTheTypeWithTheConfiguredCPURequest(t *testing.T) {
 	if _, err := d.Dispatch(context.Background(), ocDispatchInputs()); err != nil {
 		t.Fatal(err)
 	}
-	want := openchoreo.CodingAgentComponentType(openchoreo.CodingAgentResources{CPURequest: "100m"})
+	want := openchoreo.CodingAgentComponentType(openchoreo.CodingAgentResources{
+		CPURequest: "100m", DeadlineCeiling: delivery.AgentDeadlines{}.Ceiling(),
+	})
 	if !reflect.DeepEqual(fake.ensuredType, want) {
 		t.Fatal("ensured ComponentType does not carry the configured CPU request")
 	}

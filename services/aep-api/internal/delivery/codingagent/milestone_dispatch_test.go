@@ -93,8 +93,10 @@ func TestDispatch_ValidationCycle_AnchorsToItsIssue(t *testing.T) {
 	if strings.Contains(shape.prompt, "milestone 4") {
 		t.Errorf("validation must stay issue-anchored, got %q", shape.prompt)
 	}
-	if shape.taskKind != "validation" || shape.deadline != validationDeadlineSeconds {
-		t.Errorf("validation shape = kind %q deadline %d, want the aep-validation skill + 2h", shape.taskKind, shape.deadline)
+	// The task kind is also what the dispatcher reads the validation deadline
+	// off (AgentDeadlines.For).
+	if shape.taskKind != delivery.CycleKindValidation {
+		t.Errorf("validation shape = kind %q, want the validation-task skill", shape.taskKind)
 	}
 }
 

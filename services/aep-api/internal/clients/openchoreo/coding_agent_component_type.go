@@ -18,6 +18,7 @@ package openchoreo
 
 import (
 	"slices"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
@@ -26,11 +27,10 @@ import (
 // per org. Billing aliases key on this exact string (and job/coding-agent).
 const CodingAgentComponentTypeName = "coding-agent"
 
-// CodingAgentDeadlineCeilingSeconds is the schema's activeDeadlineSeconds
-// maximum (3h). It bounds BOTH cycle kinds: a validation cycle passes 2h and a
-// coding cycle 3h, and the schema — never the caller — is what rejects anything
-// past it.
-const CodingAgentDeadlineCeilingSeconds = 10800
+// codingAgentDefaultDeadlineSeconds is the activeDeadlineSeconds a dispatch
+// that names none gets (1h). Every dispatch names one; see
+// CodingAgentResources.DeadlineCeiling for what bounds it.
+const codingAgentDefaultDeadlineSeconds = 3600
 
 // CodingAgentComponentTypeRef is what a Component's spec.componentType.name
 // carries — {workloadType}/{typeName}. Matches OC's API name format.
@@ -43,6 +43,18 @@ type CodingAgentResources struct {
 	// Empty or "500m" leaves the schema byte-for-byte as before:
 	// EnsureComponentType PUTs on any body difference. Memory is not tunable.
 	CPURequest string
+	// DeadlineCeiling is the schema's activeDeadlineSeconds maximum: the
+	// longest cycle any dispatch may ask for, rendered in whole seconds. The
+	// schema, never the caller, is what rejects a dispatch past it. The
+	// dispatcher sets it from delivery.AgentDeadlines.Ceiling; zero (or less
+	// than the default) bounds every dispatch to the 1h default.
+	DeadlineCeiling time.Duration
+}
+
+// deadlineSchema renders the activeDeadlineSeconds parameter.
+func (r CodingAgentResources) deadlineSchema() map[string]any {
+	ceiling := max(codingAgentDefaultDeadlineSeconds, int(r.DeadlineCeiling/time.Second))
+	return map[string]any{"type": "integer", "default": codingAgentDefaultDeadlineSeconds, "maximum": ceiling}
 }
 
 // cpuRequestSchema renders the cpuRequest parameter. A default outside the base
@@ -99,13 +111,10 @@ func CodingAgentComponentType(res CodingAgentResources) map[string]any {
 							"type": "integer", "default": 0, "maximum": 0,
 						},
 						// Default 1h for a dispatch that names no deadline; every
-						// dispatch does name one — a coding cycle 10800 (3h: it now
-						// ends with a browser verification wave, which an hour reaps
-						// mid-run) and a validation cycle 7200. The maximum is the
-						// larger of the two, so it is what actually bounds the Job.
-						"activeDeadlineSeconds": map[string]any{
-							"type": "integer", "default": 3600, "maximum": CodingAgentDeadlineCeilingSeconds,
-						},
+						// dispatch does name one, per cycle kind
+						// (delivery.AgentDeadlines). The maximum is the longest of
+						// them, so it is what actually bounds the Job.
+						"activeDeadlineSeconds": res.deadlineSchema(),
 						"ttlSecondsAfterFinished": map[string]any{
 							"type": "integer", "default": 86400,
 						},

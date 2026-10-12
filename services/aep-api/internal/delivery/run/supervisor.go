@@ -50,6 +50,9 @@ type Supervisor struct {
 	// The workflow reaches it through its own activity; this reference is the
 	// admission check.
 	dispatcher delivery.MilestoneDispatcher
+	// deadlines is the cycle deadlines the dispatcher launches under; each run
+	// snapshots their LandingTimeout at start.
+	deadlines delivery.AgentDeadlines
 }
 
 // NewSupervisor wires the supervisor. A nil dispatcher is a documented state,
@@ -59,6 +62,15 @@ type Supervisor struct {
 // for the reconcile sweep to re-offer once the dispatcher is wired.
 func NewSupervisor(rt *delivery.Runtime, runs RunStore, dispatcher delivery.MilestoneDispatcher) *Supervisor {
 	return &Supervisor{rt: rt, runs: runs, dispatcher: dispatcher}
+}
+
+// WithAgentDeadlines sets the cycle deadlines the dispatcher launches under, so
+// a run never calls a cycle dead while its Job may still be running. They must
+// be the dispatcher's own; the zero value is the platform default. Returns the
+// receiver.
+func (s *Supervisor) WithAgentDeadlines(d delivery.AgentDeadlines) *Supervisor {
+	s.deadlines = d
+	return s
 }
 
 // StartRun admits the run row when the caller has not already, then starts the
@@ -150,6 +162,9 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		// widen a run that was admitted narrower.
 		CycleCeiling:       row.CycleCeiling,
 		ValidationAttempts: row.ValidationAttempts,
+		// Platform configuration rather than a budget, so it comes off neither:
+		// it is snapshotted here and lives in the workflow's history.
+		LandingTimeout: s.deadlines.LandingTimeout(),
 	})
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if errors.As(err, &already) {

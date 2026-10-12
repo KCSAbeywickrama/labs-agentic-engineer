@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestEnsureComponentType_Create(t *testing.T) {
@@ -64,14 +65,7 @@ func TestEnsureComponentType_Create(t *testing.T) {
 // simulated without hand-writing a second copy of the whole spec.
 func storedSpec(t *testing.T, mutate func(props map[string]any)) map[string]any {
 	t.Helper()
-	raw, err := json.Marshal(CodingAgentComponentType(CodingAgentResources{})["spec"])
-	if err != nil {
-		t.Fatalf("marshal desired spec: %v", err)
-	}
-	var spec map[string]any
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal desired spec: %v", err)
-	}
+	spec := specOf(t, CodingAgentComponentType(CodingAgentResources{}))
 	if mutate != nil {
 		params, _ := spec["parameters"].(map[string]any)
 		schema, _ := params["openAPIV3Schema"].(map[string]any)
@@ -80,6 +74,21 @@ func storedSpec(t *testing.T, mutate func(props map[string]any)) map[string]any 
 			t.Fatal("stored spec has no openAPIV3Schema.properties")
 		}
 		mutate(props)
+	}
+	return spec
+}
+
+// specOf is a ComponentType body's spec as OpenChoreo stores and serves it:
+// round-tripped through JSON, so numbers come back as float64.
+func specOf(t *testing.T, ct map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(ct["spec"])
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal spec: %v", err)
 	}
 	return spec
 }
@@ -176,14 +185,14 @@ func TestEnsureComponentType_ConflictLeavesACurrentTypeAlone(t *testing.T) {
 // dispatch is rejected by its own stale copy — and the create path, which
 // already worked, proves nothing about that.
 func TestEnsureComponentType_ConflictConvergesAStaleType(t *testing.T) {
-	f := &componentTypeFake{stored: storedSpec(t, func(props map[string]any) {
-		deadline, _ := props["activeDeadlineSeconds"].(map[string]any)
-		deadline["maximum"] = float64(7200) // the pre-3h ceiling
-	})}
+	// The org's type was seeded under a 3h ceiling; the platform now allows 5h.
+	stale := CodingAgentComponentType(CodingAgentResources{DeadlineCeiling: 3 * time.Hour})
+	desired := CodingAgentComponentType(CodingAgentResources{DeadlineCeiling: 5 * time.Hour})
+	f := &componentTypeFake{stored: specOf(t, stale)}
 	srv := f.serve(t)
 
 	c := NewComponentClient(Config{BaseURL: srv.URL})
-	if err := c.EnsureComponentType(context.Background(), "wc-abc", CodingAgentComponentType(CodingAgentResources{})); err != nil {
+	if err := c.EnsureComponentType(context.Background(), "wc-abc", desired); err != nil {
 		t.Fatalf("EnsureComponentType: %v", err)
 	}
 	if f.posts != 1 || f.gets != 1 || f.puts() != 1 {
@@ -194,14 +203,14 @@ func TestEnsureComponentType_ConflictConvergesAStaleType(t *testing.T) {
 	if meta["name"] != CodingAgentComponentTypeName {
 		t.Errorf("PUT body name = %v", meta["name"])
 	}
-	if max := storedDeadlineMaximum(t, got); max != float64(CodingAgentDeadlineCeilingSeconds) {
-		t.Errorf("converged maximum = %v, want %d", max, CodingAgentDeadlineCeilingSeconds)
+	if max := storedDeadlineMaximum(t, got); max != float64(5*3600) {
+		t.Errorf("converged maximum = %v, want %d", max, 5*3600)
 	}
 
 	// The write settled it: a second ensure over the now-current type is a
 	// read again, not a second write. Convergence must not be a per-dispatch
 	// rewrite loop.
-	if err := c.EnsureComponentType(context.Background(), "wc-abc", CodingAgentComponentType(CodingAgentResources{})); err != nil {
+	if err := c.EnsureComponentType(context.Background(), "wc-abc", desired); err != nil {
 		t.Fatalf("second EnsureComponentType: %v", err)
 	}
 	if f.puts() != 1 {
