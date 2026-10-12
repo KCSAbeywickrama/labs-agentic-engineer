@@ -328,9 +328,15 @@ bash deployments/scripts/restore-host-k3d-internal.sh         # repair
 ```
 
 It writes the name into `coredns-custom`, which no controller reconciles, so
-one run survives later restarts too. Re-running `make dev-env` does **not** fix
-this — nothing in that chain defines the name, and the cluster-create step it
-would come from is skipped on an existing cluster.
+one run survives later restarts too. `make dev-env` (its CoreDNS step) and
+`make dev-update` (first thing) run it as well, so either repairs the name.
+
+Every script writes its own `coredns-custom` key by merge patch. An earlier
+`setup-env-for-aectl.sh` wrote its key with `kubectl apply` while
+`setup-agent-manager.sh` applied the whole ConfigMap. Every second `make dev-env`
+then pruned the keys the last apply had recorded, `hostk3dinternal.override`
+among them, and died at the Agent Manager environment check. The CoreDNS step
+now also drops that stale `last-applied-configuration` annotation.
 
 **OpenBao forgets every platform secret.** It runs `bao server -dev`
 (in-memory) and its `postStart` re-seeds only OpenChoreo's own fixtures, so the

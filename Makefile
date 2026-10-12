@@ -412,6 +412,11 @@ obs-status:
 # config (gateway host, IdP URLs, console origins, egress): an install that
 # predates them converges here, with no secret touched.
 #
+# deployments/scripts/restore-host-k3d-internal.sh runs first: a colima or host
+# restart drops host.k3d.internal from CoreDNS, every *.localhost rewrite then
+# resolves to nothing, and the rollout below comes up on a platform whose
+# tokens all read INVALID_TOKEN. Idempotent (a check when the name is pinned).
+#
 # deployments/scripts/openbao-aep-api-auth.sh runs before the upgrade: the
 # local OpenBao is in memory, so a restart forgets aep-api's write-only policy
 # and Kubernetes-auth role, and the new aep-api must find its role at its
@@ -429,6 +434,7 @@ obs-status:
 # Named dev-update, not dev: `make dev` is the uniform verb (turbo run dev,
 # host-side TS dev servers per package) and already means something else.
 dev-update:
+	bash deployments/scripts/restore-host-k3d-internal.sh
 	$(MAKE) dev-images
 	$(MAKE) ae-studio-refs-check
 	cd tools/aectl && go build -o aectl-skaffold .
