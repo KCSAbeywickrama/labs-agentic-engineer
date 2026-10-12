@@ -48,8 +48,8 @@ type Skill struct {
 	// Enabled is the inverse of the skill's skills-manifest.json Disabled
 	// flag (no entry, or no manifest, is enabled).
 	Enabled bool
-	// Audience is metadata.aep.audience filtered to design | coding; empty
-	// in the source means both.
+	// Audience is metadata.aep.audience filtered to design | coding | chat;
+	// empty in the source means design and coding (chat is opt-in only).
 	Audience []string
 }
 
@@ -57,6 +57,8 @@ type Skill struct {
 const (
 	AudienceDesign = "design"
 	AudienceCoding = "coding"
+	// AudienceChat is an area chat's sub-agent; never mirrored to a coding run.
+	AudienceChat = "chat"
 
 	kindPlatform = "platform"
 	kindOrg      = "org"

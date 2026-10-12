@@ -61,6 +61,16 @@ test("skillAudience reads the declared list; anything else is permissive", () =>
   assert.ok(!audienceIncludesCoding(["design"]));
 });
 
+test("a chat-only skill is a chat's: never mirrored to a coding run unless pinned", () => {
+  assert.deepEqual(skillAudience(md("triage", "[chat]")), ["chat"]);
+  assert.ok(!audienceIncludesCoding(skillAudience(md("triage", "[chat]"))));
+  const lib = [{ name: "triage", skillMd: md("triage", "[chat]") }];
+  assert.deepEqual(selectMirroredSkills(lib, new Set(), new Set()), {
+    copied: [],
+    skipped: [{ name: "triage", reason: "not-coding" }],
+  });
+});
+
 test("the rule admits coding skills and withholds design-only ones", () => {
   const lib = [
     { name: "go", skillMd: md("go", "[coding]") },
@@ -70,7 +80,7 @@ test("the rule admits coding skills and withholds design-only ones", () => {
   ];
   const { copied, skipped } = selectMirroredSkills(lib, new Set(), new Set());
   assert.deepEqual(copied, ["go", "prototype", "unmarked"]);
-  assert.deepEqual(skipped, [{ name: "planning", reason: "design-only" }]);
+  assert.deepEqual(skipped, [{ name: "planning", reason: "not-coding" }]);
 });
 
 test("disabled is withheld, but a pin overrides BOTH axes", () => {

@@ -156,8 +156,8 @@ func TestFrontmatterKind(t *testing.T) {
 }
 
 // frontmatterAudience derivation: metadata.aep.audience names the agent(s)
-// this skill's guidance is written for (design | coding); an empty, absent,
-// or all-unrecognised list defaults to BOTH — the permissive default so an
+// this skill's guidance is written for (design | coding | chat); an empty,
+// absent, or all-unrecognised list defaults to design and coding — the permissive default so an
 // unmarked or org-authored skill stays visible everywhere it always was.
 func TestFrontmatterAudience(t *testing.T) {
 	t.Parallel()
@@ -174,6 +174,7 @@ func TestFrontmatterAudience(t *testing.T) {
 		{"unrecognised values only", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [ops, qa]\n---\nbody", []string{"design", "coding"}},
 		{"unrecognised value dropped, one kept", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [coding, ops]\n---\nbody", []string{"coding"}},
 		{"whitespace value", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: ['  coding  ']\n---\nbody", []string{"coding"}},
+		{"chat only (opt-in, never the default)", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [chat]\n---\nbody", []string{"chat"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

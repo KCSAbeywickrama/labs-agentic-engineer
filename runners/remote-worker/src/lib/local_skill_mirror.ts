@@ -47,12 +47,14 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
 const AUDIENCE_DESIGN = "design";
 const AUDIENCE_CODING = "coding";
+/** An area chat's sub-agent (the design agent's pod): opt-in only, never a coding run's. */
+const AUDIENCE_CHAT = "chat";
 
 /**
  * The audiences a SKILL.md declares (`metadata.aep.audience`). Unrecognised
- * values are dropped; nothing declared resolves to EVERY audience — the
- * permissive default the Go and design-agent parsers both apply, so an
- * unmarked or org-authored skill keeps working.
+ * values are dropped; nothing declared resolves to the design and coding
+ * agents — the permissive default the Go and design-agent parsers both apply,
+ * so an unmarked or org-authored skill keeps working. `chat` is opt-in only.
  */
 export function skillAudience(skillMd: string): string[] {
   const m = FRONTMATTER_RE.exec(skillMd.replace(/\r\n/g, "\n"));
@@ -65,7 +67,9 @@ export function skillAudience(skillMd: string): string[] {
   }
   const aep = (fm as { metadata?: { aep?: { audience?: unknown } } } | null)?.metadata?.aep;
   const declared = Array.isArray(aep?.audience) ? aep.audience : [];
-  const audience = declared.filter((a): a is string => a === AUDIENCE_DESIGN || a === AUDIENCE_CODING);
+  const audience = declared.filter(
+    (a): a is string => a === AUDIENCE_DESIGN || a === AUDIENCE_CODING || a === AUDIENCE_CHAT,
+  );
   return audience.length > 0 ? audience : [AUDIENCE_DESIGN, AUDIENCE_CODING];
 }
 
@@ -78,7 +82,7 @@ export interface MirrorSelection {
   /** Skill names the rule admits into the project's `.claude/skills/`. */
   copied: string[];
   /** Names withheld, with why — logged so a local run explains its own mirror. */
-  skipped: Array<{ name: string; reason: "design-only" | "disabled" }>;
+  skipped: Array<{ name: string; reason: "not-coding" | "disabled" }>;
 }
 
 /**
@@ -104,7 +108,7 @@ export function selectMirroredSkills(
       continue;
     }
     if (!audienceIncludesCoding(skillAudience(skillMd))) {
-      skipped.push({ name, reason: "design-only" });
+      skipped.push({ name, reason: "not-coding" });
       continue;
     }
     copied.push(name);

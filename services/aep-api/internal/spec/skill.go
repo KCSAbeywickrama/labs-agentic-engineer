@@ -51,9 +51,10 @@ type Skill struct {
 	Enabled bool `json:"enabled"`
 	// Audience names the agent(s) this skill's guidance is written for
 	// (ADR-0013, mirrored from the TS agents service's SkillAudience): "design"
-	// | "coding". Derived from frontmatter `metadata.aep.audience` by
-	// frontmatterAudience — an empty/absent list means EVERY audience (the
-	// permissive default), so an unmarked or org-authored skill stays visible
+	// | "coding" | "chat" (an area chat's sub-agent in the design agent's pod).
+	// Derived from frontmatter `metadata.aep.audience` by frontmatterAudience —
+	// an empty/absent list means design and coding (the permissive default; chat
+	// is opt-in only), so an unmarked or org-authored skill stays visible
 	// everywhere it always was. Ownership (Kind) and Audience are independent
 	// axes: a skill can be the org's to edit while being coding-only to read.
 	Audience []string `json:"audience"`
@@ -61,10 +62,13 @@ type Skill struct {
 
 // Skill audiences. A SKILL.md declares its audience in frontmatter
 // `metadata.aep.audience` as a string list; unrecognised values are dropped
-// and an empty/absent list means every audience (see frontmatterAudience).
+// and an empty/absent list means design and coding (see frontmatterAudience).
 const (
 	SkillAudienceDesign = "design"
 	SkillAudienceCoding = "coding"
+	// SkillAudienceChat is an area chat's sub-agent (the Issues chats); opt-in
+	// only, so a coding run never mirrors a chat skill.
+	SkillAudienceChat = "chat"
 )
 
 // Skill kinds. A SKILL.md declares its kind in frontmatter `metadata.aep.kind`;
