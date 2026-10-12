@@ -395,10 +395,15 @@ started with, so a changed `aep/*` key breaks only the NEXT pod start: an
 the role or a client is set from a Secret ESO has not refreshed since the key
 changed. `make dev-env` and `make dev-update` (`aectl platform sync-clients`)
 make ESO re-read OpenBao first, then set the role and the clients, so either
-repairs a drifted cluster:
+repairs a drifted cluster. When the role's password does change, they restart
+every Deployment that reads `postgres-secrets`: a running `temporal-frontend`
+keeps the old password in its env and fails every persistence call
+(`pq: password authentication failed` in its log) while its TCP readiness
+probe keeps it Ready, so aep-api logs `run: worker start failed, re-dialing
+... context deadline exceeded` without end.
 
 ```bash
-./tools/aectl/aectl-skaffold platform sync-clients   # ESO sync, Postgres role, Thunder clients
+./tools/aectl/aectl-skaffold platform sync-clients   # ESO sync, Postgres role (+ its clients), Thunder clients
 ```
 
 ## Tear down

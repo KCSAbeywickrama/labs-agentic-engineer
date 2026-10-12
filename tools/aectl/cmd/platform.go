@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/wso2/aep/aectl/internal/addons"
@@ -1439,12 +1441,132 @@ func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, 
 	}
 
 	deadline := time.Now().Add(alterPostgresPasswordRetryWindow)
-	if err := retryAlterPostgresRolePassword(ctx, namespace, password, deadline); err != nil {
+	changed, err := applyPostgresRolePassword(ctx, password, postgresRoleSteps{
+		authenticates: func(ctx context.Context, pw string) bool {
+			_, err := runPostgresPasswordCheck(ctx, namespace, postgresPod, pw)
+			return err == nil
+		},
+		alter: func(ctx context.Context, pw string) error {
+			return retryAlterPostgresRolePassword(ctx, namespace, pw, deadline)
+		},
+		restartClients: func(ctx context.Context) ([]string, error) {
+			return restartDeploymentsReadingSecret(ctx, k8sClient, namespace, postgresSecretName)
+		},
+	})
+	if err != nil {
 		sp.Fail("Postgres password sync failed")
 		return err
 	}
-	sp.Success("Postgres password synced")
+	if changed {
+		sp.Success("Postgres password synced; its clients restarted onto it")
+	} else {
+		sp.Success("Postgres password already in sync")
+	}
 	return nil
+}
+
+// postgresRoleSteps are the cluster calls applyPostgresRolePassword makes.
+type postgresRoleSteps struct {
+	// authenticates reports whether the role already takes pw.
+	authenticates func(ctx context.Context, pw string) bool
+	alter         func(ctx context.Context, pw string) error
+	// restartClients rolls every Deployment that reads the password, and
+	// names them.
+	restartClients func(ctx context.Context) ([]string, error)
+}
+
+// applyPostgresRolePassword sets the role's password to pw unless it already
+// is, and then restarts the role's clients. Each client read the password
+// into its env at start, so after a change every one still running holds
+// the old password: aep-api fails its next new connection, and
+// temporal-frontend fails every persistence call while its TCP readiness
+// probe keeps it Ready (aep-api then logs "worker start failed ... context
+// deadline exceeded" without end). It reports whether the password changed.
+func applyPostgresRolePassword(ctx context.Context, pw string, st postgresRoleSteps) (bool, error) {
+	if st.authenticates(ctx, pw) {
+		return false, nil
+	}
+	if err := st.alter(ctx, pw); err != nil {
+		return false, err
+	}
+	restarted, err := st.restartClients(ctx)
+	if err != nil {
+		return true, fmt.Errorf("restart the Postgres clients: %w", err)
+	}
+	for _, name := range restarted {
+		ui.Detail("Restarted " + name)
+	}
+	return true, nil
+}
+
+// postgresPasswordCheck reads a password from STDIN (never argv) and logs in
+// with it over TCP to the pod's own address, where pg_hba.conf asks for the
+// password (the local socket trusts every connection).
+const postgresPasswordCheck = `
+read -r PW
+PGPASSWORD="$PW" psql -h "$(hostname -i)" -U aep -d aep -tAc 'select 1' >/dev/null
+`
+
+// runPostgresPasswordCheck execs postgresPasswordCheck over kubectl; a
+// package variable like runAlterPostgresRolePassword.
+var runPostgresPasswordCheck = func(ctx context.Context, namespace, podName, password string) ([]byte, error) {
+	args := []string{"exec", "-i", "-n", namespace, podName, "--", "sh", "-c", postgresPasswordCheck}
+	if kubeconfig != "" {
+		args = append([]string{"--kubeconfig", kubeconfig}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(password)
+	return cmd.CombinedOutput()
+}
+
+// deploymentsReadingSecret names the Deployments in namespace whose pods take
+// env from the Secret name (a secretKeyRef or an envFrom), sorted.
+func deploymentsReadingSecret(ctx context.Context, c kubernetes.Interface, namespace, name string) ([]string, error) {
+	deps, err := c.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list Deployments in %s: %w", namespace, err)
+	}
+	var out []string
+	for _, d := range deps.Items {
+		spec := d.Spec.Template.Spec
+		if containersReadSecret(append(append([]corev1.Container{}, spec.InitContainers...), spec.Containers...), name) {
+			out = append(out, d.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func containersReadSecret(cs []corev1.Container, name string) bool {
+	for _, c := range cs {
+		for _, e := range c.Env {
+			if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil && e.ValueFrom.SecretKeyRef.Name == name {
+				return true
+			}
+		}
+		for _, e := range c.EnvFrom {
+			if e.SecretRef != nil && e.SecretRef.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// restartDeploymentsReadingSecret rolls (as `kubectl rollout restart` does)
+// every Deployment deploymentsReadingSecret names, and names them.
+func restartDeploymentsReadingSecret(ctx context.Context, c kubernetes.Interface, namespace, name string) ([]string, error) {
+	names, err := deploymentsReadingSecret(ctx, c, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":%q}}}}}`, time.Now().Format(time.RFC3339))
+	for _, n := range names {
+		if _, err := c.AppsV1().Deployments(namespace).Patch(ctx, n, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
+			return nil, fmt.Errorf("restart Deployment %s/%s: %w", namespace, n, err)
+		}
+	}
+	return names, nil
 }
 
 // retryAlterPostgresRolePassword retries runAlterPostgresRolePassword until

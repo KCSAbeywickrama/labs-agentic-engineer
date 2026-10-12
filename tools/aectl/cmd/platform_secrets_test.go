@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -350,5 +351,58 @@ func TestWritePlatformSecrets_RestoresImportedKey(t *testing.T) {
 	}
 	if got, _ := kv.get("aep/jev-api-key"); got != "jev-synced" {
 		t.Fatal("Jev key not restored")
+	}
+}
+
+// A role that already takes the Secret's password is left alone: an ALTER is
+// harmless, but restarting its clients is not free.
+func TestApplyPostgresRolePassword(t *testing.T) {
+	var altered, restarted int
+	st := postgresRoleSteps{
+		authenticates: func(context.Context, string) bool { return true },
+		alter:         func(context.Context, string) error { altered++; return nil },
+		restartClients: func(context.Context) ([]string, error) {
+			restarted++
+			return []string{"aep-api", "temporal-frontend"}, nil
+		},
+	}
+	if changed, err := applyPostgresRolePassword(context.Background(), "pw", st); err != nil || changed || altered+restarted != 0 {
+		t.Fatalf("in sync: changed=%t err=%v altered=%d restarted=%d", changed, err, altered, restarted)
+	}
+	// A changed role password strands every running client on the old one:
+	// temporal-frontend then fails each DB call while it stays Ready.
+	st.authenticates = func(context.Context, string) bool { return false }
+	if changed, err := applyPostgresRolePassword(context.Background(), "pw", st); err != nil || !changed || altered != 1 || restarted != 1 {
+		t.Fatalf("drifted: changed=%t err=%v altered=%d restarted=%d", changed, err, altered, restarted)
+	}
+	st.alter = func(context.Context, string) error { return errors.New("boom") }
+	if _, err := applyPostgresRolePassword(context.Background(), "pw", st); err == nil || restarted != 1 {
+		t.Fatalf("failed ALTER must not restart: err=%v restarted=%d", err, restarted)
+	}
+}
+
+func TestDeploymentsReadingSecret(t *testing.T) {
+	dep := func(name string, c corev1.Container) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
+			Spec:       appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c}}}},
+		}
+	}
+	ref := func(secret string) corev1.Container {
+		return corev1.Container{Env: []corev1.EnvVar{{Name: "P", ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: "k"}}}}}
+	}
+	from := corev1.Container{EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-secrets"}}}}}
+	c := fake.NewSimpleClientset(
+		dep("aep-api", ref("postgres-secrets")),
+		dep("temporal-frontend", from),
+		dep("aep-console", ref("other")),
+	)
+	got, err := deploymentsReadingSecret(context.Background(), c, "ns", "postgres-secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "aep-api,temporal-frontend" {
+		t.Fatalf("got %v", got)
 	}
 }
