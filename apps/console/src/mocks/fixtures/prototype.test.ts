@@ -44,9 +44,19 @@ function docWith(files: Record<string, string>): Y.Doc {
 
 const made = () => docWith({ [manifestPath(SAMPLE_COMPONENT)]: SAMPLE_MANIFEST, [sourcePath(SAMPLE_COMPONENT)]: SAMPLE_SOURCE });
 
+/**
+ * The first check in a process loads the TypeScript compiler and parses the
+ * standard library's, React's and the kit's declarations before it renders;
+ * on a shared CI runner that alone can take several seconds.
+ */
+const FIRST_CHECK_TIMEOUT_MS = 60_000;
+
 describe("the mock's sample prototype", () => {
-  it("passes the kit's checks on the Oxygen theme, as written and as every comment it knows revises it", async () => {
+  it("passes the kit's checks on the Oxygen theme as written", async () => {
     expect(await checkPrototypeFiles({ manifest: SAMPLE_MANIFEST, source: SAMPLE_SOURCE }, { theme: oxygen })).toEqual([]);
+  }, FIRST_CHECK_TIMEOUT_MS);
+
+  it("passes the kit's checks on the Oxygen theme as every comment it knows revises it", async () => {
     let source = SAMPLE_SOURCE;
     for (const comment of ["Approve on the right", "A bigger total", "Remove the Reject button"]) {
       const tweak = tweakSource(source, comment);

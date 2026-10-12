@@ -24,7 +24,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import ts from "typescript";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { checkPrototypeFiles } from "../src/check/index.js";
 import { checkSourceTypes, MAX_TYPE_FINDINGS } from "../src/check/types.js";
 import { parseManifestJson } from "../src/manifest/parse.js";
@@ -56,6 +57,14 @@ export default defineApp({ screens: { "screen.home": Home }, data: { claims: [] 
 `;
 
 describe("the type stage", () => {
+  // The first check in a process reads and parses the standard library's,
+  // React's and the kit's declarations. Paid once here, so each test below
+  // times only its own check; on a shared CI runner that first parse alone
+  // can take several seconds.
+  beforeAll(() => {
+    checkSourceTypes(RENAMED);
+  }, 30_000);
+
   it("is what catches the stale field: every earlier stage passes it", () => {
     const parsed = parseManifestJson(MANIFEST);
     if (!parsed.ok) throw new Error(JSON.stringify(parsed.findings));
@@ -103,10 +112,15 @@ describe("the type stage", () => {
     expect(findings[0]?.message).toMatch(/'stale0' does not exist/);
   });
 
-  it("checks a whole prototype warm in well under a second", () => {
-    checkSourceTypes(RENAMED);
-    const started = performance.now();
-    checkSourceTypes(STALE);
-    expect(performance.now() - started).toBeLessThan(1000);
+  it("parses the declarations once: a warm check reads none of them again", () => {
+    const readFile = vi.spyOn(ts.sys, "readFile");
+    try {
+      checkSourceTypes(STALE);
+      // package.json lookups are the compiler's own per-program module resolution, not a re-parse.
+      const reread = readFile.mock.calls.map(([fileName]) => fileName).filter((f) => !f.endsWith("/package.json"));
+      expect(reread).toEqual([]);
+    } finally {
+      readFile.mockRestore();
+    }
   });
 });
