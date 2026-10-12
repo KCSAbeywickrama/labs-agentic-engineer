@@ -17,10 +17,8 @@
 package cmd
 
 import (
-	"errors"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -104,61 +102,6 @@ func TestAEStudioOverrides_WebhookRelayLegacyKey(t *testing.T) {
 	if !strings.Contains(got, "--set aeStudio.webhookRelay.enabled=true") {
 		t.Errorf("legacy key on, new absent: want the relay on, got %s", got)
 	}
-}
-
-// The seed is written create-only when missing, never rewritten, and the
-// value is 64 hex chars.
-func TestSeedWebhookRelaySeedIfMissing(t *testing.T) {
-	hex64 := regexp.MustCompile(`^[0-9a-f]{64}$`)
-
-	t.Run("present: no write", func(t *testing.T) {
-		created, err := seedWebhookRelaySeedIfMissing(
-			func(p string) (bool, error) { return true, nil },
-			func(p, v string) error { t.Errorf("put %s on a present seed", p); return nil })
-		if err != nil || created {
-			t.Fatalf("created=%t err=%v", created, err)
-		}
-	})
-	t.Run("missing: one create-only write", func(t *testing.T) {
-		var wrote []string
-		created, err := seedWebhookRelaySeedIfMissing(
-			func(p string) (bool, error) { return false, nil },
-			func(p, v string) error {
-				if !hex64.MatchString(v) {
-					t.Errorf("seed must be 64 hex chars, got %d chars", len(v))
-				}
-				wrote = append(wrote, p)
-				return nil
-			})
-		if err != nil || !created || len(wrote) != 1 || wrote[0] != webhookRelaySeedPath {
-			t.Fatalf("created=%t err=%v wrote=%v", created, err, wrote)
-		}
-	})
-	t.Run("raced: another writer's seed is kept", func(t *testing.T) {
-		created, err := seedWebhookRelaySeedIfMissing(
-			func(p string) (bool, error) { return false, nil },
-			func(p, v string) error { return errSecretExists })
-		if err != nil || created {
-			t.Fatalf("created=%t err=%v", created, err)
-		}
-	})
-	t.Run("check fails: error, no write", func(t *testing.T) {
-		_, err := seedWebhookRelaySeedIfMissing(
-			func(p string) (bool, error) { return false, errors.New("403") },
-			func(p, v string) error { t.Error("put after a failed check"); return nil })
-		if err == nil || !strings.Contains(err.Error(), webhookRelaySeedPath) {
-			t.Fatalf("want an error naming the path, got %v", err)
-		}
-	})
-	t.Run("write fails: error without the value", func(t *testing.T) {
-		var sent string
-		_, err := seedWebhookRelaySeedIfMissing(
-			func(p string) (bool, error) { return false, nil },
-			func(p, v string) error { sent = v; return errors.New("500") })
-		if err == nil || strings.Contains(err.Error(), sent) {
-			t.Fatalf("want an error that does not carry the seed, got %v", err)
-		}
-	})
 }
 
 func ptr[T any](v T) *T { return &v }

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -381,7 +380,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		sp := ui.NewSpinner("Verifying existing OpenBao secrets")
 		sp.Start()
-		if err := reconcileReusedOpenBaoSecrets(ctx); err != nil {
+		if err := reconcileReusedOpenBaoSecrets(ctx, initPlatformNamespace); err != nil {
 			sp.Fail("Secret verification failed")
 			return fmt.Errorf("reuse-secrets verification failed: %w\nRemove --reuse-secrets to run a fresh install", err)
 		}
@@ -427,7 +426,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Println()
-		if err := provisionOpenBao(ctx, anthropicKey, adminClientID, adminClientSecret); err != nil {
+		if err := provisionOpenBao(ctx, initPlatformNamespace, anthropicKey, adminClientID, adminClientSecret); err != nil {
 			return fmt.Errorf("provision OpenBao: %w", err)
 		}
 	}
@@ -493,7 +492,14 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	helmSp.Success(fmt.Sprintf("%s installed", chartLabel))
 
-	if err := syncPostgresPassword(ctx, k8sClient, initPlatformNamespace); err != nil {
+	// The Postgres role and the Thunder clients below are set from ESO-synced
+	// Secrets, so ESO re-reads OpenBao first: a Secret otherwise holds what ESO
+	// synced up to an hour ago, and its next refresh would undo both.
+	unsynced, err := syncPlatformExternalSecrets(ctx, initPlatformNamespace)
+	if err != nil {
+		return err
+	}
+	if err := syncPostgresPassword(ctx, k8sClient, initPlatformNamespace, unsynced); err != nil {
 		return fmt.Errorf("sync postgres password: %w", err)
 	}
 
@@ -508,7 +514,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	ui.Step("Registering Thunder OAuth clients")
 	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
 		viper.GetString("thunder.namespace"),
-		consoleURL, nil,
+		consoleURL, clientsReadingUnsynced(unsynced),
 	); err != nil {
 		return err
 	}
@@ -899,21 +905,6 @@ func openOpenBaoSession(ctx context.Context) (*openBaoSession, error) {
 	return &openBaoSession{baseURL: baseURL, token: token, stop: stop}, nil
 }
 
-// seedMissingThunderClientSecrets writes the generated aep/thunder-clients/*
-// keys that are absent and leaves existing ones untouched, so a store seeded
-// before a client existed is topped up rather than refused. It returns the
-// secrets it wrote. The write is a KV v2 create-only (cas 0), so the store
-// itself refuses to overwrite an existing key.
-func (s *openBaoSession) seedMissingThunderClientSecrets(ctx context.Context) ([]seededSecret, error) {
-	exists := func(path string) (bool, error) {
-		return s.pathExists(ctx, path)
-	}
-	put := func(path, value string) error {
-		return s.putCreateOnly(ctx, path, value)
-	}
-	return seedMissingGeneratedSecrets(exists, put)
-}
-
 // putCreateOnly writes value at path as a KV v2 create-only (cas 0): the store
 // refuses to overwrite an existing key, which comes back as errSecretExists.
 func (s *openBaoSession) putCreateOnly(ctx context.Context, path, value string) error {
@@ -943,7 +934,7 @@ func (s *openBaoSession) putCreateOnly(ctx context.Context, path, value string) 
 // them) and tops up, create-only, the generated secrets a store from an older
 // install may lack: the Thunder client secrets and, with the relay on, the
 // webhook relay seed. Those are the only things it writes.
-func reconcileReusedOpenBaoSecrets(ctx context.Context) error {
+func reconcileReusedOpenBaoSecrets(ctx context.Context, platformNamespace string) error {
 	s, err := openOpenBaoSession(ctx)
 	if err != nil {
 		return err
@@ -958,12 +949,19 @@ func reconcileReusedOpenBaoSecrets(ctx context.Context) error {
 		return fmt.Errorf("the following secrets are not in OpenBao:\n  %s", strings.Join(missing, "\n  "))
 	}
 
-	if _, err := s.seedMissingThunderClientSecrets(ctx); err != nil {
+	recover, err := newClusterSecretRecovery(ctx, platformNamespace)
+	if err != nil {
 		return err
 	}
-	return topUpWebhookRelaySeed(
-		func(path string) (bool, error) { return s.pathExists(ctx, path) },
-		func(path, value string) error { return s.putCreateOnly(ctx, path, value) })
+	st := s.seedStore(ctx, recover)
+	seeded, err := seedGeneratedSecrets(generatedThunderClientSecrets(), st)
+	if err != nil {
+		return err
+	}
+	for _, line := range describeSeeded(seeded) {
+		ui.Detail(line)
+	}
+	return topUpWebhookRelaySeed(st)
 }
 
 // requiredOpenBaoPaths are the secrets an install seeds that aectl does not
@@ -1038,46 +1036,11 @@ func thunderClientSecretValue(name string) (string, error) {
 	return bootstrap.GeneratePassword(32)
 }
 
-// seededSecret is a vault key seedMissingGeneratedSecrets wrote. value is held
-// only to verify the cluster Secret caught up; it is never logged.
-type seededSecret struct{ path, value string }
-
-// errSecretExists is what a put returns when the store refused to overwrite an
-// existing key (KV v2 check-and-set), which seeding treats as "already there".
-var errSecretExists = errors.New("secret already exists")
-
-// seedMissingGeneratedSecrets writes every generated aep/thunder-clients/*
-// secret that is absent and leaves existing ones untouched: put must refuse to
-// overwrite (errSecretExists), so a key created between the check and the
-// write survives. It returns what it wrote.
-func seedMissingGeneratedSecrets(exists func(path string) (bool, error), put func(path, value string) error) ([]seededSecret, error) {
-	var seeded []seededSecret
-	for _, name := range generatedThunderClientNames {
-		path := "aep/thunder-clients/" + name
-		ok, err := exists(path)
-		if err != nil {
-			return seeded, fmt.Errorf("check secret %s: %w", path, err)
-		}
-		if ok {
-			continue
-		}
-		v, err := thunderClientSecretValue(name)
-		if err != nil {
-			return seeded, fmt.Errorf("generate thunder client secret %s: %w", name, err)
-		}
-		if err := put(path, v); err != nil {
-			if errors.Is(err, errSecretExists) {
-				continue
-			}
-			return seeded, fmt.Errorf("write %s: %w", path, err)
-		}
-		seeded = append(seeded, seededSecret{path: path, value: v})
-	}
-	return seeded, nil
-}
-
-// provisionOpenBao seeds all platform secrets into OC's built-in OpenBao instance.
-func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, thunderAdminClientSecret string) error {
+// provisionOpenBao writes the install's inputs into OC's built-in OpenBao
+// and seeds the generated platform secrets it lacks, never rewriting one it
+// has (platform_secrets.go says why). A key the store lost (the local OpenBao
+// is in memory) is restored from the cluster Secret ESO last synced it into.
+func provisionOpenBao(ctx context.Context, platformNamespace, anthropicKey, thunderAdminClientID, thunderAdminClientSecret string) error {
 	sp := ui.NewSpinner("Connecting to OpenBao")
 	sp.Start()
 
@@ -1087,66 +1050,33 @@ func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, t
 		return err
 	}
 	defer session.stop()
-	baseURL, token := session.baseURL, session.token
 
-	sp.Update("Generating secrets")
-
-	postgresPassword, err := bootstrap.GeneratePassword(32)
+	recover, err := newClusterSecretRecovery(ctx, platformNamespace)
 	if err != nil {
-		sp.Fail("Secret generation failed")
-		return fmt.Errorf("generate postgres password: %w", err)
-	}
-	openSearchPassword, err := bootstrap.GeneratePassword(24)
-	if err != nil {
-		sp.Fail("Secret generation failed")
-		return fmt.Errorf("generate opensearch password: %w", err)
-	}
-	relaySeed, err := webhookRelaySeed()
-	if err != nil {
-		sp.Fail("Secret generation failed")
-		return fmt.Errorf("generate webhook relay seed: %w", err)
+		sp.Fail("Reading the cluster's synced secrets failed")
+		return err
 	}
 
-	thunderClientSecrets := make(map[string]string, len(generatedThunderClientNames))
-	for _, name := range generatedThunderClientNames {
-		v, err := thunderClientSecretValue(name)
-		if err != nil {
-			sp.Fail("Secret generation failed")
-			return fmt.Errorf("generate thunder client secret %s: %w", name, err)
-		}
-		thunderClientSecrets[name] = v
-	}
-
-	secrets := []struct{ path, value string }{
+	inputs := []platformInput{
 		{"aep/anthropic-api-key", anthropicKey},
-		{"aep/postgres-password", postgresPassword},
-		{webhookRelaySeedPath, relaySeed},
 		{"aep/opensearch-username", "admin"},
-		{"aep/opensearch-password", openSearchPassword},
 		{"aep/thunder-admin/client-id", thunderAdminClientID},
 		{"aep/thunder-admin/client-secret", thunderAdminClientSecret},
 		// system-client ID is a known constant but stored in OpenBao so the
 		// thunder-app-operator can source both credentials from the same ESO Secret.
 		{"aep/thunder-clients/system-client-id", "aep-system-client"},
 	}
-	for _, name := range generatedThunderClientNames {
-		secrets = append(secrets, struct{ path, value string }{
-			"aep/thunder-clients/" + name, thunderClientSecrets[name],
-		})
+	sp.Update("Writing secrets")
+	seeded, err := writePlatformSecrets(ctx, session, inputs, recover)
+	if err != nil {
+		sp.Fail("Writing secrets failed")
+		return err
 	}
-
-	sp.Update(fmt.Sprintf("Writing %d secrets", len(secrets)))
-	for i, sec := range secrets {
-		sp.Update(fmt.Sprintf("Writing secrets (%d/%d)", i+1, len(secrets)))
-		if _, err := openbao.Must(ctx, "PUT", baseURL, token, "/v1/secret/data/"+sec.path, map[string]interface{}{
-			"data": map[string]interface{}{"value": sec.value},
-		}); err != nil {
-			sp.Fail(fmt.Sprintf("Failed writing %s", sec.path))
-			return fmt.Errorf("write %s: %w", sec.path, err)
-		}
+	sp.Success(fmt.Sprintf("%d inputs written, %d of %d generated secrets seeded (the rest kept)",
+		len(inputs), len(seeded), len(generatedPlatformSecrets())))
+	for _, line := range describeSeeded(seeded) {
+		ui.Detail(line)
 	}
-
-	sp.Success(fmt.Sprintf("%d secrets provisioned", len(secrets)))
 	return nil
 }
 
@@ -1362,6 +1292,9 @@ func waitForAllPodsReady(ctx context.Context, client *kubernetes.Clientset, name
 	}
 }
 
+// postgresSecretName is the ESO-synced Secret holding the role's password.
+const postgresSecretName = "postgres-secrets"
+
 // postgresPod is the chart's fixed StatefulSet pod name — postgres is a plain
 // in-cluster StatefulSet with a single replica, not a configurable release.
 const postgresPod = "postgres-0"
@@ -1470,19 +1403,26 @@ var runAlterPostgresRolePassword = func(ctx context.Context, namespace, podName,
 // canceled.
 const postgresSyncTimeout = postgresPodStartTimeout + 2*time.Minute
 
-func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string) error {
+func syncPostgresPassword(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string, unsynced map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, postgresSyncTimeout)
 	defer cancel()
 
 	sp := ui.NewSpinner("Syncing Postgres password")
 	sp.Start()
 
+	// A Secret ESO has not refreshed holds a value it may be about to replace:
+	// setting the role to it is the drift this sync exists to prevent.
+	if reason, ok := unsynced[postgresSecretName]; ok {
+		sp.Fail("postgres-secrets is not in sync with OpenBao")
+		return fmt.Errorf("%s/%s: %s", namespace, postgresSecretName, reason)
+	}
+
 	if err := waitForPodRunning(ctx, k8sClient, namespace, postgresPod, postgresPodStartTimeout); err != nil {
 		sp.Fail("Postgres pod never started")
 		return fmt.Errorf("wait for %s: %w", postgresPod, err)
 	}
 
-	secret, err := waitForSecretData(ctx, k8sClient, namespace, "postgres-secrets", 60*time.Second)
+	secret, err := waitForSecretData(ctx, k8sClient, namespace, postgresSecretName, 60*time.Second)
 	if err != nil {
 		sp.Fail("postgres-secrets not ready")
 		return fmt.Errorf("read postgres-secrets: %w", err)

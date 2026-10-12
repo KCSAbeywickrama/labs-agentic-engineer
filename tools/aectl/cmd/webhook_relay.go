@@ -18,7 +18,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -31,7 +30,7 @@ import (
 // webhookRelaySeedPath keys every org's AE Studio relay channel (aep-api's
 // AE_STUDIO_WEBHOOK_RELAY_SEED). Seeded with the install's secrets but not in
 // requiredOpenBaoPaths: an install that predates the relay is topped up by
-// `platform update` (seedWebhookRelaySeedIfMissing), it is not a wiped store.
+// `platform update` (topUpWebhookRelaySeed), it is not a wiped store.
 const webhookRelaySeedPath = "aep/webhook-relay-seed"
 
 // webhookRelaySeed is 32 random bytes as hex text: `platform secret import`
@@ -58,59 +57,40 @@ func webhookRelayEnabled() bool {
 	return enabled
 }
 
-// seedWebhookRelaySeedIfMissing writes a fresh relay seed when the store has
-// none and leaves an existing one untouched: put must refuse to overwrite
-// (errSecretExists), so a seed created between the check and the write
-// survives. It reports whether it wrote one; the value is never returned or
-// printed (a new seed only changes channel URLs nobody has registered yet).
-func seedWebhookRelaySeedIfMissing(exists func(path string) (bool, error), put func(path, value string) error) (bool, error) {
-	ok, err := exists(webhookRelaySeedPath)
-	if err != nil {
-		return false, fmt.Errorf("check secret %s: %w", webhookRelaySeedPath, err)
-	}
-	if ok {
-		return false, nil
-	}
-	seed, err := webhookRelaySeed()
-	if err != nil {
-		return false, fmt.Errorf("generate webhook relay seed: %w", err)
-	}
-	if err := put(webhookRelaySeedPath, seed); err != nil {
-		if errors.Is(err, errSecretExists) {
-			return false, nil
-		}
-		return false, fmt.Errorf("write %s: %w", webhookRelaySeedPath, err)
-	}
-	return true, nil
-}
-
 // ensureWebhookRelaySeed tops up aep/webhook-relay-seed in OpenBao for an
-// install that predates the relay (create-only), before the chart's
-// ExternalSecret for it is rendered.
-func ensureWebhookRelaySeed(ctx context.Context) error {
+// install that predates the relay, or whose in-memory OpenBao restarted
+// (create-only), before the chart's ExternalSecret for it is rendered.
+func ensureWebhookRelaySeed(ctx context.Context, platformNamespace string) error {
+	if !webhookRelayEnabled() {
+		return nil
+	}
 	s, err := openOpenBaoSession(ctx)
 	if err != nil {
 		return fmt.Errorf("connect to OpenBao: %w", err)
 	}
 	defer s.stop()
-	return topUpWebhookRelaySeed(
-		func(path string) (bool, error) { return s.pathExists(ctx, path) },
-		func(path, value string) error { return s.putCreateOnly(ctx, path, value) })
-}
-
-// topUpWebhookRelaySeed seeds aep/webhook-relay-seed create-only when the
-// relay is enabled, and says so only when it wrote one (never the value).
-// With the relay off it does not touch the store.
-func topUpWebhookRelaySeed(exists func(path string) (bool, error), put func(path, value string) error) error {
-	if !webhookRelayEnabled() {
-		return nil
-	}
-	created, err := seedWebhookRelaySeedIfMissing(exists, put)
+	recover, err := newClusterSecretRecovery(ctx, platformNamespace)
 	if err != nil {
 		return err
 	}
-	if created {
-		ui.Success("Seeded " + webhookRelaySeedPath)
+	return topUpWebhookRelaySeed(s.seedStore(ctx, recover))
+}
+
+// topUpWebhookRelaySeed seeds aep/webhook-relay-seed create-only when the
+// relay is enabled: the seed the cluster's Secret still holds when there is
+// one (a new seed moves every org's channel off the URL its hooks deliver to),
+// a fresh one otherwise. It says what it wrote, never the value. With the
+// relay off it does not touch the store.
+func topUpWebhookRelaySeed(st seedStore) error {
+	if !webhookRelayEnabled() {
+		return nil
+	}
+	seeded, err := seedGeneratedSecrets([]generatedSecret{webhookRelaySeedSecret}, st)
+	if err != nil {
+		return err
+	}
+	for _, line := range describeSeeded(seeded) {
+		ui.Success(line)
 	}
 	return nil
 }

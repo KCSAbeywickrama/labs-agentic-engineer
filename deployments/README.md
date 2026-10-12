@@ -358,18 +358,26 @@ now also drops that stale `last-applied-configuration` annotation.
 **OpenBao forgets every platform secret.** It runs `bao server -dev`
 (in-memory) and its `postStart` re-seeds only OpenChoreo's own fixtures, so the
 `aep/*` paths `aectl platform install` writes are gone once that pod restarts.
-Re-running the install re-seeds them — but it generates a fresh
-`aep/postgres-password` while the Postgres PVC keeps the old one, and Postgres
-only honours `POSTGRES_PASSWORD` when it initialises an empty data directory.
-If `aep-api` then fails to reach its database, re-initialise it (this discards
-the AEP database). To keep the install and its secrets instead, restore the
-keys from their Kubernetes Secrets: [Local OpenBao wipe recovery](#local-openbao-wipe-recovery).
+Re-run `make dev-env`: the install writes its inputs again and restores each
+generated key (Postgres password, Thunder client secrets, webhook relay seed)
+from the cluster Secret ESO last synced it into, so no holder of the old value
+breaks. It never rewrites a generated key the store still has, so a re-run on
+an intact OpenBao rotates nothing. Then follow steps 3 to 5 of
+[Local OpenBao wipe recovery](#local-openbao-wipe-recovery) for what the
+install does not own (environment bindings, org secrets, aep-api's access).
+
+**Secrets and their holders drift (`failed SASL auth`, `invalid_client`).**
+ESO refreshes an ExternalSecret hourly, and running pods keep the env they
+started with, so a changed `aep/*` key breaks only the NEXT pod start: an
+`aep-api` that crash-loops with `password authentication failed for user
+"aep"`, or `GET /projects` 500s on a Thunder `invalid_client`. It happens when
+the role or a client is set from a Secret ESO has not refreshed since the key
+changed. `make dev-env` and `make dev-update` (`aectl platform sync-clients`)
+make ESO re-read OpenBao first, then set the role and the clients, so either
+repairs a drifted cluster:
 
 ```bash
-# foreground, so postgres-0 is gone before the PVC: pvc-protection holds a
-# claim that a running pod still mounts, and the delete below would hang
-kubectl -n wso2-aep delete statefulset postgres --cascade=foreground
-kubectl -n wso2-aep delete pvc data-postgres-0
+./tools/aectl/aectl-skaffold platform sync-clients   # ESO sync, Postgres role, Thunder clients
 ```
 
 ## Tear down
@@ -394,10 +402,12 @@ from the cluster's DNS. Repair the name first with
 `deployments/scripts/restore-host-k3d-internal.sh`, which restores it in
 CoreDNS ([After a host restart](#after-a-host-restart)).
 
-**Do NOT run `make dev-env`, `aectl platform install` or `--reuse-secrets`.**
-`install` regenerates and overwrites every `aep/*` key (only Postgres is
-rescued), which rotates secrets under the running platform. Never write a value
-with `value=-` over `kubectl exec -i`: it intermittently stores an empty value.
+**Step 1 is what `make dev-env` (`aectl platform install`) does.** It writes
+the install's inputs again and restores every generated `aep/*` key from its
+Secret before it would generate one, and never rewrites a key the store has.
+Do the manual steps below only for what it does not own (steps 3 to 5), or
+without a re-install. Never write a value with `value=-` over
+`kubectl exec -i`: it intermittently stores an empty value.
 
 Never print a value, not even to compare. Compare lengths or sha256 hashes.
 Never put a value on a command line (no `echo`, no `value=<literal>`). That
@@ -451,13 +461,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    `aep/anthropic-api-key`, `aep/opensearch-username` and `aep/opensearch-password`
    have no ESO target Secret; re-enter them from where you hold them (the
    OpenSearch pair is in the observability plane's own Secret, if installed).
-   Restore the `aep/thunder-clients/*` keys too, from their Secrets. Leaving
-   one out does not preserve it. The sync step's `sync-clients` seeds a **new** random
-   value for each missing key, syncs it into the Secret and updates the Thunder
-   client to match. That is a rotation of that client's secret. Every holder of
-   the old value then fails until it restarts on the new Secret. Do it only if
-   a rotation is what you want. `sync-clients` also refuses until every
-   non-generated path above is back.
+   A missing `aep/thunder-clients/*` key is restored from its Secret by the
+   sync step's `sync-clients` (a new value only when no Secret holds one).
+   `sync-clients` refuses until every non-generated path above is back.
 2. **Verify** each written key by length (or sha256) against the Secret it came
    from.
 3. **Environment identity bindings.** Each environment with a Thunder binding
@@ -514,9 +520,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    if it fails, add `<k3d network gateway, e.g. 172.18.0.1> host.k3d.internal`
    to both and restart CoreDNS. Do not stop and start the cluster to fix it:
    that wipes OpenBao again.
-7. **Sync.** Force-sync the ExternalSecrets
-   (`kubectl annotate externalsecret <name> -n wso2-aep force-sync=$(date +%s) --overwrite`)
-   and run `aectl platform sync-clients`.
+7. **Sync.** Run `aectl platform sync-clients`: it force-syncs the platform
+   ExternalSecrets, then sets the Postgres role and the Thunder clients from
+   them.
 
 ## Upgrading to write-only secrets
 
