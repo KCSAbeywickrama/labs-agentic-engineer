@@ -151,7 +151,17 @@ the files that do not depend on each other as parallel calls.
      screens come first.
    - each `service`: its `openapi.yaml` (`openapi-conventions`). Its
      operations serve the screens of each prototype that calls it, and its
-     schemas come from the data model.
+     schemas come from the data model. Before you write it, walk each
+     prototype flow (`prototype.json` `flows`) that calls it to its last
+     action. After that action, each screen that shows the changed records
+     gets them from an operation: the same records, in the same states.
+     Example: in the prototype, a booking that its booker cancels stays in
+     My bookings as Cancelled, so `GET /me/bookings` returns it, and its
+     `summary` says so. Where a prototype flow and the requirements differ,
+     that is a gap: close it as **The gap check** says, and fix the
+     prototype. Report the walk in one chat line, with what each list keeps
+     after the last action: `Prototype walk: 4 flows; My bookings keeps
+     cancelled bookings.`
    - each `ai-agent`: its `agent.afm.md` (`agent-building`), after the
      contracts whose operations it calls.
    A component of another kind (a scheduled task, a worker) has no artifact:
@@ -388,6 +398,9 @@ it. When no comment is left to act on, say so and stop.
      the comment's words, without `*assumed*`: its author decided it.
    - A decision that you make to apply a comment goes where **Technical
      decisions** puts it.
+   - When you change a prototype screen or a contract operation, walk again
+     each flow that reaches that screen, as step 5 of **The lineup** says
+     for a `service`.
    - Decline a comment only when it conflicts with a requirement.
 5. **Change every place.** A comment that renames a field or a term changes
    each line that has the old name. Before you edit a file, find each of

@@ -60,10 +60,10 @@ Error:
   type: object
   required: [code, message]
   properties:
-    code: { type: integer, description: HTTP or application error code }
-    message: { type: string, description: short human-readable label }
-    description: { type: string, description: detailed explanation }
-    moreInfo: { type: string, description: URI to documentation }
+    code: { type: integer, description: "HTTP or application error code" }
+    message: { type: string, description: "short human-readable label" }
+    description: { type: string, description: "detailed explanation" }
+    moreInfo: { type: string, description: "URI to documentation" }
 ```
 
 Each operation declares at least its failure modes: `'400'`/`'404'` where
@@ -78,9 +78,9 @@ default 0). The 200 response is an envelope, not a bare array:
 type: object
 required: [count, data]
 properties:
-  count: { type: integer, description: total matching items }
-  next: { type: string, nullable: true, description: relative URI of the next page }
-  previous: { type: string, nullable: true, description: relative URI of the previous page }
+  count: { type: integer, description: "total matching items" }
+  next: { type: string, nullable: true, description: "relative URI of the next page" }
+  previous: { type: string, nullable: true, description: "relative URI of the previous page" }
   data: { type: array, items: { $ref: '#/components/schemas/ExpenseClaim' } }
 ```
 
@@ -187,12 +187,12 @@ operation; the correct document simply has none.
 paths:
   /me/claims:
     get:
-      summary: The caller's claims
+      summary: "The caller's claims"
       security:
         - oauth2: [claims:read]
   /claims:
     get:
-      summary: Every claim
+      summary: "Every claim"
       security:
         - oauth2: [claims:read-all]
   /health:
@@ -209,4 +209,7 @@ one puts the coding agent's issue in direct conflict with its skills.
 
 2-space indentation throughout; quote status-code keys (`'200'`, `'404'`).
 The file is edited with anchored string edits later, so consistent
-indentation is load-bearing.
+indentation is load-bearing. Put each `summary` and `description` value in
+double quotes. In a flow mapping (`{ … }`), a comma ends a value that has no
+quotes, and the text after it becomes a new key with no value:
+`{ type: string, description: "e.g. submitted, approved" }`.
