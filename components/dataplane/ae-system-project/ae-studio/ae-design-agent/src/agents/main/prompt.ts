@@ -21,6 +21,7 @@ import {
   EMPTY_SKILL_SOURCE,
   SERVICE_AUDIENCE,
   type LoadedSkillBody,
+  type SkillCatalogEntry,
   type SkillSource,
 } from "./skill-source.js";
 
@@ -120,16 +121,11 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   // to the pre-audience catalog. `pinOnly` rows still get a line — the design
   // agent has to NAME a coding skill to pin it onto a component's design.json —
   // just no loadSkill invitation, appended as a separate block.
+  // A chat-only skill (an area chat's, `src/areas/`) is neither: it is no
+  // guidance for this agent and nothing a component pins.
   const loadable = entries.filter((e) => e.audience.includes(SERVICE_AUDIENCE));
-  const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE));
-
-  const lines = loadable.map((e) => `- ${e.name}: ${e.description}`).join("\n");
-  // The reference note appears only when some LOADABLE skill carries reference
-  // files — a reference note about a skill this agent cannot load is useless.
-  const hasRefs = loadable.some((e) => e.hasReferences);
-  const refNote = hasRefs
-    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
-    : "";
+  const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE) && e.audience.includes("coding"));
+  if (loadable.length === 0 && pinOnly.length === 0) return "";
 
   // Emitted ONLY when something is pin-only, so a design-only library keeps the
   // exact prompt text (and cached prefix) it had before audiences existed.
@@ -150,20 +146,31 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   // If nothing is loadable (a pin-only-only library), skip the "call
   // loadSkill" invitation and its empty list — only the heading survives, and
   // `pinBlock` carries the rest of the explanation.
-  const header =
-    loadable.length === 0
-      ? `
+  const header = loadable.length === 0 ? `\n\n# Skills` : loadableSkillsBlock(loadable);
 
-# Skills`
-      : `
+  return header + pinBlock;
+}
+
+/**
+ * The `# Skills` block over skills the reader may load: the loadSkill
+ * invitation and one line per skill, with the reference note only when one of
+ * them carries reference files (a note about a skill it cannot load is
+ * useless). "" for none. The design catalog (`buildSkillCatalog`) and an area
+ * chat's catalog of its other skills (`src/areas/prompt.ts`) both render it.
+ */
+export function loadableSkillsBlock(entries: readonly SkillCatalogEntry[]): string {
+  if (entries.length === 0) return "";
+  const lines = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
+  const refNote = entries.some((e) => e.hasReferences)
+    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
+    : "";
+  return `
 
 # Skills
 
 You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. Call loadSkill ONCE with every relevant skill's name (names: [...]) to read their guidance BEFORE applying any of them — never guess a skill's contents.${refNote}
 
 ${lines}`;
-
-  return header + pinBlock;
 }
 
 /**

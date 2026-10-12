@@ -30,9 +30,9 @@
  * this turn, never from the instruction or this turn's model output. A
  * confirmed write runs at most once.
  *
- * The gates themselves (`issues/filing-gate.ts`, `issue/confirm-gate.ts`) say
- * which tool waits for which answer and how its change is rendered; this
- * module is how every gate reads an answer and a card and holds a tool.
+ * Which tool waits for which answer, and how its change is rendered, is the
+ * tool registry's (`../tools/registry.ts`), applied by `../tools/gate.ts`;
+ * this module is how the gate reads an answer and a card and holds a tool.
  */
 
 import type { ModelMessage, ToolSet } from "ai";

@@ -22,11 +22,11 @@ reviewable change, and `applyToolCall` folds the streamed calls through the cano
 
 ## Agents and the loop
 
-Each agent is a `ToolLoopAgent` built in its own module by a factory, following the AI
-SDK's building-agents guidance: `createMainAgent` (`src/agents/main/agent.ts`, the spec
-editor), `createIssuesAgent` (`src/agents/issues/agent.ts`) and `createIssueAgent`
-(`src/agents/issue/agent.ts`). A factory takes what the agent IS (its deps: tools,
-instructions, or for a view's agent what it builds them from) and `AgentRunSettings` (`src/agents/run-settings.ts`), what `runTurn` decided for
+Each agent is a `ToolLoopAgent` built by a factory, following the AI SDK's
+building-agents guidance: `createMainAgent` (`src/agents/main/agent.ts`, the spec editor)
+and `buildSubAgent` (`src/areas/sub-agent.ts`, the one generic sub-agent behind every
+area chat, built from an area scope). A factory takes what the agent IS (its deps: tools,
+instructions, or for a sub-agent the scope it builds them from) and `AgentRunSettings` (`src/agents/run-settings.ts`), what `runTurn` decided for
 this turn: the model built from the org's connection, the step cap, the output ceiling,
 retries, provider options, `instructionsWrap` (the system prompt, with the cache
 breakpoint when caching is on) and `prepareStep` (the rolling breakpoint). Every agent
@@ -37,9 +37,9 @@ and leaves an absent option off entirely.
 `runTurn` takes `agentFor(run)` rather than tools and instructions: it pushes the user
 message, which is what fixes the turn prompt's index for the rolling breakpoint, then
 calls `agentFor` once and streams the agent it returns. `runConversationTurn` picks the
-factory: the Issues view's turns get `createIssuesAgent`, which merges the turn's MCP
-tools under its own and gates `create_issue`; an issue's thread gets `createIssueAgent`,
-which keeps that issue's MCP tools and gates every write; every other turn gets `createMainAgent`
+factory: the Issues view's turns get `buildSubAgent` over `scopeFor("issues")`, an issue's
+thread over `scopeFor("issues", {kind: "issue", number})` (the wire still says `view` and
+`issueNumber`; `areaScopeOf` maps them); every other turn gets `createMainAgent`
 over the tool set it assembles (files or task-plan, then MCP, register draft and web
 search).
 
@@ -103,14 +103,32 @@ pair is `400 invalid_chat`); a turn is sent to a thread, whose chat the book kno
 turn body names no view. Only the main chat rotates. The chat's view (`VIEWS` in
 `@aep/agent-stream`) selects that view's agent in place of the spec editor:
 `toolsetFor(turn, view)` returns `issues` for `view: "issues"`, `issue` for
-`view: "issue"`, and otherwise derives `files`/`task-plan` from the turn. `runConversationTurn` runs an `issues` turn on
-`createIssuesAgent` (`src/agents/issues/agent.ts`: the report classifier, the question
-tools, the turn's MCP tools under them, Issues-agent instructions, no spec bundle), and
-it stops on an accepted question call like every agent, so a "File this issue?" card
-ends the turn awaiting the user. Adding a view is one entry in `VIEWS`, one tool set,
-one `src/agents/<view>/` with its `agent.ts` factory and one entry in `VIEW_AGENTS`
-(`src/agents/views.ts`); a view the main agent hands reports to also has one entry each
-in `HAND_OFF_TOOLS` and `HAND_OFF_DESCRIPTIONS` (`src/agents/main/tools/hand-off.ts`).
+`view: "issue"`, and otherwise derives `files`/`task-plan` from the turn. `runConversationTurn` runs an `issues` or
+`issue` turn on the generic sub-agent, and it stops on an accepted question call like
+every agent, so a "File this issue?" card ends the turn awaiting the user.
+
+**Area profiles.** What a sub-agent is, is data (`src/areas/profiles.ts`): an
+`AreaProfile` (`id`, `label`, an optional hand-off sentence, a `base` scope and per focus
+kind an overlay scope whose stated fields REPLACE the base's) and its `AreaScope`
+(`tools`: an allow-list of registry names, `skills`: the platform chat skills inlined into
+the prompt, `reportsBack`). The Issues base takes `ask_question`, `ask_questions`,
+`classify_report`, `search_issues`, `create_issue` and the `issue-triage` skill, and
+reports back an outcome note; its focus `issue` takes the question tools, `get_issue`,
+`list_components`, `comment_issue`, `edit_issue`, `close_issue`, `reopen_issue`,
+`hand_to_coding_agent` and `issue-work`, and reports back `on-close-summary` (which tells
+nothing yet). `scopeFor` refuses a scope naming an unknown tool or a write without a
+confirmation. `buildSubAgent` makes each named built-in from the tool registry
+(`src/tools/registry.ts`) and takes each named MCP tool the chat's route listed; anything
+else the route lists is dropped, and an MCP tool named like a built-in never stands in for
+it. A skill loader (over the `chat` audience view, `src/areas/skills.ts`) joins only when
+the library has chat skills the scope does not inline. Its prompt
+(`src/areas/prompt.ts`) is assembled per turn: the generic core (role, how to ask, the
+go-ahead discipline, the rules), the area block (project, area label, focus: "issue
+#N"), the scope's skills inlined, the catalog of the other chat skills, the confirmation
+table generated from the scope's writes, and the surface's narration policy. Adding an
+area is a profile, its tools in the registry and its skills in `skills/` with `audience:
+[chat]`, one entry in `VIEWS`, and, for a hand-off target, one entry each in
+`HAND_OFF_TOOLS` and `HAND_OFF_DESCRIPTIONS` (`src/agents/main/tools/hand-off.ts`).
 Only the Issues view receives a hand-off and only its chat leaves the main chat a branch
 note; a view's agent works on no spec, so its turn is a plain chat turn (a typed
 `/design` is words for it, not a flow), it joins no Room, takes no spec scope (a `400`),
@@ -121,15 +139,15 @@ which ae-studio-tools forwards to aep-api's surface for that project and issue; 
 never names either. The usage record of a view's turn carries `view`, so aep-api's spec
 status reads past it.
 
-**Branch notes.** An Issues turn's result carries its `outcome` (`src/agents/issues/
-outcome.ts`: `Filed #N: <title>` when it filed, else its last reply, one line, at most 400
+**Branch notes.** A turn of a scope that reports back with an outcome note (the Issues
+chat) carries its `outcome` (`src/areas/outcome.ts`: `Filed #N: <title>` when it filed, else its last reply, one line, at most 400
 characters); the `ThreadBook` counts them per project (`noteOutcome`), and the main chat's
 next browser turn takes them as the desk accepts it (`takeBranchNotes`, once: a start the
 pod refuses leaves them, a main turn that fails does not hand them on) and opens its prompt with one quoted, labelled `Meanwhile in Issues (N turns): …`
-line (`branchNotesNote`).
+line (`branchNotesNote`, the label from the area's profile).
 
-An **issue's thread** (`view: "issue"`) is the chat on one filed issue's card;
-`createIssueAgent` names its issue number in its prompt. It exists only while the issue is
+An **issue's thread** (`view: "issue"`) is the chat on one filed issue's card; its
+sub-agent's prompt names its issue number. It exists only while the issue is
 open: opening its thread and starting a turn on it first read the issue through its own
 route's `get_issue` (`conversations/issue-state.ts`), and a closed issue is `409
 issue_closed` (its thread is removed), an unknown one `404 issue_unknown`. Unknown is read
@@ -148,32 +166,32 @@ from the turn's MCP block, the issue's own tools by contract name (`get_issue`,
 `hand_to_coding_agent`); anything else the server lists is left out. The route names the
 issue, so the tools act on it alone. Its turns carry no `outcome`.
 
-The Issues agent files on one explicit answer. The prompt has it call a single
-`ask_question` with the exact question `FILE_QUESTION` and the exact options `FILE_IT`
-(flagged `recommended: true`) and "Change it". `gateCreateIssue` (`filing-gate.ts`) wraps
-the MCP tool named `create_issue`: unless the turn's instruction is the single-answer
-serialization of `FILE_IT` to `FILE_QUESTION` (a batched answer never qualifies), the tool
-refuses with an error that tells the model what to ask. Once confirmed, the tool executes
+Every write waits on one explicit answer. The tool registry (`src/tools/registry.ts`)
+gives each write its `confirm`: the question, the option that goes ahead, the option that
+does not, and the layout of its change — `create_issue`: "File this issue?" → "File it" /
+"Change it"; "Post this comment?" → "Post it", "Apply this edit?" → "Apply it", "Close this
+issue?" → "Close it", "Reopen this issue?" → "Reopen it", "Hand this to the coding
+agent?" → "Hand it over", each with "Not now". The prompt's confirmation table is
+generated from it, and `gateConfirmations` (`src/tools/gate.ts`) wraps every tool in the
+set that has one: unless the turn's instruction is the single-answer serialization of
+that tool's option to its question (a batched answer never qualifies), the tool refuses
+with an error that tells the model what to ask. Once confirmed, the tool executes
 at most once in the turn; any later call is refused, so injected text in an earlier tool
 result, or a retry after a timeout that did file, cannot file twice, and a failed first
 attempt is reported to the user rather than retried silently.
 
-Every write an issue's agent makes waits the same way, generalised
-(`src/agents/confirmation.ts`: `answeredWith`, `refusing`, `onceAsShown`, which the filing
-gate uses too). `CONFIRMATIONS` (`issue/confirm-gate.ts`) gives each write tool its question
-and option: "Post this comment?" → "Post it", "Apply this edit?" → "Apply it", "Close this
-issue?" → "Close it", "Reopen this issue?" → "Reopen it", "Hand this to the coding agent?"
-→ "Hand it over", each with "Not now". `gateWrites` lets the one tool the turn's single
-answer confirms run once and refuses every other write with an error naming its question;
-`get_issue` and `list_components` are never gated. The prompt reads the issue first,
-drafts each change, asks its question, and before a hand-off asks which component (the
-options from `list_components`); a "Deploy a version first" answer is relayed as is.
+The engine is `src/agents/confirmation.ts` (`answeredWith`, `refusing`, `onceAsShown`):
+the one tool the turn's single answer confirms runs once, every other write refuses with
+an error naming its question, and read-only tools are never gated. The procedure (read the
+issue first, draft each change, pick the component before a hand-off, relay "Deploy a
+version first" as is; classify, search, draft and file a report) is the `issue-work` and
+`issue-triage` skills'.
 
 A gate binds the tool AND its arguments to the card the user answered, not only which
 write runs. The agent puts the exact change in the confirm option's `description`, in one
-canonical rendering per tool (`describeChange` beside `CONFIRMATIONS`: the comment; "Title:
-…" and/or "Body:\n…"; the reason; "Component: …"; nothing for a reopen; `describeFiling`
-for `create_issue`: title, kind and body). An argument the rendering does not name is shown
+canonical rendering per tool (`describeChange` over the registry's layout: the comment;
+"Title: …" and/or "Body:\n…"; the reason; "Component: …"; nothing for a reopen; title,
+kind and body for `create_issue`). An argument the rendering does not name is shown
 too, so nothing reaches the tool unshown. In the answer turn `runConversationTurn` hands the
 agent the card the user is answering, read from the history the service stored before the
 turn (`answerableQuestion`), never the instruction or this turn's model output. It is the

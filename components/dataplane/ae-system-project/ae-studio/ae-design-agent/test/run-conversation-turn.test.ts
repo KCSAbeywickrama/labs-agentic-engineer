@@ -26,8 +26,7 @@ import type { Conversation } from "../src/store/conversation-store.js";
 import type { RoomPeer } from "../src/collab/room-peer.js";
 import { SEED_FILES } from "./seed-files.js";
 import { buildAnswerInstruction, buildAnswersInstruction, type AskQuestionInput, type StreamPart } from "@aep/agent-stream";
-import { describeFiling } from "../src/agents/issues/filing-gate.js";
-import { describeChange } from "../src/agents/issue/confirm-gate.js";
+import { describeChange } from "../src/tools/registry.js";
 import { mockModel, type MockStep } from "../src/shared/mock-model.js";
 import { testSkillSource } from "./skill-source.js";
 import { listen0 } from "../src/shared/listen.js";
@@ -1092,7 +1091,7 @@ test("toolset issues: the files-diverged note is not added (the prompt has no fi
 const DRAFT = { title: "Save button does nothing", body: "Steps", kind: "bug" };
 const FILE_CARD: AskQuestionInput = {
   question: "File this issue?",
-  options: [{ label: "File it", recommended: true, description: describeFiling(DRAFT) }, { label: "Change it" }],
+  options: [{ label: "File it", recommended: true, description: describeChange("create_issue", DRAFT) }, { label: "Change it" }],
 };
 
 /**
@@ -1186,7 +1185,7 @@ test("issues: create_issue reaches the MCP server only on the File it answer, wi
     assert.deepEqual(mcp.filed, [DRAFT]);
     assert.equal(errors.length, 2);
     assert.match(errors[0]!, /not the change the user confirmed\. Ask "File this issue\?" again/);
-    assert.match(errors[1]!, /already attempted/);
+    assert.match(errors[1]!, /Already attempted in this turn/);
   } finally {
     await mcp.close();
   }

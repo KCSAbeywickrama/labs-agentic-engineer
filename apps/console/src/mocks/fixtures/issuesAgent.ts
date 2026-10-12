@@ -21,7 +21,7 @@ import type { ScriptedTurn } from "./interview";
 import { Script } from "./interview";
 
 // The mock Issues agent, on the Issues Page's chat. It does what the real one
-// does (ae-design-agent src/agents/issues): classify the report, look for an
+// does (ae-design-agent src/areas, the issue-triage skill): classify the report, look for an
 // issue that already covers it, draft one, ask "File this issue?" and file it
 // on the user's File it. A report it cannot place gets the kind question
 // first. It reads the conversation from the user's earlier messages, as the

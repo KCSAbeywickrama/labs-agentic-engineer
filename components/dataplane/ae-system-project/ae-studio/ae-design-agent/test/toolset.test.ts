@@ -29,9 +29,6 @@ import { buildFileToolSet, buildRegisterDraftTools } from "../src/agents/main/to
 import { buildTaskPlanTools } from "../src/agents/main/tools/task-plan.js";
 import { BuildPlan } from "../src/agents/main/task-plan-accumulator.js";
 import { instructions, buildInstructions, taskPlanInstructions, buildTaskPlanInstructions } from "../src/agents/main/prompt.js";
-import { buildIssuesTools } from "../src/agents/issues/tools.js";
-import { describeFiling, FILE_IT, FILE_QUESTION } from "../src/agents/issues/filing-gate.js";
-import { buildIssuesInstructions } from "../src/agents/issues/prompt.js";
 import { testSkillSource } from "./skill-source.js";
 
 const SKILLS = testSkillSource([{ name: "task-planning", description: "plan tasks", content: "one task per component" }]);
@@ -96,89 +93,4 @@ test("planBuild records the checklist in the accumulator", async () => {
   const out = await planBuild.execute!({ items: [{ item: "F2", components: ["api"], note: "Approvals." }] }, {} as never);
   assert.equal((out as { ok: boolean }).ok, true);
   assert.equal(p.plan()?.[0]?.item, "F2");
-});
-
-// --- issues tool set (the Issues chat) ---------------------------------------
-
-test("issues tool set is the classifier + the question tools — no file tools, no loadSkill", () => {
-  const tools = buildIssuesTools(undefined);
-  assert.deepEqual(Object.keys(tools).sort(), ["ask_question", "ask_questions", "classify_report"]);
-});
-
-test("issues instructions carry the procedure and keep the classifier unnamed to the user", () => {
-  const out = buildIssuesInstructions(undefined, undefined);
-  for (const needle of ["classify_report", "search_issues", "create_issue", "File it", "Change it"]) {
-    assert.ok(out.includes(needle), `mentions ${needle}`);
-  }
-  assert.match(out, /never .*classifier/i);
-  // The one allowed occurrence is the rule that forbids naming it.
-  assert.equal(out.match(/Jev/g)?.length, 1);
-  // Not the spec agent's prompt: no file-editing vocabulary.
-  assert.equal(out.includes("addFile"), false);
-});
-
-test("issues instructions order the classifier outcomes: question, then ask the kind, and unknown means ask", () => {
-  const out = buildIssuesInstructions(undefined, undefined);
-  const question = out.indexOf('kind is "question"');
-  const clarify = out.indexOf("needsClarification is true");
-  assert.ok(question > 0 && clarify > question, "a question is handled before the clarification rule");
-  assert.match(out, /"unknown"/);
-  assert.match(out, /could not tell/);
-});
-
-test("issues instructions use the gate's question and option wording", () => {
-  const out = buildIssuesInstructions(undefined, undefined);
-  assert.ok(out.includes(`"${FILE_QUESTION}"`));
-  assert.ok(out.includes(FILE_IT));
-  assert.match(out, /never ask_questions/);
-});
-
-test("issues instructions pin the exact question and labels, with recommended as a flag not label text", () => {
-  const out = buildIssuesInstructions(undefined, undefined);
-  assert.ok(out.includes(`question exactly "${FILE_QUESTION}"`));
-  assert.ok(out.includes(`"${FILE_IT}"`) && out.includes('"Change it"'));
-  assert.match(out, /recommended: true/);
-  assert.equal(out.includes("(recommended)"), false, "never a label that carries the word");
-});
-
-test("issues instructions put the drafted issue in File it's description, verbatim, in the gate's form", () => {
-  const out = buildIssuesInstructions(undefined, undefined);
-  // The form comes from the gate's own rendering, so the two cannot drift apart.
-  const form = describeFiling({ title: "<title>", kind: "<kind>", body: "<body>" });
-  assert.equal(form, "Title: <title>\n\nKind: <kind>\n\nBody:\n<body>");
-  assert.ok(out.includes(JSON.stringify(form)));
-  const text = out.replace(/\s+/g, " ");
-  assert.match(text, /description/);
-  assert.match(text, /verbatim/);
-  // A note asking for changes never files the changed issue: the agent asks again.
-  assert.match(text, /note .*ask .*again/i);
-});
-
-test("issues instructions append the surface's narration policy", () => {
-  const skills = testSkillSource([{ name: "console", description: "how to speak", content: "Say issue, not ticket." }]);
-  assert.match(buildIssuesInstructions(skills, "console"), /# Narration policy\n\nSay issue, not ticket\./);
-  assert.equal(buildIssuesInstructions(skills, undefined), buildIssuesInstructions(undefined, undefined));
-});
-
-test("issues instructions treat /issue as a decision to file: classify without the prefix, ask what is missing in one batch", () => {
-  const out = buildIssuesInstructions(undefined, undefined).replace(/\s+/g, " ");
-  assert.ok(out.includes("When the message starts with /issue"));
-  assert.ok(out.includes("What should the issue be about?"));
-  assert.ok(out.includes("ask_questions"));
-  assert.match(out, /at most 4/);
-  assert.match(out, /without the \/issue prefix/);
-  assert.match(out, /never take the question branch/i);
-  // The clarifying batch never carries the filing question.
-  assert.match(out, /never include "File this issue\?"/i);
-  // Filing is still the single ask_question.
-  assert.equal(out.split(`question exactly "${FILE_QUESTION}"`).length, 2);
-});
-
-test("issues instructions send a bare /issue's answer down the /issue path, with the kind question's follow-ups", () => {
-  const out = buildIssuesInstructions(undefined, undefined).replace(/\s+/g, " ");
-  assert.ok(
-    /treat it as the text of an \/issue message and follow this section from the classify step \(including the batch\)/.test(out),
-  );
-  assert.match(out, /each question except the kind question/);
-  assert.match(out, /then the questions common to all kinds \(the need and the outcome\)/);
 });

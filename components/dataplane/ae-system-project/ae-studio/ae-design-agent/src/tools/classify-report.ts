@@ -31,7 +31,7 @@
 
 import { tool, type Tool } from "ai";
 import { z } from "zod";
-import { callMcpTool, type McpTransport } from "../../shared/mcp-client.js";
+import { callMcpTool, type McpTransport } from "../shared/mcp-client.js";
 
 export const CLASSIFY_REPORT = "classify_report";
 

@@ -673,6 +673,7 @@ export class TurnStarter {
             ...(wantsRegisterDraftTool(l.spec, l.route) ? { registerDraft: true } : {}),
             ...(viewMcp ? { mcp: viewMcp } : catalogTurn(gates) ? { mcp: deps.tools } : {}),
             ...(chat.view === "issue" ? { issueNumber: chat.issueNumber } : {}),
+            ...(chat.view !== undefined ? { project: projectOf(l.scope) } : {}),
             ...(branchNotes.length ? { branchNotes } : {}),
             webSearch: chat.view === undefined && designOrRoomTurn(gates),
             ...(eager.length ? { eagerSkills: eager } : {}),

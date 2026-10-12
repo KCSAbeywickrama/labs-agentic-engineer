@@ -30,17 +30,20 @@
 /**
  * Which agent a skill's guidance is written for (ADR-0013): the DESIGN agent
  * authors a project's spec, design and Task plan; the CODING agent implements a
- * component. Ownership (`metadata.aep.kind`) and audience are independent — a
- * skill can be the org's to edit while being the coding agent's to read.
+ * component; a CHAT sub-agent works in an area's chat (the Issues chats,
+ * `src/areas/`). Ownership (`metadata.aep.kind`) and audience are independent —
+ * a skill can be the org's to edit while being the coding agent's to read.
  */
-export type SkillAudience = "design" | "coding";
+export type SkillAudience = "design" | "coding" | "chat";
 
 /**
- * Every audience — what a skill declaring none resolves to. Narrowing is
- * opt-in, so an unmarked skill (and any an org authors without knowing the
- * field exists) stays readable by whoever asks.
+ * What a skill declaring no audience resolves to: the design and coding
+ * agents. Narrowing is opt-in, so an unmarked skill (and any an org authors
+ * without knowing the field exists) stays readable by both. `chat` is opt-in
+ * only: a chat sub-agent reads the skills written for it, never the design
+ * flows an unmarked library is made of.
  */
-export const ALL_AUDIENCES: readonly SkillAudience[] = ["design", "coding"];
+export const UNMARKED_AUDIENCES: readonly SkillAudience[] = ["design", "coding"];
 
 /** One catalog row: what the system prompt shows — never a body. */
 export interface SkillCatalogEntry {
@@ -83,9 +86,11 @@ export type LoadedReference = { content: string } | { binary: true } | undefined
 export type SkillLoadResult = LoadedSkillBody | { refused: true } | undefined;
 
 /**
- * The audience this service reads skills as. The design agent IS the design
- * agent — the coding agent runs in the remote-worker runner and never calls
- * here — so the audience is a property of the process, not of a request.
+ * The audience this service reads skills as by default. The design agent IS
+ * the design agent — the coding agent runs in the remote-worker runner and
+ * never calls here — so the audience is a property of the process, not of a
+ * request. The one other reader in this process is an area chat's sub-agent,
+ * which names `chat` when it loads (`src/areas/skills.ts`).
  */
 export const SERVICE_AUDIENCE: SkillAudience = "design";
 
@@ -114,12 +119,12 @@ export interface SkillSource {
   catalog(): readonly SkillCatalogEntry[];
   /**
    * Body + reference paths for one skill; a refusal when the skill is out of
-   * this consumer's audience; `undefined` for an unknown / vanished name
-   * (ENOENT). Throws `SkillReadError` on other I/O faults. Three distinct
-   * outcomes, none collapsed into another: a refusal is not a miss, and an I/O
-   * fault is not a miss either.
+   * `audience` (default `SERVICE_AUDIENCE`); `undefined` for an unknown /
+   * vanished name (ENOENT). Throws `SkillReadError` on other I/O faults. Three
+   * distinct outcomes, none collapsed into another: a refusal is not a miss,
+   * and an I/O fault is not a miss either.
    */
-  load(name: string): SkillLoadResult;
+  load(name: string, audience?: SkillAudience): SkillLoadResult;
   /**
    * One reference file: text content, a binary marker, or `undefined` (unknown
    * name/path / ENOENT). Throws `SkillReadError` on other I/O faults.

@@ -27,6 +27,6 @@ export interface BranchNote {
   view: "issues";
   /** Turns that chat completed since then (a positive integer). */
   turns: number;
-  /** The newest of those turns' outcome (`agents/issues/outcome.ts`). */
+  /** The newest of those turns' outcome (`areas/outcome.ts`). */
   outcome: string;
 }

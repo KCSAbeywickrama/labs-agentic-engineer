@@ -24,7 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
-import { OUTCOME_MAX_CHARS, turnOutcome } from "../src/agents/issues/outcome.js";
+import { OUTCOME_MAX_CHARS, turnOutcome } from "../src/areas/outcome.js";
 
 const user: ModelMessage = { role: "user", content: "the save button is broken" };
 

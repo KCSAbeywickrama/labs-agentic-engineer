@@ -17,7 +17,7 @@
  */
 
 /**
- * The Issues chat's `classify_report` tool (`agents/issues/classify.ts`): asks
+ * The Issues chat's `classify_report` tool (`tools/classify-report.ts`): asks
  * aep-api, over the Issues chat's MCP route, what kind of report a message is
  * (aep-api asks Jev with the platform's key, which the pod never holds), and
  * decides here whether the agent must ask. Every failure degrades to
@@ -26,7 +26,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyReport, buildClassifyReportTool, CLASSIFY_REPORT } from "../src/agents/issues/classify.js";
+import { classifyReport, buildClassifyReportTool, CLASSIFY_REPORT } from "../src/tools/classify-report.js";
 import type { McpTransport } from "../src/shared/mcp-client.js";
 import { FakeToolsSocket } from "../src/tools-socket/fake.js";
 import { mcpRoute } from "../src/shared/mcp-client.js";

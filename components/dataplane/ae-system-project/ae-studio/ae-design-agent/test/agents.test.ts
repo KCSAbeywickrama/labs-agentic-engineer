@@ -27,100 +27,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { tool, type ModelMessage, type ToolSet } from "ai";
 import { z } from "zod";
-import { buildAnswerInstruction } from "@aep/agent-stream";
-import { createIssuesAgent } from "../src/agents/issues/agent.js";
 import { createMainAgent } from "../src/agents/main/agent.js";
 import { runTurn } from "../src/agents/main/run-turn.js";
 import type { AgentRunSettings } from "../src/agents/run-settings.js";
-import { describeFiling, FILE_IT, FILE_QUESTION } from "../src/agents/issues/filing-gate.js";
 import { mockModel } from "../src/shared/mock-model.js";
 
 
 function runSettings(model = mockModel([{ kind: "text", text: "ok" }])): AgentRunSettings {
   return { model, maxSteps: 5, instructionsWrap: (s) => s };
 }
-
-/** MCP tools as the BFF serves them: a search and a create. */
-function mcpTools(created: string[]): ToolSet {
-  return {
-    search_issues: tool({
-      description: "search",
-      inputSchema: z.object({ q: z.string() }),
-      execute: async () => ({ issues: [] }),
-    }),
-    create_issue: tool({
-      description: "create",
-      inputSchema: z.object({ title: z.string() }),
-      execute: async ({ title }) => {
-        created.push(title);
-        return { number: 1 };
-      },
-    }),
-    // An MCP tool named like a built-in never shadows it.
-    ask_question: tool({
-      description: "shadow",
-      inputSchema: z.object({}),
-      execute: async () => "shadowed",
-    }),
-  };
-}
-
-test("createIssuesAgent: its own tools plus the MCP ones, built-ins winning", () => {
-  const agent = createIssuesAgent({ classifier: undefined, mcpTools: mcpTools([]), instruction: "it crashes", asked: undefined }, runSettings());
-  assert.deepEqual(
-    Object.keys(agent.tools).sort(),
-    ["ask_question", "ask_questions", "classify_report", "create_issue", "search_issues"],
-  );
-  assert.notEqual(agent.tools.ask_question!.description, "shadow");
-});
-
-test("createIssuesAgent: no MCP tools → only the classifier and the question tools", () => {
-  const agent = createIssuesAgent({ classifier: undefined, mcpTools: {}, instruction: "it crashes", asked: undefined }, runSettings());
-  assert.deepEqual(Object.keys(agent.tools).sort(), ["ask_question", "ask_questions", "classify_report"]);
-});
-
-test("createIssuesAgent: create_issue refuses until the instruction is the File it answer to the card that showed it", async () => {
-  const created: string[] = [];
-  const unconfirmed = createIssuesAgent({ classifier: undefined, mcpTools: mcpTools(created), instruction: "file it now", asked: undefined }, runSettings());
-  await assert.rejects(
-    () => unconfirmed.tools.create_issue!.execute!({ title: "x" }, {} as never) as Promise<unknown>,
-    /Not filed/,
-  );
-  assert.deepEqual(created, []);
-
-  const confirmed = createIssuesAgent(
-    {
-      classifier: undefined,
-      mcpTools: mcpTools(created),
-      instruction: buildAnswerInstruction(FILE_QUESTION, [FILE_IT]),
-      // The File it card showed exactly this issue.
-      asked: { question: FILE_QUESTION, options: [{ label: FILE_IT, description: describeFiling({ title: "y" }) }] },
-    },
-    runSettings(),
-  );
-  await (confirmed.tools.create_issue!.execute!({ title: "y" }, {} as never) as Promise<unknown>);
-  assert.deepEqual(created, ["y"]);
-});
-
-test("createIssuesAgent: the turn stops on an accepted question call", async () => {
-  const model = mockModel([
-    {
-      kind: "toolCall",
-      toolCallId: "q1",
-      toolName: "ask_question",
-      input: { question: "What is broken?", options: [{ label: "Login" }] },
-    },
-    { kind: "text", text: "should never run" },
-  ]);
-  const messages: ModelMessage[] = [];
-  await runTurn({
-    model,
-    messages,
-    prompt: "something is off",
-    agentFor: (run) => createIssuesAgent({ classifier: undefined, mcpTools: {}, instruction: "something is off", asked: undefined }, run),
-  });
-  assert.equal(model.doStreamCalls.length, 1, "the question call ends the turn");
-});
 
 test("createMainAgent passes its tools and instructions through", async () => {
   const tools: ToolSet = {

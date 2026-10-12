@@ -17,11 +17,12 @@
  */
 
 /**
- * An issue's agent changes its issue only on the user's own answer to that
- * change's question, and only with the change the question's card showed. The
- * prompt asks for it; this gate enforces it in code, because the issue's body
- * and comments (text the model reads) can try to talk it into a write the user
- * never confirmed, or into writing something else than what they confirmed.
+ * An issue's chat changes its issue only on the user's own answer to that
+ * change's question, and only with the change the question's card showed
+ * (`src/tools/gate.ts` over the registry's confirmations). The prompt asks for
+ * it; the gate enforces it in code, because the issue's body and comments
+ * (text the model reads) can try to talk it into a write the user never
+ * confirmed, or into writing something else than what they confirmed.
  */
 
 import { test } from "node:test";
@@ -29,15 +30,21 @@ import assert from "node:assert/strict";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { buildAnswerInstruction, buildAnswersInstruction, type AskQuestionInput } from "@aep/agent-stream";
-import {
-  CONFIRMATIONS,
-  confirmedTool,
-  describeChange,
-  gateWrites,
-  ISSUE_MCP_TOOLS,
-  NOT_NOW,
-  type WriteTool,
-} from "../src/agents/issue/confirm-gate.js";
+import { describeChange, TOOLS, type ToolConfirmation } from "../src/tools/registry.js";
+import { confirmedTool, gateConfirmations as gateWrites } from "../src/tools/gate.js";
+import { scopeFor } from "../src/areas/profiles.js";
+
+type WriteTool = "comment_issue" | "edit_issue" | "close_issue" | "reopen_issue" | "hand_to_coding_agent";
+
+/** The issue chat's MCP tools: everything its scope names that is not built in. */
+const ISSUE_MCP_TOOLS = scopeFor("issues", { kind: "issue", number: 1 }).tools.filter((t) => TOOLS[t]!.source === "mcp");
+
+/** The issue chat's writes and their confirmations, from the registry. */
+const CONFIRMATIONS = Object.fromEntries(
+  ISSUE_MCP_TOOLS.flatMap((t) => (TOOLS[t]!.confirm ? [[t, TOOLS[t]!.confirm]] : [])),
+) as Record<WriteTool, ToolConfirmation>;
+
+const NOT_NOW = "Not now";
 
 const WRITES = Object.keys(CONFIRMATIONS) as WriteTool[];
 
@@ -96,6 +103,7 @@ const call = (tools: ToolSet, name: string, input: unknown = ARGS[name as WriteT
 
 test("the issue's MCP tools are its two reads and its writes", () => {
   assert.deepEqual(ISSUE_MCP_TOOLS, ["get_issue", "list_components", ...WRITES]);
+  assert.deepEqual(WRITES, ["comment_issue", "edit_issue", "close_issue", "reopen_issue", "hand_to_coding_agent"]);
 });
 
 test("describeChange: each write's change as its card shows it", () => {
@@ -112,14 +120,15 @@ test("describeChange: each write's change as its card shows it", () => {
 });
 
 test("the confirmation table is the constraint's, word for word", () => {
-  assert.deepEqual(CONFIRMATIONS, {
+  const table = Object.fromEntries(Object.entries(CONFIRMATIONS).map(([t, c]) => [t, { question: c.question, option: c.option }]));
+  for (const c of Object.values(CONFIRMATIONS)) assert.equal(c.decline, NOT_NOW);
+  assert.deepEqual(table, {
     comment_issue: { question: "Post this comment?", option: "Post it" },
     edit_issue: { question: "Apply this edit?", option: "Apply it" },
     close_issue: { question: "Close this issue?", option: "Close it" },
     reopen_issue: { question: "Reopen this issue?", option: "Reopen it" },
     hand_to_coding_agent: { question: "Hand this to the coding agent?", option: "Hand it over" },
   });
-  assert.equal(NOT_NOW, "Not now");
 });
 
 test("confirmedTool: each single answer names its own tool, with or without a note, whitespace trimmed", () => {

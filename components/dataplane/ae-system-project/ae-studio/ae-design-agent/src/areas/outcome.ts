@@ -17,12 +17,15 @@
  */
 
 /**
- * What an Issues turn came to: the line the main chat's next turn is told
+ * What a turn of a scope that reports back with an outcome note (the Issues
+ * chat, `./profiles.ts`) came to: the line the main chat's next turn is told
  * (a branch note, `conversations/thread-book.ts`).
  */
 
 import type { ModelMessage } from "ai";
-import { filedIssue } from "./filing-gate.js";
+
+/** The registered write whose result is a filing (`../tools/registry.ts`). */
+const CREATE_ISSUE = "create_issue";
 
 /** The longest a turn's outcome (and so a branch note's) may be. */
 export const OUTCOME_MAX_CHARS = 400;
@@ -69,4 +72,46 @@ function oneLine(text: string): string {
     .replace(/\p{Cc}/gu, (c) => (/[\s\u0085]/.test(c) ? " " : ""))
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * The issue this turn filed: the last `create_issue` call whose result names
+ * the new issue's number, with the title the call filed (raw: the caller
+ * sanitises it). Read defensively — the result is the MCP server's text
+ * (`{"number":15,"url":…}`) and a refused, failed or unreadable call is no
+ * filing. Undefined when the turn filed nothing.
+ */
+function filedIssue(messages: readonly ModelMessage[]): { number: number; title: string } | undefined {
+  const titles = new Map<string, string>();
+  let filed: { number: number; title: string } | undefined;
+  for (const m of messages) {
+    if (typeof m.content === "string") continue;
+    for (const part of m.content) {
+      if (part.type === "tool-call" && part.toolName === CREATE_ISSUE) {
+        const title = (part.input as { title?: unknown } | null)?.title;
+        if (typeof title === "string") titles.set(part.toolCallId, title);
+      } else if (part.type === "tool-result" && part.toolName === CREATE_ISSUE) {
+        const number = issueNumber(part.output);
+        const title = titles.get(part.toolCallId);
+        if (number !== undefined && title !== undefined) filed = { number, title };
+      }
+    }
+  }
+  return filed;
+}
+
+/** The `number` a create_issue result names, when it is a positive integer. */
+function issueNumber(output: unknown): number | undefined {
+  const o = output as { type?: unknown; value?: unknown } | null;
+  let value: unknown;
+  if (o?.type === "json") value = o.value;
+  else if (o?.type === "text" && typeof o.value === "string") {
+    try {
+      value = JSON.parse(o.value);
+    } catch {
+      return undefined;
+    }
+  } else return undefined;
+  const number = (value as { number?: unknown } | null)?.number;
+  return typeof number === "number" && Number.isInteger(number) && number > 0 ? number : undefined;
 }

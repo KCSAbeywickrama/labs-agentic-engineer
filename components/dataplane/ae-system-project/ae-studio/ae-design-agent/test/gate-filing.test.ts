@@ -17,11 +17,12 @@
  */
 
 /**
- * The Issues agent files only on the user's own "File it" answer, and only the
- * issue its card showed. The prompt asks for it; this gate enforces it in code,
- * because text the model reads (an issue body from search_issues, something the
- * user pasted) can try to talk it into calling create_issue unconfirmed, or
- * into filing something else than what the user confirmed.
+ * The Issues chat files only on the user's own "File it" answer, and only the
+ * issue its card showed (`src/tools/gate.ts` over the registry's create_issue
+ * confirmation). The prompt asks for it; the gate enforces it in code, because
+ * text the model reads (an issue body from search_issues, something the user
+ * pasted) can try to talk it into calling create_issue unconfirmed, or into
+ * filing something else than what the user confirmed.
  */
 
 import { test } from "node:test";
@@ -29,13 +30,15 @@ import assert from "node:assert/strict";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { buildAnswerInstruction, buildAnswersInstruction, type AskQuestionInput } from "@aep/agent-stream";
-import {
-  describeFiling,
-  FILE_IT,
-  FILE_QUESTION,
-  filingConfirmed,
-  gateCreateIssue,
-} from "../src/agents/issues/filing-gate.js";
+import { describeChange, TOOLS } from "../src/tools/registry.js";
+import { confirmedTool, gateConfirmations } from "../src/tools/gate.js";
+
+const { question: FILE_QUESTION, option: FILE_IT } = TOOLS.create_issue!.confirm!;
+const describeFiling = (input: unknown): string => describeChange("create_issue", input);
+const filingConfirmed = (instruction: string): boolean => confirmedTool(instruction) === "create_issue";
+/** The gate on a turn whose instruction is (or is not) the File it answer. */
+const gateCreateIssue = (tools: ToolSet, confirmed: boolean, asked: AskQuestionInput | undefined): ToolSet =>
+  gateConfirmations(tools, confirmed ? buildAnswerInstruction(FILE_QUESTION, [FILE_IT]) : "file it now", asked);
 
 const ISSUE = { title: "Save does nothing", body: "## What happened\n\nNothing saves.", kind: "bug" };
 
@@ -51,9 +54,10 @@ const MISMATCH =
 const file = (tools: ToolSet, input: unknown = ISSUE): Promise<unknown> =>
   tools.create_issue!.execute!(input, {} as never) as Promise<unknown>;
 
-test("the question and option the gate waits for are the ones the prompt uses", () => {
+test("the question and options the gate waits for are the constraint's, word for word", () => {
   assert.equal(FILE_QUESTION, "File this issue?");
   assert.equal(FILE_IT, "File it");
+  assert.equal(TOOLS.create_issue!.confirm!.decline, "Change it");
 });
 
 test("filingConfirmed: the single answer form, with or without a note, whitespace trimmed", () => {
@@ -110,7 +114,7 @@ test("gateCreateIssue: unconfirmed, create_issue refuses with a tool error that 
   assert.equal(gated.create_issue!.inputSchema, createIssue.inputSchema);
   await assert.rejects(
     () => gated.create_issue!.execute!({ title: "x" }, {} as never) as Promise<unknown>,
-    /Not filed\. Ask the user "File this issue\?" with ask_question .*file only after they answer File it\./,
+    /Not done\. Ask the user "File this issue\?" with ask_question \(options File it \/ Change it\) and act only after they answer File it\./,
   );
 });
 
@@ -136,7 +140,7 @@ test("gateCreateIssue: confirmed, only the first create_issue call of the turn e
   assert.equal(await file(gated), "FILED");
   await assert.rejects(
     () => file(gated),
-    /A filing was already attempted in this turn; tell the user the result and ask before trying again\./,
+    /Already attempted in this turn; tell the user the result and ask before trying again\./,
   );
   assert.equal(runs, 1, "the second call never reached the inner tool");
 });
@@ -154,7 +158,7 @@ test("gateCreateIssue: a first call that throws still uses up the turn's one fil
   await assert.rejects(() => file(gated), /timeout/);
   await assert.rejects(
     () => file(gated),
-    /already attempted/,
+    /Already attempted/,
   );
   assert.equal(runs, 1);
 });

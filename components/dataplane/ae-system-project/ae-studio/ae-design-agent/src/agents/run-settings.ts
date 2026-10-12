@@ -21,7 +21,7 @@
  * (`AgentRunSettings`), the one way an agent is put together from them
  * (`buildToolLoopAgent`), and the question stop every agent ends its turn on.
  *
- * An agent module (`main/agent.ts`, `issues/agent.ts`) owns WHAT the agent is —
+ * An agent module (`main/agent.ts`, `areas/sub-agent.ts`) owns WHAT the agent is —
  * its tools and instructions. `runTurn` owns what varies per turn — the model
  * built from the org's key, the step cap, the output ceiling and the prompt-
  * cache breakpoints — and hands it over as `AgentRunSettings`.

@@ -24,7 +24,7 @@
  */
 
 import type { LoadedReference, LoadedSkillBody, SkillAudience, SkillCatalogEntry, SkillSource } from "../src/agents/main/skill-source.js";
-import { ALL_AUDIENCES } from "../src/agents/main/skill-source.js";
+import { UNMARKED_AUDIENCES } from "../src/agents/main/skill-source.js";
 
 /** One in-test skill: a resolved SKILL.md (body + optional aux files). */
 export interface TestSkill {
@@ -46,7 +46,7 @@ export function testSkillSource(skills: readonly TestSkill[]): SkillSource {
     name: s.name,
     description: s.description,
     hasReferences: !!s.references && Object.keys(s.references).length > 0,
-    audience: s.audience ?? ALL_AUDIENCES,
+    audience: s.audience ?? UNMARKED_AUDIENCES,
   }));
   return {
     catalog: () => entries,

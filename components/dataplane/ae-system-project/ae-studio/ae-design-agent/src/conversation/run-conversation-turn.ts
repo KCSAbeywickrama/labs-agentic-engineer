@@ -46,8 +46,8 @@ import { StreamingDocWriter } from "../collab/streaming-add.js";
 import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn } from "../agents/main/run-turn.js";
 import { createMainAgent } from "../agents/main/agent.js";
-import { createIssuesAgent } from "../agents/issues/agent.js";
-import { createIssueAgent } from "../agents/issue/agent.js";
+import { buildSubAgent } from "../areas/sub-agent.js";
+import { scopeFor, type ResolvedScope } from "../areas/profiles.js";
 import { answerableQuestion } from "../agents/confirmation.js";
 import { endedAwaitingHuman, type AgentRunSettings, type ProviderOptions, type TurnAgent } from "../agents/run-settings.js";
 import { buildFileToolSet, buildRegisterDraftTools } from "../agents/main/tools/files.js";
@@ -73,7 +73,7 @@ import {
   type ModelConnection,
 } from "../shared/model.js";
 import { MODEL_MAX_RETRIES } from "../shared/provider-limit.js";
-import { turnOutcome } from "../agents/issues/outcome.js";
+import { turnOutcome } from "../areas/outcome.js";
 import type { BranchNote } from "../conversations/branch-notes.js";
 import { loadMcpTools, type McpTransport } from "../shared/mcp-client.js";
 import { turnTelemetry } from "../shared/telemetry.js";
@@ -145,18 +145,20 @@ export interface RunConversationTurnInput {
   /** A `task-plan` turn: what the version carries, which `planBuild` is checked against. */
   planScope?: PlanScope;
   /**
-   * The issue an `issue` turn works on: that agent's prompt names it.
-   * Required for the `issue` tool set (a turn without it is refused before the
-   * model runs); ignored by every other.
+   * The issue an `issue` turn works on: the focus of its Issues scope, which
+   * its prompt names. Required for the `issue` tool set (a turn without it is
+   * refused before the model runs); ignored by every other.
    */
   issueNumber?: number;
+  /** The project an area chat's turn belongs to: its sub-agent's prompt names it. Ignored by a spec turn. */
+  project?: string;
   /**
    * The MCP transport for this turn (the tools socket's fetch). Present →
    * `tools/list` is fetched (best-effort) and merged into the tool set as
    * dynamic tools, under a shadow-guard so a discovered tool can never shadow
    * a built-in one. Omitted → no fetch, no merge (byte-identical to today).
    * An Issues or issue turn's transport is its chat's route on the socket
-   * (`mcpRoute`), whose tools are that agent's.
+   * (`mcpRoute`), whose tools its sub-agent's scope picks from.
    */
   mcp?: McpTransport;
   /**
@@ -235,9 +237,9 @@ export interface ConversationTurnResult {
    */
   changedPaths: string[];
   /**
-   * What an Issues turn came to (`agents/issues/outcome.ts`): the filing, else
-   * its last reply. Absent on every other turn, and on one that neither filed
-   * nor replied in text.
+   * What an Issues turn came to (`areas/outcome.ts`; a scope that reports back
+   * with an outcome note): the filing, else its last reply. Absent on every
+   * other turn, and on one that neither filed nor replied in text.
    */
   outcome?: string;
 }
@@ -256,24 +258,25 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     conv.status = "active";
 
     // 3. select the agent from `toolset` (default `files`). The Issues chat
-    //    and an issue's own chat each have an agent of their own
-    //    (agents/issues/agent.ts, agents/issue/agent.ts); every other turn
-    //    runs the main agent (agents/main/agent.ts) over the tool set built
-    //    here. Both spec tool sets build a throwaway per-turn accumulator from
-    //    the passed snapshot; the skill catalog + `loadSkill` are registered
-    //    identically (only when skills were supplied, ADR-0002). The `files`
-    //    set also carries the HITL question tools (ask_question /
-    //    ask_questions); `task-plan` does not. The FileBundle is held by name:
-    //    the live doc writer below needs it.
+    //    and an issue's own chat each run the generic sub-agent built from
+    //    their area scope (areas/sub-agent.ts); every other turn runs the
+    //    main agent (agents/main/agent.ts) over the tool set built here. Both
+    //    spec tool sets build a throwaway per-turn accumulator from the passed
+    //    snapshot; the skill catalog + `loadSkill` are registered identically
+    //    (only when skills were supplied, ADR-0002). The `files` set also
+    //    carries the HITL question tools (ask_question / ask_questions);
+    //    `task-plan` does not. The FileBundle is held by name: the live doc
+    //    writer below needs it.
     const toolset: Toolset = input.toolset ?? "files";
-    // A view's agent (the Issues chat, an issue's thread) works on no spec: the
-    // user's message is its whole prompt, with no spec-turn notes.
-    const viewAgent = toolset === "issues" || toolset === "issue";
-    // A view's agent writes only what the user confirmed on a question card:
-    // the card it binds to is the one the user is answering, the one card the
-    // previous turn asked in the history this service stored, never anything
-    // this turn's instruction or model says.
-    const asked = viewAgent ? answerableQuestion(conv.messages) : undefined;
+    // An area chat's turn (the Issues chat, an issue's thread) works on no
+    // spec: the user's message is its whole prompt, with no spec-turn notes.
+    const scope = areaScopeOf(toolset, input.issueNumber);
+    const areaChat = scope !== undefined;
+    // An area chat's sub-agent writes only what the user confirmed on a
+    // question card: the card it binds to is the one the user is answering,
+    // the one card the previous turn asked in the history this service
+    // stored, never anything this turn's instruction or model says.
+    const asked = areaChat ? answerableQuestion(conv.messages) : undefined;
     const skills = input.skillSource;
     let bundle: FileBundle | undefined;
     /** The bundle as the turn found it: what `changedPaths` is measured against. */
@@ -283,30 +286,22 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // what lets each file write settle at its OWN tool-input-end instead of at
     // the step's tail, which for a batched step is minutes later.
     let writes: WriteLedger | undefined;
-    if (toolset === "issues") {
-      // The Issues chat: its filing tools arrive over its MCP route
-      // (best-effort, like 3b below); the agent merges them under its own and
-      // gates create_issue on this turn's instruction.
+    if (scope !== undefined) {
+      // Its tools arrive over the chat's MCP route (best-effort, like 3b
+      // below); the sub-agent takes the ones its scope names and gates every
+      // write on this turn's instruction. A built-in that asks aep-api (the
+      // report classifier: the pod holds no Jev key) asks on the same route.
       const mcpTools = input.mcp ? await loadMcpTools(input.mcp) : {};
-      // The classifier is aep-api's, on the same route (the pod holds no Jev key).
-      const classifier = input.mcp;
-      agentFor = (run) =>
-        createIssuesAgent(
-          { classifier, mcpTools, instruction: input.instruction, asked, skills, surface: input.surface },
-          run,
-        );
-    } else if (toolset === "issue") {
-      // An issue's own chat: its tools arrive over the issue's MCP route; the
-      // agent keeps the issue's tools and gates every write on this turn's
-      // instruction.
-      const issueNumber = input.issueNumber;
-      if (issueNumber === undefined) throw new Error("an issue turn needs the issue number it works on");
-      const mcpTools = input.mcp ? await loadMcpTools(input.mcp) : {};
-      agentFor = (run) =>
-        createIssueAgent(
-          { issueNumber, mcpTools, instruction: input.instruction, asked, skills, surface: input.surface },
-          run,
-        );
+      const context = {
+        route: input.mcp,
+        mcpTools,
+        instruction: input.instruction,
+        asked,
+        skills,
+        surface: input.surface,
+        project: input.project,
+      };
+      agentFor = (run) => buildSubAgent(scope, context, run);
     } else {
       let tools: ToolSet;
       let instructions: string;
@@ -385,11 +380,11 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 4. one generic turn. The instructions append the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
     //    divergence note ONLY when the caller flagged an external edit (append-only).
-    // A view's agent has no "Existing files:" block for the note to refer to.
-    const note = input.filesChangedExternally && !viewAgent ? DIVERGENCE_NOTE : "";
-    // What the Issues chat did meanwhile reaches the main agent, never a view's
-    // agent (the Issues agent was there; an issue's chat is about one issue).
-    const branchNote = viewAgent ? "" : branchNotesNote(input.branchNotes);
+    // An area chat's sub-agent has no "Existing files:" block for the note to refer to.
+    const note = input.filesChangedExternally && !areaChat ? DIVERGENCE_NOTE : "";
+    // What the Issues chat did meanwhile reaches the main agent, never an area chat's
+    // sub-agent (the Issues chat was there; an issue's chat is about one issue).
+    const branchNote = areaChat ? "" : branchNotesNote(input.branchNotes);
     // Eager skills (#335): resolve the requested bodies and inline them ahead
     // of the instruction — the model applies them in its FIRST step instead of
     // spending a whole model call on loadSkill. Unknown names skip silently
@@ -443,8 +438,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
         attachmentsNote((input.chatAttachments ?? []).flatMap((p) => (p.filename ? [p.filename] : []))) +
         unreadableReferencesNote(input.unreadableReferences) +
         eagerBlock +
-        // A view's agent has no spec snapshot: the user's message is the prompt.
-        (viewAgent ? input.instruction : buildPrompt(input.files, input.instruction)),
+        // An area chat's sub-agent has no spec snapshot: the user's message is the prompt.
+        (areaChat ? input.instruction : buildPrompt(input.files, input.instruction)),
       messages: history,
       ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
       // Each agent ends its turn here or at an ACCEPTED HITL question call (the
@@ -513,9 +508,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const cutOff = res.finishReason === "length" ? truncation.cutOffCall() : undefined;
     if (cutOff) throw new OutputTruncatedError(cutOff, maxOutputTokens);
 
-    // 8. An Issues turn's outcome (the filing, else its last reply): the
-    //    caller keeps it for the main chat's next turn (a branch note).
-    const outcome = toolset === "issues" ? turnOutcome(conv.messages.slice(startLen)) : undefined;
+    // 8. An outcome-note scope's outcome (the Issues chat's: the filing, else
+    //    its last reply): the caller keeps it for the main chat's next turn
+    //    (a branch note).
+    const outcome = scope?.reportsBack === "outcome-note" ? turnOutcome(conv.messages.slice(startLen)) : undefined;
     return {
       conversation: conv,
       usage,
@@ -532,6 +528,18 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       docWriter.rollbackDangling();
     }
   }
+}
+
+/**
+ * The area scope a chat's tool set names: the Issues chat's, or an issue's
+ * (the Issues area focused on that issue); none for a spec turn. An issue
+ * turn without its number is refused before the model runs.
+ */
+function areaScopeOf(toolset: Toolset, issueNumber: number | undefined): ResolvedScope | undefined {
+  if (toolset === "issues") return scopeFor("issues");
+  if (toolset !== "issue") return undefined;
+  if (issueNumber === undefined) throw new Error("an issue turn needs the issue number it works on");
+  return scopeFor("issues", { kind: "issue", number: issueNumber });
 }
 
 /** The turn's provider options as a spreadable field; none for a model that takes none. */
