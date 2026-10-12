@@ -110,17 +110,6 @@ aeStudio:
   webhookRelay:
     enabled: false
     image: "ghcr.io/chmouel/gosmee@sha256:60b8db1f68cc4b72366fff941fb2db9a53c3b7a94f23a5e45bd10a777cf7be2f"  # v0.32.0
-  # The platform's one Jev (TypeSafe) key, which every org's design agent reads
-  # as JEV_API_KEY to classify an issue's kind. Off: the Issues agent asks the
-  # user whether a report is a bug, feature request or improvement. On: the key
-  # is read from OpenBao aep/jev-api-key (by aep-api, which re-pins every org's
-  # pod when it changes, and by each pod's ExternalSecret through the
-  # dataplane's store). Import it with
-  #   ./tools/aectl/aectl-skaffold platform secret import --path aep/jev-api-key --value-file <file>
-  # url: the endpoint, "" = the agent's default.
-  jev:
-    enabled: false
-    url: ""
 
 tryIt:
   enabled: true

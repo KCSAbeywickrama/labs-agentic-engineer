@@ -225,7 +225,6 @@ func rtVars(relayURL string) map[string]any {
 			"pullSecret":   map[string]any{"remoteKey": "", "property": ""},
 			"extraEgress":  []any{},
 			"webhookRelay": map[string]any{"image": "ghcr.io/chmouel/gosmee@sha256:abc"},
-			"jevUrl":       "",
 		},
 	}
 }

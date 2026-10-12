@@ -267,26 +267,6 @@ spec:
                   key: AE_STUDIO_WEBHOOK_RELAY_SEED
                   optional: true
             {{- end }}
-            {{- $jev := default dict $ae.jev }}
-            {{- if $jev.enabled }}
-            # The platform's one Jev key (values.yaml aeStudio.jev), given to every
-            # org's design agent. Optional: aep-api boots, without Jev, before it is
-            # imported. The pods read it from the same OpenBao path.
-            - name: AE_STUDIO_JEV_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aep-jev
-                  key: AE_STUDIO_JEV_API_KEY
-                  optional: true
-            - name: AE_STUDIO_JEV_REMOTE_KEY
-              value: "aep/jev-api-key"
-            - name: AE_STUDIO_JEV_REMOTE_PROPERTY
-              value: "value"
-            {{- with $jev.url }}
-            - name: AE_STUDIO_JEV_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- end }}
             # OpenBao-direct secrets delivery (local-only). Cloud injects a
             # different SecretsProvider via the overlay; OPENBAO_* must be
             # absent there. No static token: aep-api logs in by Kubernetes
