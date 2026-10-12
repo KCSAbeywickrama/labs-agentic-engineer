@@ -37,13 +37,16 @@ import (
 // Whether a write may run is the design agent's confirmation gate, not this
 // handler's: by the time a write lands here the user has confirmed it.
 
-// IssueAgentPorts are what an issue's agent reaches beyond the issue service.
-// Promoter and Components are wired in production; a nil one makes its tool a
-// tool error. Threads is optional: nil removes nothing on close.
+// IssueAgentPorts are what the issue chats' agents reach beyond the issue
+// service. Promoter and Components are wired in production; a nil one makes
+// its tool a tool error. Threads is optional: nil removes nothing on close.
+// Classifier is the Issues agent's (classify_report); nil, on an install
+// with no Jev key, answers every report unknown.
 type IssueAgentPorts struct {
 	Promoter   Promoter
 	Components ComponentLister
 	Threads    IssueThreadRemover
+	Classifier ReportClassifier
 }
 
 // Promoter hands an issue to the coding agent: it joins the deployed

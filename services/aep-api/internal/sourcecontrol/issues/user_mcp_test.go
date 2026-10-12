@@ -147,7 +147,7 @@ func callToolAs(t *testing.T, h http.Handler, scope auth.IssuesMCPScope, name st
 	return resp.Result.Content[0].Text, resp.Result.IsError
 }
 
-// The Issues view's token lists exactly its two tools, and none of them can
+// The Issues view's token lists exactly its tools, and none of them can
 // name the scope the session fixed.
 // newHandler serves the Issues view's tools over fake; it wires no issue-agent
 // ports (the Issues view's tools need none).
@@ -155,7 +155,7 @@ func newHandler(fake sourcecontrol.IssueService) http.Handler {
 	return issues.NewUserMCPHandler(fake, issues.IssueAgentPorts{})
 }
 
-func TestUserMCPListsExactlyTheTwoTools(t *testing.T) {
+func TestUserMCPListsExactlyTheIssuesTools(t *testing.T) {
 	names, props := listedTools(t, newHandler(&recordingIssues{}), issuesScope)
 	for name, p := range props {
 		for _, banned := range []string{"project", "org", "namespace", "labels"} {
@@ -164,8 +164,8 @@ func TestUserMCPListsExactlyTheTwoTools(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"search_issues", "create_issue"}) {
-		t.Fatalf("tools = %v, want [search_issues create_issue]", names)
+	if want := []string{"search_issues", "create_issue", "classify_report"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("tools = %v, want %v", names, want)
 	}
 }
 

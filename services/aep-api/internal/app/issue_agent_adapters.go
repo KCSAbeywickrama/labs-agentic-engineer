@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/aestudiotools"
+	"github.com/wso2/aep/aep-api/internal/clients/jev"
+	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -43,6 +45,32 @@ func (p issueAgentPromoter) PromoteAndExecute(ctx context.Context, orgID, projec
 		return scissues.HandOffRefusedError{Reason: refusal.Error()}
 	}
 	return err
+}
+
+// jevClassifier is the Issues agent's report classifier
+// (scissues.ReportClassifier) over Jev, with the platform's key, which never
+// leaves aep-api.
+type jevClassifier struct{ jev *jev.Client }
+
+func (c jevClassifier) ClassifyReport(ctx context.Context, _ string, r scissues.Report) (scissues.ReportClass, error) {
+	got, err := c.jev.Classify(ctx, jev.Report{Message: r.Message, Recent: r.Recent})
+	if err != nil {
+		return scissues.ReportClass{}, err
+	}
+	alts := make([]scissues.KindChance, 0, len(got.Alternatives))
+	for _, a := range got.Alternatives {
+		alts = append(alts, scissues.KindChance{Kind: a.Kind, P: a.P})
+	}
+	return scissues.ReportClass{Kind: got.Kind, Confidence: got.Confidence, Alternatives: alts}, nil
+}
+
+// reportClassifier is the install's classifier: Jev while it has a key, else
+// none (every report is unknown).
+func reportClassifier(cfg config.JevConfig) scissues.ReportClassifier {
+	if !cfg.On() {
+		return nil
+	}
+	return jevClassifier{jev: jev.New(cfg.URL, cfg.APIKey)}
 }
 
 // podIssueThreads removes an issue's chat threads in the org's AE Studio pod,

@@ -162,6 +162,23 @@ anything (no hook is migrated): re-create such a project, or disconnect and
 reconnect the org's GitHub in Settings, which forgets the org's hook ids so the
 sweep's hook repair installs every project's hook on the relay URL.
 
+**The Jev key (issue classification).** The platform holds one Jev (TypeSafe)
+key. aep-api alone reads it, and classifies reports (bug, feature, improvement)
+for every org's Issues agent: the pod's `classify_report` reaches aep-api over
+its Issues MCP route, and no org's AE Studio pod is ever given the key. Off by
+default, when the agent asks the user the kind instead. Import the key, then
+turn it on:
+
+```sh
+./tools/aectl/aectl-skaffold platform secret import --path aep/jev-api-key --value-file <file>
+./tools/aectl/aectl-skaffold platform update --set aeStudio.jev.enabled=true   # optionally --set aeStudio.jev.url=<endpoint>
+```
+
+aep-api reads the key from the ESO Secret `aep-jev` (optional: it boots,
+classifying nothing, before the import) at start; ESO refreshes it hourly, so
+restart aep-api after re-importing a key
+(`kubectl rollout restart deployment/aep-api -n wso2-aep`).
+
 **Upgrading an install that mounted `/workspaces` on aep-api.** aep-api no
 longer has a workspace volume: the chart drops PVC `aep-workspaces`, the mount,
 the `workspaces.*` values and the `AEP_WORKSPACE_*` env. The PVC carries no
@@ -421,6 +438,7 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    | `aep/postgres-password` | `postgres-secrets` | `POSTGRES_PASSWORD` |
    | `aep/thunder-clients/<name>` | `aep-thunder-secrets` (and `aep-ae-studio-internal-secrets` for `ae-studio-internal`) | `OC_WORKLOAD_PUBLISHER_SECRET`, `OC_OBSERVER_READER_SECRET`, `AEP_API_CLIENT_SECRET`, `BFF_TO_GIT_SERVICE_SECRET`, `BFF_TO_REMOTE_WORKER_SECRET`, `LOCAL_DEV_SEEDER_SECRET`, `THUNDER_SYSTEM_CLIENT_SECRET`, `OC_RCA_AGENT_SECRET`, `AE_STUDIO_INTERNAL_CLIENT_SECRET` (for `oc-workload-publisher`, `oc-observer-reader`, `aep-api-client`, `bff-git-service`, `bff-remote-worker`, `local-dev-seeder`, `system-client`, `openchoreo-rca-agent`, `ae-studio-internal`, in that order) |
    | `aep/webhook-relay-seed` | `aep-webhook-relay` | `AE_STUDIO_WEBHOOK_RELAY_SEED` |
+   | `aep/jev-api-key` (only with `aeStudio.jev.enabled`) | `aep-jev` | `AE_STUDIO_JEV_API_KEY` |
 
    The SRE handoff key is not in OpenBao: `aectl sre install` keeps it in the
    Kubernetes Secrets `sre-handoff` (`wso2-aep`) and `sre-agent-aep` (the

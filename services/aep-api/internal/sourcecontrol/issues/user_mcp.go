@@ -62,15 +62,16 @@ const userSearchBodyRunes = 500
 // newest first.
 const userSearchMaxHits = 25
 
-// NewUserMCPHandler serves the Issues agent's search_issues and create_issue
-// tools on a project's route, and an issue agent's tools (issueTools) on an
+// NewUserMCPHandler serves the Issues agent's search_issues, create_issue and
+// classify_report tools on a project's route, and an issue agent's tools (issueTools) on an
 // issue's. A request without the gate's scope answers 401; a nil issues
 // service answers 503.
 func NewUserMCPHandler(issues sourcecontrol.IssueService, agent IssueAgentPorts) http.Handler {
+	classifyLimits := newClassifyLimiter()
 	projectServer := mcprpc.Server{
 		Name: "aep-issues", Version: "1.0.0", Tools: userTools(),
 		Call: func(w http.ResponseWriter, r *http.Request, req mcprpc.Request) {
-			callUserTool(w, r, issues, req)
+			callUserTool(w, r, issues, agent.Classifier, classifyLimits, req)
 		},
 	}
 	issueServer := mcprpc.Server{
@@ -98,11 +99,13 @@ func NewUserMCPHandler(issues sourcecontrol.IssueService, agent IssueAgentPorts)
 }
 
 type userToolArgs struct {
-	Query string `json:"query"`
-	State string `json:"state"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Kind  string `json:"kind"`
+	Query          string   `json:"query"`
+	State          string   `json:"state"`
+	Title          string   `json:"title"`
+	Body           string   `json:"body"`
+	Kind           string   `json:"kind"`
+	Message        string   `json:"message"`
+	RecentMessages []string `json:"recentMessages"`
 }
 
 // userIssueHit is one search_issues hit as the agent reads it.
@@ -115,7 +118,7 @@ type userIssueHit struct {
 	Body   string   `json:"body"`
 }
 
-func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.IssueService, req mcprpc.Request) {
+func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.IssueService, classifier ReportClassifier, limits *classifyLimiter, req mcprpc.Request) {
 	scope, _ := auth.IssuesMCPScopeFromContext(r.Context())
 	var call struct {
 		Name      string       `json:"name"`
@@ -183,6 +186,8 @@ func callUserTool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.I
 			Number int    `json:"number"`
 			URL    string `json:"url"`
 		}{issue.Number, issue.URL}))
+	case "classify_report":
+		classifyReport(w, r, req.ID, classifier, limits, scope.OrgID, args)
 	default:
 		mcprpc.WriteToolError(w, req.ID, "unknown tool: "+call.Name)
 	}

@@ -25,7 +25,7 @@ flowchart LR
 | Slice | Use-case | Entry |
 |---|---|---|
 | `issues` | file / search a project's issues | `POST`+`GET /projects/{projectName}/issues` |
-| `issues` (Issues agent) | the design agent's Issues chat searches / files issues on its one project | `POST /internal/v1/ae-studio/projects/{p}/issues/mcp` (`search_issues`, `create_issue`; `user_mcp.go`) |
+| `issues` (Issues agent) | the design agent's Issues chat searches / files issues on its one project | `POST /internal/v1/ae-studio/projects/{p}/issues/mcp` (`search_issues`, `create_issue`, `classify_report`; `user_mcp.go`, `classify.go`: Jev with the platform's key, `clients/jev`, rate-limited per org, `unknown` on any failure) |
 | `issues` (issue agent) | one issue's chat agent reads and works that one issue | `POST /internal/v1/ae-studio/projects/{p}/issues/{n}/mcp` (`get_issue`, `list_components`, `comment_issue`, `edit_issue`, `close_issue`, `reopen_issue`, `hand_to_coding_agent`; `issue_mcp.go`) |
 
 *In the domain root rather than a slice: repo lifecycle, the Git port, and webhook register/receive

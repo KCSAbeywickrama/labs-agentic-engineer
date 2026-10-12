@@ -57,5 +57,21 @@ func userTools() []mcprpc.Tool {
 				"required": []string{"title", "body", "kind"},
 			},
 		},
+		{
+			Name: "classify_report",
+			Description: "Classify a user's message as a bug, feature, improvement or question. Returns kind, confidence and " +
+				"the two most probable kinds; kind is unknown when the classifier is unavailable.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"message": str("The user's message to classify, verbatim."),
+					"recentMessages": map[string]any{
+						"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 6,
+						"description": "Up to six of the latest earlier messages, oldest first, to resolve words like it or that.",
+					},
+				},
+				"required": []string{"message"},
+			},
+		},
 	}
 }

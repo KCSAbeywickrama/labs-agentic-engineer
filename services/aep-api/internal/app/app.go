@@ -850,12 +850,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// The design agent's Issues and issue chats act with the issue tools on
 	// the pod's org credential (InternalDeps.IssuesMCP); a closed issue's
-	// chat thread is removed in the pod, where the agent keeps it.
+	// chat thread is removed in the pod, where the agent keeps it. Reports
+	// are classified here, with the platform's Jev key, never in the pod.
 	issueThreads := podIssueThreads{repos: repoRepo, pod: studioTools}
 	issuesMCP := scissues.NewUserMCPHandler(issueService, scissues.IssueAgentPorts{
 		Promoter:   issueAgentPromoter{commands: taskCommands},
 		Components: designComponents{store: artifactStore},
 		Threads:    issueThreads,
+		Classifier: reportClassifier(cfg.AEStudio.Jev),
 	})
 
 	// Controllers

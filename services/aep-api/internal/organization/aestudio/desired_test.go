@@ -268,3 +268,26 @@ func TestDesired_ToolsSecretHoldsNoPublisherClient(t *testing.T) {
 		t.Fatal("the publisher row must not feed the tools rev")
 	}
 }
+
+// The platform's Jev key stays in aep-api (it classifies for the pods): no
+// org's pod is ever given it, by secret entry, parameter or env config.
+func TestDesired_PodNeverGetsTheJevKey(t *testing.T) {
+	f := newFixture(t).withAllRefs().withRef(organization.OrgSecretDefaultKey, "default-default-key-cccc0005")
+	f.svc.cfg.Jev.APIKey, f.svc.cfg.Jev.URL = "jev-secret-1", "https://jev.example/v1/systemone"
+	d, err := f.svc.desired(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, set := range []secretSet{d.Params.Secrets.DesignAgent, d.Params.Secrets.StudioTools} {
+		for _, e := range set.Data {
+			if strings.Contains(strings.ToUpper(e.Env+e.Key), "JEV") {
+				t.Errorf("a pod secret reads the Jev key: %+v", e)
+			}
+		}
+	}
+	p, _ := json.Marshal(d.Params)
+	e, _ := json.Marshal(d.EnvConfigs)
+	if all := string(p) + string(e); strings.Contains(all, "jev-secret-1") || strings.Contains(strings.ToLower(all), "jev") {
+		t.Fatalf("the pod's inputs name Jev: %s", all)
+	}
+}

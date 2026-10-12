@@ -355,7 +355,21 @@ type AEStudioConfig struct {
 	// WebhookRelayImage (AE_STUDIO_WEBHOOK_RELAY_IMAGE) is the relay
 	// container's image, needed whenever the relay is on.
 	WebhookRelayImage string
+
+	// Jev is the platform's report classifier for the Issues agent.
+	Jev JevConfig
 }
+
+// JevConfig is the platform's one Jev (TypeSafe) key, with which aep-api
+// classifies reports for every org's Issues agent (its classify_report tool).
+// APIKey (AE_STUDIO_JEV_API_KEY) is a secret: never logged, and never handed
+// to an org's pod. URL (AE_STUDIO_JEV_URL) is the endpoint, "" = Jev's
+// default. No APIKey: off, and every report classifies as unknown (the agent
+// asks the user).
+type JevConfig struct{ APIKey, URL string }
+
+// On reports whether the key is set.
+func (j JevConfig) On() bool { return j.APIKey != "" }
 
 // Missing returns the env names Ensure needs and lacks, in a stable order.
 func (c AEStudioConfig) Missing() []string {

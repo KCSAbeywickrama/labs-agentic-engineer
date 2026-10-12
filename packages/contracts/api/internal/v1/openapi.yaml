@@ -89,8 +89,9 @@ paths:
       summary: The Issues chat's issue tools, MCP JSON-RPC (AE Studio tools pod)
       description: |-
         One opaque JSON-RPC 2.0 operation; sourcecontrol/issues serves the
-        Issues agent's tools (search_issues, create_issue) on the path's
-        project. The org is the one the pod's ae-studio client token is
+        Issues agent's tools (search_issues, create_issue, classify_report)
+        on the path's project; classify_report asks Jev with the platform's
+        key (rate-limited per org; unknown on any failure). The org is the one the pod's ae-studio client token is
         recorded for (auth.IssuesMCPGate); no tool takes a project or an org.
         Declared so this spec lists every internal route. Excluded from code
         generation (internal/igen/oapi-codegen.yaml exclude-operation-ids): the
