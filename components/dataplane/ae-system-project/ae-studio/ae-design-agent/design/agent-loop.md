@@ -192,9 +192,12 @@ another default-ignorable character) is refused whatever the card says, naming t
 point. No card in the history (an answer typed by hand) refuses too. A note on the answer does not change what was confirmed: the
 prompts have the agent ask again with the revised text.
 
-The report classifier (`classify_report`, Jev) never blocks a turn. Below 0.8 confidence,
-or for a `question`, it asks the agent to clarify; a missing key, a non-2xx response, a
-malformed body, a network error or the 5 s timeout all yield kind `unknown` with
+The report classifier (`classify_report`, Jev) never blocks a turn. The pod holds no Jev
+key: the tool calls aep-api's `classify_report` on the Issues chat's MCP route, and aep-api
+asks Jev with the platform's one key (rate-limited per org, the report capped). The tool
+decides the rest: below 0.8 confidence, or for a `question`, it asks the agent to clarify;
+aep-api's `unknown` (no key on the install, Jev failing, the org past its rate), a tool
+error, a malformed answer or the socket not answering all yield kind `unknown` with
 `needsClarification`, and the agent asks the user which kind the report is.
 
 ## Prototype write gate

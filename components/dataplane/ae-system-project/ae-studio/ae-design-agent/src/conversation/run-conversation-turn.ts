@@ -288,10 +288,11 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       // (best-effort, like 3b below); the agent merges them under its own and
       // gates create_issue on this turn's instruction.
       const mcpTools = input.mcp ? await loadMcpTools(input.mcp) : {};
-      const jev = { ...config.jev, fetch: input.toolFetch ?? globalThis.fetch };
+      // The classifier is aep-api's, on the same route (the pod holds no Jev key).
+      const classifier = input.mcp;
       agentFor = (run) =>
         createIssuesAgent(
-          { jev, mcpTools, instruction: input.instruction, asked, skills, surface: input.surface },
+          { classifier, mcpTools, instruction: input.instruction, asked, skills, surface: input.surface },
           run,
         );
     } else if (toolset === "issue") {

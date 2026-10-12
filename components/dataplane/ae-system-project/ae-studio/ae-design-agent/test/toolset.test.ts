@@ -101,7 +101,7 @@ test("planBuild records the checklist in the accumulator", async () => {
 // --- issues tool set (the Issues chat) ---------------------------------------
 
 test("issues tool set is the classifier + the question tools — no file tools, no loadSkill", () => {
-  const tools = buildIssuesTools({ apiKey: undefined, url: "http://jev.invalid", fetch: globalThis.fetch });
+  const tools = buildIssuesTools(undefined);
   assert.deepEqual(Object.keys(tools).sort(), ["ask_question", "ask_questions", "classify_report"]);
 });
 

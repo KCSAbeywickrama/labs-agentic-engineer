@@ -48,7 +48,7 @@ export const DESIGN_TOOL_NAMES = [
 ] as const;
 
 /** The Issues chat's tools (ae-studio-tools `mcp.IssuesTools`). */
-export const ISSUES_TOOL_NAMES = ["search_issues", "create_issue"] as const;
+export const ISSUES_TOOL_NAMES = ["search_issues", "create_issue", "classify_report"] as const;
 
 /** An issue's chat tools (ae-studio-tools `mcp.IssueTools`). */
 export const ISSUE_TOOL_NAMES = [
@@ -79,6 +79,11 @@ export interface FakeToolsSocketOptions {
   callTool?: (call: FakeToolCall) => string;
   /** Issues by number, as every project's issue routes answer them; any other number is not found. */
   issues?: Record<number, { state: "open" | "closed"; title?: string }>;
+  /**
+   * What the Issues route's `classify_report` answers (aep-api asking Jev);
+   * absent, it answers `unknown`, as aep-api does with no Jev key.
+   */
+  classification?: { kind: string; confidence: number; alternatives: { kind: string; p: number }[] };
 }
 
 interface JsonRpcRequest {
@@ -107,6 +112,7 @@ export class FakeToolsSocket implements ToolsSocket {
   private readonly skillsSha: string;
   private readonly callTool: (call: FakeToolCall) => string;
   private readonly issues: Record<number, { state: "open" | "closed"; title?: string }>;
+  private readonly classification: NonNullable<FakeToolsSocketOptions["classification"]>;
   private failures = 0;
   private failStatus = 503;
   private held: Promise<void> | null = null;
@@ -119,6 +125,7 @@ export class FakeToolsSocket implements ToolsSocket {
     this.skillsSha = opts.skillsSha ?? "skills-fake";
     this.callTool = opts.callTool ?? ((call) => JSON.stringify({ tool: call.name }));
     this.issues = opts.issues ?? {};
+    this.classification = opts.classification ?? { kind: "unknown", confidence: 0, alternatives: [] };
   }
 
   /** The next `count` `postUsage` calls fail: 503 (transient), or 400 when `permanent`. */
@@ -212,6 +219,9 @@ export class FakeToolsSocket implements ToolsSocket {
       return json({ jsonrpc: "2.0", id: req.id, error: { code: -32602, message: `tool not allowed: ${call.name}` } });
     }
     this.toolCalls.push(call);
+    if (number === undefined && call.name === "classify_report") {
+      return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: JSON.stringify(this.classification) }] } });
+    }
     if (number !== undefined && call.name === "get_issue") {
       const issue = this.issues[number];
       if (!issue) {

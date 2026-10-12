@@ -26,16 +26,19 @@
 
 import type { AskQuestionInput, Surface } from "@aep/agent-stream";
 import type { ToolSet } from "ai";
+import type { McpTransport } from "../../shared/mcp-client.js";
 import type { SkillSource } from "../main/skill-source.js";
 import { buildToolLoopAgent, type AgentRunSettings, type TurnAgent } from "../run-settings.js";
-import type { JevOptions } from "./classify.js";
 import { filingConfirmed, gateCreateIssue } from "./filing-gate.js";
 import { buildIssuesInstructions } from "./prompt.js";
 import { buildIssuesTools } from "./tools.js";
 
 export interface IssuesAgentDeps {
-  /** How the report classifier reaches its model. */
-  jev: JevOptions;
+  /**
+   * The Issues chat's MCP route, where aep-api answers `classify_report`
+   * (with the platform's Jev key); `undefined` classifies every report unknown.
+   */
+  classifier: McpTransport | undefined;
   /** The MCP tools this turn loaded (`{}` when it has none). */
   mcpTools: ToolSet;
   /** This turn's raw user instruction: the filing gate reads it. */
@@ -51,7 +54,7 @@ export interface IssuesAgentDeps {
 }
 
 export function createIssuesAgent(deps: IssuesAgentDeps, run: AgentRunSettings): TurnAgent {
-  const builtIns = buildIssuesTools(deps.jev);
+  const builtIns = buildIssuesTools(deps.classifier);
   // The agent's own tools spread LAST — the shadow-guard — so an MCP tool can
   // never stand in for the classifier or a question tool of the same name.
   const merged: ToolSet = Object.keys(deps.mcpTools).length > 0 ? { ...deps.mcpTools, ...builtIns } : builtIns;

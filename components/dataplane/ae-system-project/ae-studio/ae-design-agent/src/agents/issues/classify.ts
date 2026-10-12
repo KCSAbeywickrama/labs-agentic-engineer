@@ -17,18 +17,21 @@
  */
 
 /**
- * The Issues chat's `classify_report` tool: one choice question to Jev (the
- * report classifier) asking what kind of report the user's message is. The
- * agent files on a confident bug / feature / improvement and asks otherwise.
+ * The Issues chat's `classify_report` tool: what kind of report the user's
+ * message is. aep-api answers it on the Issues chat's MCP route (its
+ * `classify_report`, which asks Jev with the platform's key: the pod never
+ * holds one); this tool decides whether the agent must ask. The agent files on
+ * a confident bug / feature / improvement and asks otherwise.
  *
- * Every failure — no key, a non-2xx, a malformed body, a timeout, a network
- * error — resolves to `unknown` with `needsClarification`, so a classifier
- * outage degrades to the agent asking and never fails a turn. The key goes only
- * into the request header; it is never logged or returned.
+ * Every failure — no route, the socket or aep-api not answering, a tool error,
+ * a malformed answer, aep-api's own `unknown` (no key, Jev down, the org past
+ * its rate) — resolves to `unknown` with `needsClarification`, so a
+ * classifier outage degrades to the agent asking and never fails a turn.
  */
 
 import { tool, type Tool } from "ai";
 import { z } from "zod";
+import { callMcpTool, type McpTransport } from "../../shared/mcp-client.js";
 
 export const CLASSIFY_REPORT = "classify_report";
 
@@ -43,37 +46,16 @@ export interface ClassifyReportResult {
   needsClarification: boolean;
 }
 
-export interface JevOptions {
-  apiKey: string | undefined;
-  url: string;
-  fetch: typeof globalThis.fetch;
-  timeoutMs?: number;
-}
-
 /** Filing needs at least this much confidence; a `question` never files. */
 const CLARIFY_BELOW = 0.8;
-const DEFAULT_TIMEOUT_MS = 5000;
 
 const KINDS = ["bug", "feature", "improvement", "question"] as const;
 
-const CRITERIA: Record<ReportKind, string> = {
-  bug: "Something that exists does not work as it should: an error, a crash, a broken button, wrong output.",
-  feature: "A request for a new capability the product does not have yet.",
-  improvement: "A change to make something that already works better: faster, clearer, easier.",
-  question: "A question or remark that reports nothing and asks for nothing to change.",
-};
-
-const INSTRUCTIONS =
-  "What kind of report is `message`? Use `recent_messages` to resolve words like it or that.";
-
-const jevResponseSchema = z.object({
-  answers: z.object({
-    kind: z.object({
-      choice: z.enum(KINDS),
-      confidence: z.number(),
-      probabilities: z.record(z.string(), z.number()).optional(),
-    }),
-  }),
+/** aep-api's `classify_report` answer. */
+const answerSchema = z.object({
+  kind: z.enum([...KINDS, "unknown"]),
+  confidence: z.number(),
+  alternatives: z.array(z.object({ kind: z.enum(KINDS), p: z.number() })).optional(),
 });
 
 const UNKNOWN: ClassifyReportResult = { kind: "unknown", confidence: 0, alternatives: [], needsClarification: true };
@@ -83,71 +65,37 @@ function unknown(reason: string): ClassifyReportResult {
   return { ...UNKNOWN, alternatives: [] };
 }
 
+/** Classify through `route` (the Issues chat's MCP route); `undefined` (no route) is unknown. */
 export async function classifyReport(
-  opts: JevOptions,
+  route: McpTransport | undefined,
   input: { message: string; recentMessages?: string[] },
 ): Promise<ClassifyReportResult> {
-  if (!opts.apiKey) return unknown("no Jev key configured");
-
-  // A real (ref'd) timer rather than AbortSignal.timeout, whose timer is unref'd.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  if (!route) return unknown("no Issues route");
+  let res: { text: string; isError: boolean };
   try {
-    return await ask(opts, opts.apiKey, input, controller.signal);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function ask(
-  opts: JevOptions,
-  apiKey: string,
-  input: { message: string; recentMessages?: string[] },
-  signal: AbortSignal,
-): Promise<ClassifyReportResult> {
-  let res: Response;
-  try {
-    res = await opts.fetch(opts.url, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: "jev-latest",
-        state: {
-          message: input.message,
-          recent_messages: input.recentMessages ?? [],
-          // No project name on purpose: the tool has none, and it keeps the project's name from a third party.
-          where_the_user_is: { page: "issues" },
-        },
-        questions: { kind: { type: "choice", instructions: INSTRUCTIONS, criteria: CRITERIA } },
-      }),
-      signal,
+    res = await callMcpTool(route, CLASSIFY_REPORT, {
+      message: input.message,
+      ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
     });
   } catch (err) {
-    return unknown(err instanceof Error ? err.name : "request failed");
+    return unknown(err instanceof Error ? err.name : "the tools socket did not answer");
   }
-  if (!res.ok) return unknown(`status ${res.status}`);
-
+  if (res.isError) return unknown("the classifier refused the call");
   let json: unknown;
   try {
-    json = await res.json();
+    json = JSON.parse(res.text);
   } catch {
-    return unknown("response is not JSON");
+    return unknown("answer is not JSON");
   }
-  const parsed = jevResponseSchema.safeParse(json);
-  if (!parsed.success) return unknown("malformed response");
-
-  const { choice, confidence, probabilities } = parsed.data.answers.kind;
-  const alternatives = KINDS.flatMap((kind) => {
-    const p = probabilities?.[kind];
-    return p === undefined ? [] : [{ kind, p }];
-  })
-    .sort((a, b) => b.p - a.p)
-    .slice(0, 2);
+  const parsed = answerSchema.safeParse(json);
+  if (!parsed.success) return unknown("malformed answer");
+  const { kind, confidence, alternatives } = parsed.data;
+  if (kind === "unknown") return { ...UNKNOWN, alternatives: [] };
   return {
-    kind: choice,
+    kind,
     confidence,
-    alternatives: alternatives.length > 0 ? alternatives : [{ kind: choice, p: confidence }],
-    needsClarification: choice === "question" || confidence < CLARIFY_BELOW,
+    alternatives: alternatives?.length ? alternatives.slice(0, 2) : [{ kind, p: confidence }],
+    needsClarification: kind === "question" || confidence < CLARIFY_BELOW,
   };
 }
 
@@ -160,9 +108,9 @@ const classifyReportInputSchema = z.object({
     .describe("Up to six of the latest earlier messages, oldest first, to resolve words like it or that."),
 });
 
-/** The `classify_report` tool: what kind of report the user's message is. */
+/** The `classify_report` tool over `route`: what kind of report the user's message is. */
 export function buildClassifyReportTool(
-  opts: JevOptions,
+  route: McpTransport | undefined,
 ): Tool<z.infer<typeof classifyReportInputSchema>, ClassifyReportResult> {
   return tool({
     description:
@@ -171,7 +119,6 @@ export function buildClassifyReportTool(
       "needsClarification is true (this includes kind unknown, when the classifier is unavailable), ask the user " +
       "which kind it is instead of filing.",
     inputSchema: classifyReportInputSchema,
-    execute: ({ message, recentMessages }) =>
-      classifyReport(opts, { message, ...(recentMessages ? { recentMessages } : {}) }),
+    execute: ({ message, recentMessages }) => classifyReport(route, { message, ...(recentMessages ? { recentMessages } : {}) }),
   });
 }

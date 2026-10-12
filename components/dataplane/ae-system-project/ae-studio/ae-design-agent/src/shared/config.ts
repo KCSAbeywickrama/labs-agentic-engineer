@@ -83,10 +83,4 @@ export const config = {
   // SSE keep-alive cadence: a `: keep-alive` comment this often while a turn
   // streams, so long generations don't die behind an idle-timeout ingress.
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
-  // Jev (TypeSafe's report classifier) for the Issues chat's `classify_report`.
-  // No key => the tool answers "unknown" and the agent asks instead of filing.
-  jev: {
-    apiKey: process.env.JEV_API_KEY || undefined,
-    url: process.env.JEV_URL || "https://api.typesafe.ai/v1/systemone",
-  },
 } as const;

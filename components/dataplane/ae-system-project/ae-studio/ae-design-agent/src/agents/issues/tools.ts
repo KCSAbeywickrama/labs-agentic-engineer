@@ -26,11 +26,13 @@
 import type { Tool } from "ai";
 import { ASK_QUESTION_TOOL, ASK_QUESTIONS_TOOL } from "@aep/agent-stream";
 import { askQuestionTool, askQuestionsTool } from "../main/tools/files.js";
-import { buildClassifyReportTool, CLASSIFY_REPORT, type JevOptions } from "./classify.js";
+import type { McpTransport } from "../../shared/mcp-client.js";
+import { buildClassifyReportTool, CLASSIFY_REPORT } from "./classify.js";
 
-export function buildIssuesTools(jev: JevOptions): Record<string, Tool> {
+/** The Issues chat's own tools; `classifier` is its MCP route (`undefined`: every report is unknown). */
+export function buildIssuesTools(classifier: McpTransport | undefined): Record<string, Tool> {
   return {
-    [CLASSIFY_REPORT]: buildClassifyReportTool(jev),
+    [CLASSIFY_REPORT]: buildClassifyReportTool(classifier),
     [ASK_QUESTION_TOOL]: askQuestionTool,
     [ASK_QUESTIONS_TOOL]: askQuestionsTool,
   };

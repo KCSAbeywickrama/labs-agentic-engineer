@@ -17,149 +17,89 @@
  */
 
 /**
- * The Issues chat's `classify_report` tool (`agents/issues/classify.ts`): one
- * choice question to the Jev classifier. Every failure degrades to
- * "unknown, ask" — a classifier outage never fails a turn.
+ * The Issues chat's `classify_report` tool (`agents/issues/classify.ts`): asks
+ * aep-api, over the Issues chat's MCP route, what kind of report a message is
+ * (aep-api asks Jev with the platform's key, which the pod never holds), and
+ * decides here whether the agent must ask. Every failure degrades to
+ * "unknown, ask": a classifier outage never fails a turn.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyReport, buildClassifyReportTool, CLASSIFY_REPORT, type JevOptions } from "../src/agents/issues/classify.js";
+import { classifyReport, buildClassifyReportTool, CLASSIFY_REPORT } from "../src/agents/issues/classify.js";
+import type { McpTransport } from "../src/shared/mcp-client.js";
+import { FakeToolsSocket } from "../src/tools-socket/fake.js";
+import { mcpRoute } from "../src/shared/mcp-client.js";
+import { issuesMcpPath } from "../src/conversations/issue-state.js";
 
-const KEY = "jev-secret-key-123";
-const URL = "https://jev.test/v1/systemone";
 const UNKNOWN = { kind: "unknown", confidence: 0, alternatives: [], needsClarification: true };
 
-function answer(choice: string, confidence: number, probabilities?: Record<string, number>) {
-  return {
-    model: "jev-1.13.0",
-    answers: {
-      kind: {
-        type: "choice",
-        choice,
-        confidence,
-        probabilities: probabilities ?? { bug: 0, feature: 0, improvement: 0, question: 0, [choice]: confidence },
-      },
-    },
+/** An Issues route whose classify_report answers `result` (a JSON-RPC result), recording each call's arguments. */
+function route(result: unknown | (() => never)) {
+  const calls: { name: string; arguments: Record<string, unknown> }[] = [];
+  const transport: McpTransport = {
+    mcpFetch: (async (_path: unknown, init?: RequestInit) => {
+      const req = JSON.parse(String(init?.body)) as { id: number; params: { name: string; arguments: Record<string, unknown> } };
+      calls.push(req.params);
+      if (typeof result === "function") (result as () => never)();
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
   };
+  return { transport, calls };
 }
 
-function stub(body: unknown, status = 200) {
-  const calls: { url: string; init: RequestInit }[] = [];
-  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init: init ?? {} });
-    return new Response(JSON.stringify(body), { status });
-  }) as typeof globalThis.fetch;
-  return { fetch, calls };
-}
+const answered = (cls: unknown) => ({ content: [{ type: "text", text: JSON.stringify(cls) }] });
 
-function opts(fetch: typeof globalThis.fetch, extra: Partial<JevOptions> = {}): JevOptions {
-  return { apiKey: KEY, url: URL, fetch, ...extra };
-}
-
-test("sends one choice question to jev-latest", async () => {
-  const { fetch, calls } = stub(answer("bug", 1));
-  await classifyReport(opts(fetch), { message: "the save button does nothing", recentMessages: ["hi"] });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.url, URL);
-  assert.equal(calls[0]!.init.method, "POST");
-  const headers = new Headers(calls[0]!.init.headers);
-  assert.equal(headers.get("authorization"), `Bearer ${KEY}`);
-  const body = JSON.parse(String(calls[0]!.init.body));
-  assert.equal(body.model, "jev-latest");
-  assert.equal(body.state.message, "the save button does nothing");
-  assert.deepEqual(body.state.recent_messages, ["hi"]);
-  assert.equal(body.state.where_the_user_is.page, "issues");
-  assert.equal(body.questions.kind.type, "choice");
-  assert.deepEqual(Object.keys(body.questions.kind.criteria), ["bug", "feature", "improvement", "question"]);
+test("asks the Issues route's classify_report with the message and the earlier ones", async () => {
+  const { transport, calls } = route(answered({ kind: "bug", confidence: 1, alternatives: [{ kind: "bug", p: 1 }] }));
+  await classifyReport(transport, { message: "the save button does nothing", recentMessages: ["hi"] });
+  assert.deepEqual(calls, [{ name: CLASSIFY_REPORT, arguments: { message: "the save button does nothing", recentMessages: ["hi"] } }]);
 });
 
 test("a confident bug files without clarification", async () => {
-  const { fetch } = stub(answer("bug", 1, { bug: 1, feature: 0, improvement: 0, question: 0 }));
-  const r = await classifyReport(opts(fetch), { message: "m" });
-  assert.equal(r.kind, "bug");
-  assert.equal(r.confidence, 1);
+  const { transport } = route(answered({ kind: "bug", confidence: 1, alternatives: [{ kind: "bug", p: 1 }, { kind: "feature", p: 0 }] }));
+  const r = await classifyReport(transport, { message: "m" });
+  assert.deepEqual(r, { kind: "bug", confidence: 1, alternatives: [{ kind: "bug", p: 1 }, { kind: "feature", p: 0 }], needsClarification: false });
+});
+
+test("below 0.8 asks; exactly 0.8 does not; a question never files", async () => {
+  const low = await classifyReport(route(answered({ kind: "improvement", confidence: 0.75, alternatives: [] })).transport, { message: "m" });
+  assert.equal(low.needsClarification, true);
+  assert.deepEqual(low.alternatives, [{ kind: "improvement", p: 0.75 }], "no alternatives: the kind alone");
+  assert.equal((await classifyReport(route(answered({ kind: "feature", confidence: 0.8, alternatives: [] })).transport, { message: "m" })).needsClarification, false);
+  const q = await classifyReport(route(answered({ kind: "question", confidence: 0.97, alternatives: [] })).transport, { message: "m" });
+  assert.equal(q.kind, "question");
+  assert.equal(q.needsClarification, true);
+});
+
+test("unknown, a tool error, a malformed answer, a dead socket or no route -> unknown", async () => {
+  assert.deepEqual(await classifyReport(route(answered({ kind: "unknown", confidence: 0, alternatives: [] })).transport, { message: "m" }), UNKNOWN);
+  assert.deepEqual(await classifyReport(route({ content: [{ type: "text", text: "no" }], isError: true }).transport, { message: "m" }), UNKNOWN);
+  assert.deepEqual(await classifyReport(route(answered({ kind: "chore", confidence: 1 })).transport, { message: "m" }), UNKNOWN);
+  assert.deepEqual(await classifyReport(route({ content: [{ type: "text", text: "<html>" }] }).transport, { message: "m" }), UNKNOWN);
+  const dead = route(() => {
+    throw new TypeError("socket closed");
+  });
+  assert.deepEqual(await classifyReport(dead.transport, { message: "m" }), UNKNOWN);
+  assert.deepEqual(await classifyReport(undefined, { message: "m" }), UNKNOWN);
+});
+
+test("through the tools socket fake: the Issues route classifies, an issue's route never offers it", async () => {
+  const tools = new FakeToolsSocket({ projects: {}, skillsSha: "s", classification: { kind: "feature", confidence: 0.9, alternatives: [{ kind: "feature", p: 0.9 }] } });
+  const r = await classifyReport(mcpRoute(tools, issuesMcpPath("greeter")), { message: "add CSV export" });
+  assert.equal(r.kind, "feature");
   assert.equal(r.needsClarification, false);
-  assert.equal(r.alternatives.length, 2);
-  assert.deepEqual(r.alternatives[0], { kind: "bug", p: 1 });
-});
-
-test("below 0.8 asks", async () => {
-  const { fetch } = stub(answer("improvement", 0.75, { bug: 0.2, feature: 0.05, improvement: 0.75, question: 0 }));
-  const r = await classifyReport(opts(fetch), { message: "m" });
-  assert.equal(r.kind, "improvement");
-  assert.equal(r.needsClarification, true);
-  assert.deepEqual(r.alternatives, [
-    { kind: "improvement", p: 0.75 },
-    { kind: "bug", p: 0.2 },
-  ]);
-});
-
-test("exactly 0.8 does not ask", async () => {
-  const { fetch } = stub(answer("feature", 0.8));
-  const r = await classifyReport(opts(fetch), { message: "m" });
-  assert.equal(r.needsClarification, false);
-});
-
-test("a question never files", async () => {
-  const { fetch } = stub(answer("question", 0.97));
-  const r = await classifyReport(opts(fetch), { message: "m" });
-  assert.equal(r.kind, "question");
-  assert.equal(r.needsClarification, true);
-});
-
-test("no key -> unknown, no request", async () => {
-  const fetch = (async () => {
-    throw new Error("no request expected");
-  }) as typeof globalThis.fetch;
-  assert.deepEqual(await classifyReport({ apiKey: undefined, url: URL, fetch }, { message: "m" }), UNKNOWN);
-});
-
-test("401 -> unknown", async () => {
-  const { fetch } = stub({ error: "unauthorized" }, 401);
-  assert.deepEqual(await classifyReport(opts(fetch), { message: "m" }), UNKNOWN);
-});
-
-test("malformed body (no answers.kind) -> unknown", async () => {
-  const { fetch } = stub({ model: "jev-1.13.0", answers: {} });
-  assert.deepEqual(await classifyReport(opts(fetch), { message: "m" }), UNKNOWN);
-});
-
-test("an unrecognised choice -> unknown", async () => {
-  const { fetch } = stub(answer("chore", 0.99));
-  assert.deepEqual(await classifyReport(opts(fetch), { message: "m" }), UNKNOWN);
-});
-
-test("fetch rejects -> unknown", async () => {
-  const fetch = (async () => {
-    throw new TypeError("network down");
-  }) as typeof globalThis.fetch;
-  assert.deepEqual(await classifyReport(opts(fetch), { message: "m" }), UNKNOWN);
-});
-
-test("timeout -> unknown", async () => {
-  const fetch = ((_url: string | URL | Request, init?: RequestInit) =>
-    new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
-    })) as typeof globalThis.fetch;
-  assert.deepEqual(await classifyReport(opts(fetch, { timeoutMs: 20 }), { message: "m" }), UNKNOWN);
-});
-
-test("the key never reaches the tool result", async () => {
-  const { fetch } = stub(answer("bug", 0.9));
-  const r = await classifyReport(opts(fetch), { message: "m" });
-  assert.ok(!JSON.stringify(r).includes(KEY));
-  const failed = await classifyReport(opts(stub({}, 401).fetch), { message: "m" });
-  assert.ok(!JSON.stringify(failed).includes(KEY));
+  assert.ok(tools.toolCalls.some((c) => c.name === CLASSIFY_REPORT && c.route === "/projects/greeter/issues/mcp"));
+  const off = new FakeToolsSocket({ projects: {}, skillsSha: "s" });
+  assert.deepEqual(await classifyReport(mcpRoute(off, issuesMcpPath("greeter")), { message: "m" }), UNKNOWN, "no key on the install");
 });
 
 test("the tool classifies through the same path and validates its input", async () => {
-  const { fetch, calls } = stub(answer("bug", 1));
-  const t = buildClassifyReportTool(opts(fetch));
-  assert.equal(CLASSIFY_REPORT, "classify_report");
+  const { transport, calls } = route(answered({ kind: "bug", confidence: 1, alternatives: [] }));
+  const t = buildClassifyReportTool(transport);
   const out = await t.execute!({ message: "it crashes" }, { toolCallId: "c1", messages: [], context: {} });
   assert.equal((out as { kind: string }).kind, "bug");
-  assert.equal(JSON.parse(String(calls[0]!.init.body)).state.message, "it crashes");
+  assert.equal(calls[0]!.arguments.message, "it crashes");
   const schema = t.inputSchema as { safeParse: (v: unknown) => { success: boolean } };
   assert.equal(schema.safeParse({ message: "" }).success, false);
   assert.equal(schema.safeParse({ message: "x", recentMessages: Array(7).fill("a") }).success, false);
