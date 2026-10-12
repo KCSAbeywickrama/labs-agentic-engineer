@@ -22,13 +22,14 @@ import "github.com/wso2/aep/aep-api/internal/platform/mcprpc"
 // issue, the project or the org.
 const issueFixed = "The issue (and its project) is fixed by the session; you cannot name another. "
 
-// issueWrite closes every write tool's description: the agents service gates
+// issueWrite closes every write tool's description: the design agent gates
 // each write on the user's answer to its confirmation question.
-const issueWrite = " This is a write: ask the user to confirm it first; the agents service refuses it until they do."
+const issueWrite = " This is a write: ask the user to confirm it first; the design agent refuses it until they do."
 
 // issueTools is an issue agent's tools/list. The names are a contract with
-// services/agents (the issue agent's toolset and its confirmation gate key on
-// them): change them together. No schema declares a project, org, issue number
+// ae-design-agent (the issue agent's toolset and its confirmation gate key on
+// them) and ae-studio-tools (mcp.IssueTools pins them): change them
+// together. No schema declares a project, org, issue number
 // or labels — the session fixes the first three and AE owns the last.
 func issueTools() []mcprpc.Tool {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }

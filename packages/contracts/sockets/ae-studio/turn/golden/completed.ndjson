@@ -1,0 +1,4 @@
+{"type":"task-op","op":"build","output":{"ok":true,"op":"build","items":[{"item":"F1","components":["greeter"],"note":"Story F1.1 asks for a greeting."}]}}
+{"type":"keep-alive"}
+{"type":"task-op","op":"build","output":{"ok":true,"op":"build","items":[{"item":"foundation","components":["greeter"],"note":"Set up the service and sign-in."},{"item":"F1","components":["greeter"],"note":"Stories F1.1 and F1.2 both need the greeting."}]}}
+{"type":"result","status":"completed"}

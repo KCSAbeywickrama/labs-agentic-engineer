@@ -78,7 +78,7 @@ func scopedRPC(t *testing.T, h http.Handler, scoped bool, msg map[string]any) *h
 func rpcAs(t *testing.T, h http.Handler, scope *auth.IssuesMCPScope, msg map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(msg)
-	req := httptest.NewRequest(http.MethodPost, "/internal/v1/issues/mcp", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/ae-studio/projects/shop/issues/mcp", strings.NewReader(string(body)))
 	if scope != nil {
 		req = req.WithContext(auth.WithIssuesMCPScope(req.Context(), *scope))
 	}

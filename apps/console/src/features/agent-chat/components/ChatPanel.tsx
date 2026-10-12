@@ -369,7 +369,7 @@ export function ChatPanel({
         aria-label={view === "issue" ? `Issue #${threadIssue} chat` : view === "issues" ? "Issues chat" : "Main chat"}
         sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
       >
-        <Thread projectName={projectName} view={view} {...ofIssue} />
+        <Thread projectName={projectName} card={card} view={view} {...ofIssue} />
         <Composer
           projectName={projectName}
           topic={topic.topic}

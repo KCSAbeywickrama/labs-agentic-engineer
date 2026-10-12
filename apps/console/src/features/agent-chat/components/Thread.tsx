@@ -20,11 +20,12 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Box, Button, CircularProgress, Link, Typography } from "@wso2/oxygen-ui";
 import { CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { visuallyHidden } from "../../../components/visuallyHidden";
+import { designQuestionsNote } from "../../design/model/chatNote";
+import { useDesignQuestions } from "../../design/useDesignQuestions";
 import { usePrototypeNotes } from "../../prototype/usePrototypeNotes";
-import { usePrototypeRequestsText } from "../../prototype/usePrototypeRequestsText";
+import type { ProjectCard } from "../../shell/scope";
 import { useSpecModel } from "../../spec/useSpecWorkspace";
 import { interviewWriteUp, openQuestionId, userLineText, withFiledLast, type ChatItem, type NoteAction } from "../chatLog";
-import type { PrototypeFeedback } from "../turnScope";
 import type { ChatView } from "../chatView";
 import { useOpenIssueChat } from "../useOpenIssuesChat";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
@@ -62,12 +63,7 @@ function AgentMark() {
   );
 }
 
-/** A prototype review's message reads as its requests, not as the `/prototype` line it went over the wire as. */
-function PrototypeRequests({ projectName, feedback }: { projectName: string; feedback: PrototypeFeedback }) {
-  return <>{usePrototypeRequestsText(projectName, feedback)}</>;
-}
-
-function UserRow({ projectName, item }: { projectName: string; item: Extract<ChatItem, { kind: "user" }> }) {
+function UserRow({ item }: { item: Extract<ChatItem, { kind: "user" }> }) {
   return (
     <Box sx={{ alignSelf: "flex-end", maxWidth: "88%", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
       <Box
@@ -80,11 +76,7 @@ function UserRow({ projectName, item }: { projectName: string; item: Extract<Cha
         }}
       >
         <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-          {item.prototypeFeedback ? (
-            <PrototypeRequests projectName={projectName} feedback={item.prototypeFeedback} />
-          ) : (
-            userLineText(item.text)
-          )}
+          {userLineText(item.text)}
         </Typography>
       </Box>
       {item.state === "failed" && (
@@ -203,10 +195,12 @@ function actionsFor(actions: NoteAction[] | undefined, newestReopen: boolean): N
 
 export function Thread({
   projectName,
+  card = null,
   view = "main",
   issueNumber,
 }: {
   projectName: string;
+  card?: ProjectCard | null;
   /** The view whose chat this is: its retries go to that view's agent. */
   view?: ChatView;
   /** The issue whose chat this is, in the issue view. */
@@ -227,6 +221,10 @@ export function Thread({
     () => items.filter((i) => i.kind === "note" && i.actions?.some((a) => a.kind === "open-issues")).at(-1)?.id,
     [items],
   );
+  const questions = useDesignQuestions(projectName).length;
+  // The design's questions are the main chat's to point at.
+  const questionsNote =
+    view === "main" ? designQuestionsNote({ items, running, questions, designCardOpen: card === "design" }) : null;
   // Nothing from the agent yet since the last message: say it is working.
   const lastItem = items.at(-1);
   const waitingForOutput = running && (!lastItem || lastItem.kind === "user");
@@ -293,7 +291,7 @@ export function Thread({
         const noteActions = item.kind === "note" ? actionsFor(item.actions, item.id === newestReopenId) : [];
         return (
           <Fragment key={item.id}>
-            {item.kind === "user" && <UserRow projectName={projectName} item={item} />}
+            {item.kind === "user" && <UserRow item={item} />}
             {(item.kind === "agent" || item.kind === "note") && <AgentRow text={item.text} />}
             {noteActions.length > 0 && <NoteActions projectName={projectName} actions={noteActions} />}
             {item.kind === "activity" && <ActivityLine item={item} features={features ?? []} />}
@@ -314,6 +312,7 @@ export function Thread({
               </Box>
             )}
             {followUp?.afterId === item.id && <InterviewFollowUp projectName={projectName} path={followUp.path} />}
+            {questionsNote?.afterId === item.id && <NoteActions projectName={projectName} actions={questionsNote.actions} />}
             {prototypeNotes.has(item.id) && (
               <>
                 <AgentRow text={prototypeNotes.get(item.id)!.text} />

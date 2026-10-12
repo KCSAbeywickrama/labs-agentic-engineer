@@ -13,3 +13,4 @@ Needs: F2.
 ## Decisions
 
 - The report is the total of approved claims per calendar month, read-only, with no export in this release.
+- An Approver can pick any calendar month to view its total of approved claims; it defaults to the current month. *assumed*

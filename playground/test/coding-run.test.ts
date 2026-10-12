@@ -28,6 +28,7 @@ import {
   dockerInvocation,
   FORWARDED_AGENT_SETTINGS,
   hostInvocation,
+  hostUserToAdopt,
   resolveRuntime,
   isFailedAgent,
   renderMergedTimeline,
@@ -45,7 +46,7 @@ import { formatEvent } from "@aep/progress-view";
 const renderEvent = (e: Parameters<typeof formatEvent>[0]): string => formatEvent(e).text;
 /** The lead agent's own event — `lead` is a literal on the wire, not an id. */
 const lead = <T extends Record<string, unknown>>(rest: T) => ({ agentId: "lead", ...rest });
-import { renderTaskContextFile } from "../src/ports/issue-store.js";
+import { renderIssueFile } from "../src/ports/issue-store.js";
 import { takeUndoSnapshot, restoreUndoSnapshot, listUndoSnapshots } from "../src/state/undo.js";
 import { codeCommand } from "../src/commands.js";
 
@@ -54,13 +55,7 @@ function tempProject(): string {
   mkdirSync(join(dir, "issues"), { recursive: true });
   writeFileSync(
     join(dir, "issues", "3.md"),
-    renderTaskContextFile({
-      issueNumber: 3,
-      component: "user-service",
-      title: "Implement the user service",
-      dependsOn: ["auth-service"],
-      body: "scope",
-    }),
+    renderIssueFile({ issueNumber: 3, title: "Build v1", version: "v1", body: "- [ ] **F1** Users: `user-service`.\n" }),
   );
   return dir;
 }
@@ -96,7 +91,7 @@ test("host mode withholds the key, so the SDK falls back to the developer's own 
 
 // These two are about the org with NO coding credential configured, so they
 // clear it explicitly: `deployments/.env` may define one on a developer's
-// machine, and `@aep/agents` merges that file into process.env at module scope.
+// machine, and `@aep/ae-design-agent` merges that file into process.env at module scope.
 test("host mode --api-key opts back into key auth", () => {
   withCodingKeyInEnv(undefined, () => {
     withKeyInEnv("sk-ant-explicit", () => {
@@ -113,6 +108,25 @@ test("docker mode always passes the key through — a container reaches no crede
     assert.ok(at > 0, "the key must be forwarded into the container");
     assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
   });
+});
+
+// A Linux bind mount keeps the host's numeric owners, so the image's `aep`
+// (uid 999) could neither write the project and run dirs nor leave files the
+// host user can delete. On Linux the run starts as root only to give `aep` the
+// host user's ids, then goes through the image's own entrypoint as `aep`.
+test("a Linux docker run adopts the host user; a macOS run keeps the image's user", () => {
+  assert.deepEqual(hostUserToAdopt("linux", 1000, 1001), { uid: 1000, gid: 1001 });
+  assert.equal(hostUserToAdopt("darwin", 501, 20), null);
+
+  const linux = dockerInvocation(invocationOpts, "/r", "c1", { uid: 1000, gid: 1001 }).args;
+  assert.equal(linux[linux.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-adopt-host-user");
+  assert.equal(linux[linux.indexOf("--user") + 1], "0:0");
+  assert.ok(linux.includes("AEP_HOST_UID=1000") && linux.includes("AEP_HOST_GID=1001"));
+  assert.ok(linux.includes(`${join(REPO_ROOT, "runners", "remote-worker", "local", "adopt-host-user.sh")}:/usr/local/bin/aep-adopt-host-user:ro`));
+
+  const mac = dockerInvocation(invocationOpts, "/r", "c1", null).args;
+  assert.equal(mac[mac.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-runner-entrypoint");
+  assert.equal(mac.includes("--user"), false);
 });
 
 // AEP_CODING_ANTHROPIC_KEY is the local half of the platform's per-org
@@ -197,7 +211,7 @@ test("an OAuth coding token displaces ANTHROPIC_API_KEY in docker mode too", () 
   });
 });
 
-// deployments/.env is the PLATFORM's file and `@aep/agents` merges it into
+// deployments/.env is the PLATFORM's file and `@aep/ae-design-agent` merges it into
 // process.env at module scope, so a CLAUDE_CODE_OAUTH_TOKEN sitting there would
 // otherwise authenticate every host run — silently billing a shared credential
 // on the one path whose whole purpose is to bill the developer's own login.

@@ -17,11 +17,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_FEEDBACK_QUEUE, earlierComments, enqueue, prototypeHash, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
 import type { PrototypeManifest } from "@wso2/prototype-kit/host";
-import { feedbackBatch } from "./feedback";
 import type { AppPrototype, PrototypeFiles } from "./prototypes";
-import { NEW_SESSION, follow, sendStarted, turnEnded, type ReviewSession } from "./revision";
+import { NEW_SESSION, follow } from "./revision";
 
 const manifest: PrototypeManifest = {
   schemaVersion: 3,
@@ -36,59 +34,44 @@ const manifest: PrototypeManifest = {
 const filesOf = (source: string): PrototypeFiles => ({ manifestText: JSON.stringify(manifest), manifest, source });
 const V1 = filesOf("// one");
 const V2 = filesOf("// two");
-const hashOf = (f: PrototypeFiles) => prototypeHash(f.manifestText, f.source);
 
-const app = (status: AppPrototype["status"], files: PrototypeFiles | null): AppPrototype => ({ component: "expense-web", status, problem: null, files, exists: true });
-
-const request = (elementIds: string[], text: string): FeedbackRequest => ({ screenId: "screen.claims", roleId: "manager", stateId: "state.default", elementIds, text });
-
-/** A session showing V1 that sent one comment, with one more held while the agent revises. */
-function heldWhileRevising(): ReviewSession {
-  let s = follow(NEW_SESSION, app("ready", V1));
-  s = { ...s, queue: enqueue(s.queue, hashOf(V1), request(["btn.reject"], "Ask for a reason")) };
-  s = sendStarted(s, feedbackBatch("expense-web", s.queue)!);
-  s = follow(s, app("revising", V1));
-  return { ...s, queue: enqueue(s.queue, hashOf(V1), request(["btn.approve"], "Make it green")) };
-}
+const app = (status: AppPrototype["status"], files: PrototypeFiles | null, problem: string | null = null): AppPrototype => ({
+  component: "expense-web",
+  status,
+  problem,
+  files,
+  exists: true,
+});
 
 describe("a revision landing", () => {
-  it("moves the held comments onto it, so the next batch names it, each still marked as written on the one before", () => {
-    const landed = follow(turnEnded(heldWhileRevising(), "completed"), app("ready", V2));
-    expect(landed.notice).toEqual({ kind: "updated", addressed: 1 });
-    expect(feedbackBatch("expense-web", landed.queue)?.prototypeHash).toBe(hashOf(V2));
-    expect(earlierComments(landed.queue, hashOf(V2))).toEqual([0]);
+  it("keeps showing the revision it had while the agent writes the next", () => {
+    const revising = follow(follow(NEW_SESSION, app("ready", V1)), app("revising", V2));
+    expect(revising).toMatchObject({ revising: true, shown: V1, notice: null });
   });
 
-  it("gives a failed batch back in front of the held comments, on the revision still showing", () => {
-    const failed = follow(turnEnded(heldWhileRevising(), "failed"), app("ready", V1));
-    expect(failed.queue.requests.map((r) => r.text)).toEqual(["Ask for a reason", "Make it green"]);
-    expect(feedbackBatch("expense-web", failed.queue)?.prototypeHash).toBe(hashOf(V1));
-    expect(earlierComments(failed.queue, hashOf(V1))).toEqual([]);
+  it("swaps the landed revision in, and says so", () => {
+    const landed = follow(follow(follow(NEW_SESSION, app("ready", V1)), app("revising", V1)), app("ready", V2));
+    expect(landed).toMatchObject({ revising: false, shown: V2, notice: { kind: "updated" } });
   });
 
-  it("moves a failed batch onto what the turn wrote before it stopped, which is showing, and says so", () => {
-    const failed = follow(turnEnded(heldWhileRevising(), "failed"), app("ready", V2));
-    expect(failed.shown).toBe(V2);
-    expect(failed.queue.requests.map((r) => r.text)).toEqual(["Ask for a reason", "Make it green"]);
-    expect(feedbackBatch("expense-web", failed.queue)?.prototypeHash).toBe(hashOf(V2));
-    expect(earlierComments(failed.queue, hashOf(V2))).toEqual([0, 1]);
+  it("keeps the last good revision showing when the new one is invalid, and says why", () => {
+    const failed = follow(follow(follow(NEW_SESSION, app("ready", V1)), app("revising", V1)), app("invalid", null, "prototype.tsx is missing"));
+    expect(failed.shown).toBe(V1);
     expect(failed.notice).toEqual({
       kind: "failed",
-      reason: "The agent stopped partway, so you're seeing the changes it made before it stopped. Your comments are back in the queue: Retry sends them again.",
+      reason: "The updated prototype can't be shown (prototype.tsx is missing), so you're still seeing the previous version.",
     });
   });
 
-  it("says the previous version still shows when a failed turn changed nothing", () => {
-    const failed = follow(turnEnded(heldWhileRevising(), "failed"), app("ready", V1));
-    expect(failed.notice).toEqual({
-      kind: "failed",
-      reason: "The prototype wasn't updated, so you're still seeing the previous version. Your comments are back in the queue: Retry sends them again.",
-    });
+  it("says nothing of a run that left the prototype as it was, or made the first one", () => {
+    const same = follow(follow(follow(NEW_SESSION, app("ready", V1)), app("revising", V1)), app("ready", filesOf("// one")));
+    expect(same.notice).toBeNull();
+    const first = follow(follow(NEW_SESSION, app("revising", null)), app("ready", V1));
+    expect(first).toMatchObject({ shown: V1, notice: null });
   });
 
-  it("keeps an empty queue empty", () => {
-    let s = sendStarted(follow(NEW_SESSION, app("ready", V1)), { prototypeHash: hashOf(V1), component: "expense-web", requests: [request([], "x")] });
-    s = follow(follow(s, app("revising", V1)), app("ready", V2));
-    expect(s.queue).toEqual(EMPTY_FEEDBACK_QUEUE);
+  it("is the same session while nothing changed", () => {
+    const shown = follow(NEW_SESSION, app("ready", V1));
+    expect(follow(shown, app("ready", V1))).toBe(shown);
   });
 });

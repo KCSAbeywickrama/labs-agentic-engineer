@@ -20,13 +20,22 @@ drift.
   2026-09-30 to the feature-file layout: stories 1–7 became F1.1–F1.3,
   F2.1–F2.3 and F3.1.
 - `lunch-coordinator-design/` — design output of the `design-lunch-coordinator`
-  run (2026-08-02, pass band 93), frozen as produced: `lunch-api` +
-  `lunch-webapp` components with design.json / openapi.yaml / wireframes,
-  design.cell, and the Gherkin acceptance criteria under specs/validation/acceptance/.
-  Its requirements still predate feature files, and its design.json files cite
-  no stories; it is refreshed when the design flow moves to per-feature design.
+  run (2026-10-11, the design-loop lineup, pass band 83), frozen as produced:
+  the requirements with the gap check's `*assumed*` lines, `lunch-api` +
+  `lunch-webapp` (its prototype, no wireframes), the Slack dependency with its
+  contract and assumptions, design.cell, domain model, security.json,
+  decisions.md, one flow and one acceptance file per feature. That run wrote
+  the Slack contract during the architecture, ahead of the lineup's
+  Dependencies step; the files themselves are sound.
 - `expense-tracker-design/` — design output of the `design-expense-tracker`
-  run (2026-10-01, the per-feature design flow), frozen as produced:
-  `expense-api` + `expense-webapp`, each citing F1.1–F3.1, with design.cell,
-  security.json and one acceptance file per feature. The tasks scenario of the
-  same name plans from it with a v1 scope naming all three features.
+  run (2026-10-11, the design-loop lineup, pass band 95), frozen as produced:
+  the requirements with the gap check's `*assumed*` lines, `expense-api` +
+  `expense-webapp` (its prototype, no wireframes), each citing F1.1–F3.1,
+  design.cell, domain model, security.json, decisions.md and one acceptance
+  file per feature. The tasks scenario of the same name plans from it with a
+  v1 scope naming all three features, and the address-comments scenario
+  reviews it.
+
+Both refreshed fixtures are as produced except their `prototype.tsx`, which
+carries the repository's license header, and, in expense-tracker's, one
+unused import (`Badge`) dropped for the lint.

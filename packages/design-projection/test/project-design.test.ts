@@ -50,7 +50,8 @@ const BUNDLE: Record<string, string> = {
     dependencies: [{ kind: "component", name: "expense-api" }],
     description: "The webapp.",
   }),
-  "specs/design/components/expense-webapp/wireframes.dsl": "screen A\n",
+  "specs/design/components/expense-webapp/prototype.json": "{}\n",
+  "specs/design/components/expense-webapp/prototype.tsx": "export default null;\n",
 };
 
 test("projects the bundle into the cell-diagram-compatible design json", () => {
@@ -77,10 +78,9 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   assert.deepEqual(web.skillsPinned, []); // no skillsPinned authored for this component
   assert.equal(web.services, undefined); // webapps expose no services
   assert.deepEqual(web.connections, [{ id: "http://expense-api", type: "http", onPlatform: true }]);
-  assert.equal(web.artifacts.wireframes, "specs/design/components/expense-webapp/wireframes.dsl");
+  assert.equal(web.artifacts.prototype, "specs/design/components/expense-webapp/prototype.json");
+  assert.equal(web.artifacts.prototypeSource, "specs/design/components/expense-webapp/prototype.tsx");
 });
-
-
 
 test("a bundle without a design tree projects to an empty component list", () => {
   const dj = buildProjectDesign("empty", { "requirements.md": "# hi\n" });

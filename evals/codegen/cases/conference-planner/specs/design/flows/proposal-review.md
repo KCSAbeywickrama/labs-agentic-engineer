@@ -1,32 +1,32 @@
-# Proposal review and acceptance
+# Proposal review
 
-A speaker submits a proposal, reviewers score it, and an organizer accepts it into a scheduled session or rejects it.
+A speaker submits a proposal, reviewers score it, and an organizer accepts or rejects it.
 
 ```mermaid
 sequenceDiagram
     actor Speaker
     actor Reviewer
     actor Organizer
-    participant conference-webapp
+    participant events-webapp
     participant events-api
-    participant registration-service
 
-    Speaker->>conference-webapp: submit proposal
-    conference-webapp->>events-api: create proposal
-    events-api-->>conference-webapp: submitted
-    Reviewer->>conference-webapp: score proposal 1 to 5
-    conference-webapp->>events-api: add score
-    alt reviewer already scored
-        events-api-->>conference-webapp: refused
-    else
-        events-api-->>conference-webapp: average updated
+    Speaker->>events-webapp: submit proposal
+    events-webapp->>events-api: submit proposal
+    alt call for proposals closed
+        events-api-->>events-webapp: refused
+    else open
+        events-api-->>events-webapp: created (submitted)
     end
-    Organizer->>conference-webapp: accept or reject
-    conference-webapp->>events-api: record decision
-    alt accepted
-        Organizer->>conference-webapp: schedule session with room, time, capacity
-        conference-webapp->>events-api: create session from proposal
-        events-api->>registration-service: set session capacity
-    end
-    Speaker->>conference-webapp: view outcome
+    Reviewer->>events-webapp: open review queue
+    events-webapp->>events-api: list assigned proposals
+    Reviewer->>events-webapp: score 1 to 5
+    events-webapp->>events-api: save review
+    events-api-->>events-webapp: proposal under review
+    Organizer->>events-webapp: open ranked proposals
+    events-webapp->>events-api: list event proposals
+    Organizer->>events-webapp: accept or reject
+    events-webapp->>events-api: decide proposal
+    Speaker->>events-webapp: open my proposals
+    events-webapp->>events-api: list my proposals
+    events-api-->>events-webapp: status and comment
 ```

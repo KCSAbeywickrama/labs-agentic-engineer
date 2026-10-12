@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: Catalogue Service
   version: 0.1.0
+  description: Titles and copies. Called only by the circulation API.
 servers:
   - url: /
 paths:
@@ -10,16 +11,22 @@ paths:
       operationId: listTitles
       summary: Search titles
       parameters:
-        - { name: q, in: query, schema: { type: string }, description: Matches name, author or subject }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: q, in: query, schema: { type: string }, description: Matches title, author or subject }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A page of titles
+          description: A page of titles with availability
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TitlePage' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data: { type: array, items: { $ref: '#/components/schemas/Title' } }
     post:
       operationId: createTitle
       summary: Add a title
@@ -40,7 +47,7 @@ paths:
       - { name: titleId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getTitle
-      summary: Get a title
+      summary: A title with its available copy count
       responses:
         '200':
           description: The title
@@ -66,27 +73,34 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteTitle
-      summary: Remove a title
+      summary: Remove a title that has no copies on loan
       responses:
-        '204': { description: Removed }
+        '204':
+          description: Removed
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /titles/{titleId}/copies:
     parameters:
       - { name: titleId, in: path, required: true, schema: { type: string } }
     get:
-      operationId: listCopies
-      summary: List copies of a title
+      operationId: listTitleCopies
+      summary: Copies of a title
       parameters:
-        - { name: status, in: query, schema: { $ref: '#/components/schemas/CopyStatus' } }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: A page of copies
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/CopyPage' }
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data: { type: array, items: { $ref: '#/components/schemas/Copy' } }
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       operationId: createCopy
@@ -104,12 +118,34 @@ paths:
               schema: { $ref: '#/components/schemas/Copy' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /copies:
+    get:
+      operationId: findCopies
+      summary: Find copies by barcode
+      parameters:
+        - { name: barcode, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of copies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data: { type: array, items: { $ref: '#/components/schemas/Copy' } }
   /copies/{copyId}:
     parameters:
       - { name: copyId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getCopy
-      summary: Get a copy
+      summary: A copy
       responses:
         '200':
           description: The copy
@@ -117,9 +153,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Copy' }
         '404': { $ref: '#/components/responses/NotFound' }
-    put:
+    patch:
       operationId: updateCopy
-      summary: Edit a copy or change its status
+      summary: Edit a copy's barcode or status
       requestBody:
         required: true
         content:
@@ -133,7 +169,11 @@ paths:
               schema: { $ref: '#/components/schemas/Copy' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
+  parameters:
+    Limit: { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 }, description: Page size }
+    Offset: { name: offset, in: query, schema: { type: integer, default: 0 }, description: Items to skip }
   responses:
     BadRequest:
       description: Invalid request
@@ -159,9 +199,6 @@ components:
         message: { type: string, description: short human-readable label }
         description: { type: string, description: detailed explanation }
         moreInfo: { type: string, description: URI to documentation }
-    CopyStatus:
-      type: string
-      enum: [available, on-loan, on-hold, withdrawn]
     TitleInput:
       type: object
       required: [name, author]
@@ -169,14 +206,14 @@ components:
         name: { type: string }
         author: { type: string }
         subject: { type: string }
-        isbn: { type: string }
     Title:
       allOf:
         - $ref: '#/components/schemas/TitleInput'
         - type: object
-          required: [id, availableCopies]
+          required: [id, copyCount, availableCopies]
           properties:
             id: { type: string }
+            copyCount: { type: integer, description: Copies not withdrawn }
             availableCopies: { type: integer, description: Copies with status available }
     CopyInput:
       type: object
@@ -187,28 +224,13 @@ components:
       type: object
       properties:
         barcode: { type: string }
-        status: { $ref: '#/components/schemas/CopyStatus' }
+        status: { type: string, enum: [available, on-loan, on-hold-shelf, withdrawn] }
     Copy:
       type: object
-      required: [id, titleId, barcode, status]
+      required: [id, titleId, titleName, barcode, status]
       properties:
         id: { type: string }
         titleId: { type: string }
+        titleName: { type: string }
         barcode: { type: string }
-        status: { $ref: '#/components/schemas/CopyStatus' }
-    TitlePage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer, description: total matching items }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/Title' } }
-    CopyPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer, description: total matching items }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/Copy' } }
+        status: { type: string, enum: [available, on-loan, on-hold-shelf, withdrawn] }

@@ -25,8 +25,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/clients/aestudiotools"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/issues"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 )
@@ -183,5 +185,38 @@ func TestIssueThreadRemoval_BoundedByTheEvent(t *testing.T) {
 	h := issueThreadRemoval{repos: locator, threads: threads}
 	if err := h.OnIssueEvent(context.Background(), "issues", "closed", issuePayload("acme/expenses", 7, false, "closed", false)); err == nil || len(threads.calls) != 0 {
 		t.Fatalf("no event time: (%v, %v), want an error and no removal", err, threads.calls)
+	}
+}
+
+// projectRows answers one project's repository row.
+type projectRows struct{}
+
+func (projectRows) GetByOrgAndProjectID(_ context.Context, org, project string) (*sourcecontrol.GitRepository, error) {
+	return &sourcecontrol.GitRepository{OrgID: org, ProjectID: project, RepoURL: "https://github.com/acme/" + project}, nil
+}
+
+// podThreads records the removal the pod is asked for.
+type podThreads struct {
+	ref     aestudiotools.RepoRef
+	project string
+	n       int
+	before  time.Time
+}
+
+func (p *podThreads) RemoveIssueThread(_ context.Context, ref aestudiotools.RepoRef, project string, n int, before time.Time) error {
+	p.ref, p.project, p.n, p.before = ref, project, n, before
+	return nil
+}
+
+// The pod is asked for the project's own repository, with the project, the
+// issue and the event's bound as aep-api had them.
+func TestPodIssueThreads_AsksThePodForTheProjectsRepository(t *testing.T) {
+	pod := &podThreads{}
+	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	if err := (podIssueThreads{repos: projectRows{}, pod: pod}).RemoveIssueThread(context.Background(), "acme-org", "shop", 7, at); err != nil {
+		t.Fatal(err)
+	}
+	if pod.ref.Org != "acme-org" || pod.ref.Owner != "acme" || pod.ref.Repo != "shop" || pod.project != "shop" || pod.n != 7 || !pod.before.Equal(at) {
+		t.Fatalf("pod asked %+v", pod)
 	}
 }

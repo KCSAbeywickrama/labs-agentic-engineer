@@ -1,16 +1,27 @@
 Feature: F3 Monthly report
 
   @story-F3.1
-  Rule: The monthly total counts only approved claims for that calendar month
+  Rule: The monthly report totals the approved claims of a calendar month
 
-    Scenario: Reading the monthly total
-      Given exactly two claims were approved in September 2026, for "150.00" and "220.00"
-      And one claim was approved in August 2026, for "60.00"
-      When Priya the approver reads the September 2026 report
-      Then the total is "370.00"
+    Scenario: Dinesh reads January's total
+      Given Maya's claim for "Conference ticket" for "$350.00" was approved on "2026-01-07"
+      When Dinesh the Approver reads the report for "January 2026"
+      Then the total is "$350.00" from 1 approved claim
 
-    @negative
-    Scenario: A submitted claim is not counted in the monthly total
-      Given a claim for "42.00" was submitted in September 2026 and has not been decided
-      When Priya the approver reads the September 2026 report
-      Then that claim's amount is not included in the total
+    Scenario: Submitted and rejected claims are excluded from the total
+      Given a submitted claim from Ravi for "$210.00" and Maya's rejected claim for "$86.40", both in January 2026
+      When Dinesh the Approver reads the report for "January 2026"
+      Then neither claim is counted in the total
+
+  @story-F3.1
+  Rule: An approver can pick any calendar month, defaulting to the current month
+
+    Scenario: The report opens on the current month
+      Given today is "2026-01-15"
+      When Dinesh the Approver opens the monthly report
+      Then it shows the total for "January 2026"
+
+    Scenario: Dinesh reads an earlier month's total
+      Given Ana's claim for "Office supplies" for "$120.00" was approved on "2025-12-16"
+      When Dinesh the Approver reads the report for "December 2025"
+      Then the total is "$120.00" from 1 approved claim

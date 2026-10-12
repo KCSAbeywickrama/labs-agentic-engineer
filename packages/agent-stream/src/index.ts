@@ -19,8 +19,8 @@
 /**
  * `@aep/agent-stream` — the single client-side consumption surface for the spec
  * agent's turn stream. Zero server-side dependencies (no Express, no AI SDK), so
- * the console, the evals, the playground, and the agents service all fold the
- * wire through ONE definition. Moving `FileBundle` here brings the component
+ * the console, the evals, the playground, and the design agent all consume
+ * the wire through ONE definition. Moving `FileBundle` here brings the component
  * `design.json` write-gate with it, so any fold enforces the same schema for
  * free (§3/§12.4 of the migration decision record).
  */
@@ -51,12 +51,9 @@ export type {
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
   Change,
-  TurnRequest,
   TurnSpec,
   TurnKind,
   PlanScope,
-  PlanContextFile,
-  TurnJournal,
   TurnAttachment,
   TurnConnection,
   ModelCapabilities,
@@ -71,17 +68,11 @@ export type {
   TurnAim,
   TurnScope,
   TurnAimIntent,
-  PrototypeFeedback,
-  PrototypeFeedbackRequest,
-  WorkspaceRef,
-  McpConfig,
-  CollabConfig,
   ManifestPart,
   TurnUsage,
   Toolset,
   Surface,
   View,
-  BranchNote,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
 export {
@@ -107,18 +98,13 @@ export {
   isToolset,
   isSurface,
   isView,
-  isBranchNotes,
-  OUTCOME_MAX_CHARS,
   isTurnSpec,
-  isPrototypeFeedback,
-  PROTOTYPE_FLOW_SKILL,
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,
   isTurnConnection,
   isTurnAim,
   isTurnScope,
   TURN_AIM_LIMITS,
-  isCollabConfig,
 } from "./contracts/sse-events.js";
 export type {
   SecurityDesign,
@@ -139,26 +125,19 @@ export type {
   ExposesAPI,
 } from "./contracts/component-design.js";
 
-// --- Task-plan tool contract (tasks-github-native §9.3/§10.3) ----------------
-export { PLAN_TASK, UPDATE_TASK } from "./contracts/task-tools.js";
+// --- Build-plan tool contract --------------------------------------------------
+export { PLAN_BUILD, FOUNDATION_ITEM, WHOLE_SPEC_ITEM } from "./contracts/task-tools.js";
 export type {
-  TaskOrigin,
   TaskOp,
   TaskToolErrCode,
-  PlanTaskInput,
-  UpdateTaskInput,
-  UpdateTaskSet,
-  TaskRef,
-  PlanTaskOk,
-  UpdateTaskOk,
+  BuildPlanItem,
+  BuildPlanInput,
+  BuildPlanOk,
   TaskToolErr,
-  AddressableRefs,
-  PlanTaskResult,
-  UpdateTaskResult,
-  TaskContextFile,
+  BuildPlanResult,
 } from "./contracts/task-tools.js";
-export { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
-export { parseKnownComponents, parseTaskContextFile, TASK_CONTEXT_FILE_RE } from "./task-context.js";
+export { buildPlanInputSchema } from "./task-tools-schema.js";
+export { parseKnownComponents } from "./task-context.js";
 
 // --- The stream-part seam ----------------------------------------------------
 export type { StreamPart } from "./stream-types.js";
@@ -169,7 +148,7 @@ export type { Equal } from "./type-equal.js";
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
 export type { PlannedWrite, WritePlan } from "./bundle.js";
-export { writeWithRenderCheck } from "./prototype-gate.js";
+export { isPrototypePath, writeWithRenderCheck } from "./prototype-gate.js";
 export type { FileWrite, PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
 export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 
@@ -257,18 +236,43 @@ export {
 } from "./security-design-messages.js";
 export type { SecurityMessageKey } from "./security-design-messages.js";
 
+// --- The review.json write-gate (the Design step's comments and checks) -----
+export {
+  checkDesignReview,
+  designReviewSchema,
+  reviewedArtifactSchema,
+  reviewCommentSchema,
+  reviewCommentStatusSchema,
+  reviewAuthorSchema,
+  reviewAnchorSchema,
+  DESIGN_REVIEW_PATH,
+  REVIEW_ARTIFACT_PATH_RE,
+  PROTOTYPE_ARTIFACT_RE,
+} from "./design-review-schema.js";
+export type { DesignReviewProblem } from "./design-review-schema.js";
+export type {
+  DesignReview,
+  ReviewedArtifact,
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewAuthor,
+  ReviewAnchor,
+} from "./contracts/design-review.js";
+
 // --- JSON Schema publication (the BFF validates the same definitions) --------
 export {
   componentDesignJsonSchema,
   securityDesignJsonSchema,
-  planTaskJsonSchema,
-  updateTaskJsonSchema,
+  designReviewJsonSchema,
+  buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "./json-schema.js";
 
 // --- The reference SSE reader ------------------------------------------------
-// `streamTurn` = fetch + parse (server-side callers: evals, playground).
-// `parseSseStream` = parse only, for a caller that owns its own fetch (the
-// console adds auth + a `{useCase,...}` body + pre-stream status mapping).
-export { streamTurn, parseSseStream } from "./sse-client.js";
-export type { SseStreamEnd, StreamTurnOptions } from "./sse-client.js";
+// `startAndStreamTurn` = start a `/v1` turn + stream it (server-side callers:
+// evals, playground).
+// `parseSseFrames` = parse only, with each frame's resume id, for a caller that
+// owns its own fetch (the console adds auth + pre-stream status mapping and
+// resumes with `?from=<last id + 1>`); `parseSseStream` = the same, parts only.
+export { startAndStreamTurn, parseSseFrames, parseSseStream, TurnRefusedError } from "./sse-client.js";
+export type { SseFrame, SseStreamEnd, TurnStartBody } from "./sse-client.js";

@@ -74,6 +74,10 @@ func TestIssueDedupeKeysAreFrozen(t *testing.T) {
 		{"validation issue",
 			DedupeKeyValidationIssue("proj", 5),
 			"validation:proj:5"},
+		// task: the version's one build issue, the same per-version family.
+		{"build issue",
+			DedupeKeyBuildIssue("proj", 5),
+			"build:proj:5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.got != tc.want {

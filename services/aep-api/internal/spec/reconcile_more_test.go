@@ -224,7 +224,7 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 	if err := nilSvc.EnsureProvisioned(ctx, "org1"); err != nil {
 		t.Fatalf("nil service: %v", err)
 	}
-	if err := NewSkillService(nil, nil, nil).EnsureProvisioned(ctx, "org1"); err != nil {
+	if err := NewSkillService(nil, nil, nil, nil).EnsureProvisioned(ctx, "org1"); err != nil {
 		t.Fatalf("nil repos: %v", err)
 	}
 	svc, _ := newTestStore(t)
@@ -279,7 +279,7 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 		"api-management": "org", "ballerina": "org", "go": "org", "react-webapp": "org",
 		"thunder-authentication": "org",
 		"cell-design":            "platform", "design": "platform",
-		"wireframes": "platform", "grilling": "platform",
+		"prototype": "platform", "grilling": "platform",
 		"architecture": "platform", "openapi-conventions": "platform", "start": "platform",
 		"task-planning": "platform", "acceptance-criteria": "platform",
 	}

@@ -17,40 +17,35 @@
  */
 
 /**
- * The tasks screen: the `issues/*.md` table (dependsOn edges + a cheap
- * resolved-glyph) plus plan/replan and running the whole project in one
- * coding-agent session — the `aep` skill owns discovery, ordering and
- * fan-out itself (mirrors prod's milestone loop), so there is no per-issue
- * run here. Deliberately NO file affordances — viewing, editing, and
+ * The tasks screen: the `issues/*.md` table (each build issue's checklist,
+ * ticked as the coding run records it) plus planning the next version and
+ * running the whole project in one coding-agent session — the `aep` skill
+ * owns the order and the fan-out itself (mirrors prod's milestone loop), so
+ * there is no per-issue run here. Deliberately NO file affordances — viewing, editing, and
  * hand-authoring issue files happen in the user's editor.
  */
 
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
-import { FsIssueStore } from "../ports/issue-store.js";
-import { projectSlug } from "../ports/spec-workspace.js";
-import { issueLooksResolved } from "../state/status.js";
+import { listIssueSummaries } from "../state/status.js";
 
 export type TasksAction = { kind: "plan" } | { kind: "code" } | { kind: "back" };
 
 /** Render the tasks table; returns the action the CLI should run. */
 export async function tasksScreen(projectDir: string): Promise<TasksAction> {
-  const store = new FsIssueStore(projectDir, projectSlug(projectDir));
-  const issues = store.list();
+  const issues = listIssueSummaries(projectDir);
   if (issues.length === 0) output.write("  (no issues yet — plan first; hand-authored issues/<n>.md files are picked up too)\n");
   let pendingCount = 0;
   for (const i of issues) {
-    const resolved = issueLooksResolved(projectDir, i.component);
-    if (!resolved) pendingCount += 1;
-    output.write(
-      `  ${resolved ? "✓" : "·"} #${i.issueNumber} [${i.component}] ${i.title}${i.dependsOn.length ? ` ⇠ ${i.dependsOn.join(", ")}` : ""}\n`,
-    );
+    if (!i.resolved) pendingCount += 1;
+    const items = i.items.map((it) => `${it.done ? "✓" : "·"} ${it.item}`).join("  ");
+    output.write(`  ${i.resolved ? "✓" : "·"} #${i.issueNumber} ${i.title}${items ? `  ${items}` : ""}\n`);
   }
 
   const choice = await clack.select<string>({
     message: "Tasks",
     options: [
-      { value: "plan", label: issues.length ? "re-plan (adds tasks for uncovered components)" : "plan tasks" },
+      { value: "plan", label: issues.length ? "plan the next version" : "plan the build" },
       ...(pendingCount > 0 ? [{ value: "code", label: `run — ${pendingCount} issue(s) look pending, one session` }] : []),
       { value: "back", label: "back" },
     ],

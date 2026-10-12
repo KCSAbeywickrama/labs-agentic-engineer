@@ -17,16 +17,17 @@
  */
 
 import { http, HttpResponse } from "msw";
-import { SSE_DONE, isPrototypeFeedback } from "@aep/agent-stream";
+import { SSE_DONE } from "@aep/agent-stream";
 import { parsePrototypeCommand } from "@aep/contracts/commands";
 import type { ChatView } from "../../features/agent-chat/chatView";
 import { scopeOfBody, type TurnBody } from "../../features/agent-chat/turnScope";
 import { webApplications } from "../../features/prototype/model/prototypes";
 import { projectSpecDoc } from "../../features/spec/collab/specDoc";
 import { readSpecLines } from "../../features/spec/collab/useSpecLines";
-import type { components } from "../../generated/aep-api";
+import type { components } from "../../generated/ae-design-agent";
 import { MOCK_USER } from "../../auth/mockSession";
 import {
+  chatOfConversation,
   conversationIdFor,
   finishedTurns,
   findTurn,
@@ -35,10 +36,10 @@ import {
   recordTurn,
   runningTurn,
   setInterviewProgress,
-  turnUseCase,
   type MockTurn,
 } from "../chatServer";
 import { createdProjects } from "../createdProjects";
+import { aeStudioUrls } from "../fixtures/aeStudio";
 import { liveDesign } from "../designState";
 import { acmeExpensesHistory } from "../fixtures/conversation";
 import { scriptDesignTurn } from "../fixtures/designTurns";
@@ -49,36 +50,37 @@ import { scriptPrototypeTurn } from "../fixtures/prototype";
 import { specView } from "../specState";
 import { changeMockIssue, fileMockIssue, issueThreadOpen, issuesOf, nextIssueNumber } from "./issues";
 
-type ProjectConversationList = components["schemas"]["ProjectConversationList"];
-type GetConversationOutputBody = components["schemas"]["GetConversationOutputBody"];
+type ProjectConversationView = components["schemas"]["ProjectConversationView"];
+type ConversationMessages = components["schemas"]["ConversationMessages"];
 type ConversationMessage = components["schemas"]["ConversationMessage"];
 type TurnOutputBody = components["schemas"]["TurnOutputBody"];
 type TurnConflict = components["schemas"]["TurnConflict"];
 type TurnStatus = components["schemas"]["TurnStatus"];
-type ApiError = components["schemas"]["Error"];
+type Problem = components["schemas"]["Problem"];
 
-// The project conversation: one stable thread per project, its history, and
+// The project conversation on the org's design agent (the pod's `/v1`, on
+// its fixed fake origin, fixtures/aeStudio.ts): one stable thread per
+// project, its history, and
 // its turns. A turn is started (202), found running (turns/active), read
 // (turns/{id}) and streamed as SSE, replayed from its start and then live, so
 // a reload mid-turn attaches to it again. One turn at a time per project: a
 // second start is the server's 409 `turn_in_progress`. What each turn says
 // and does is scripted in fixtures/interview.ts (the design review's in
 // fixtures/designTurns.ts, `/prototype` in fixtures/prototype.ts); the turns
-// themselves live in chatServer.ts. A turn's `prototypeFeedback` is refused
-// as aep-api refuses it.
+// themselves live in chatServer.ts.
 //
 // Acme Expenses starts with a conversation; a project made through New
 // project starts with the platform's kickoff (handlers/projects.ts); every
 // other project's is empty, which the real server answers the same way.
 //
 // The Issues Page's chat is a second conversation (`view=issues`) with its own
-// agent (fixtures/issuesAgent.ts): a turn with `view: "issues"` goes to it, and
+// agent (fixtures/issuesAgent.ts): a turn sent to its thread goes to it, and
 // the running turn is looked up per view, so the two chats never block each other.
 // Each open issue has one more (`view=issue` with `issueNumber`), with the
-// issue's own agent (fixtures/issueAgent.ts), as use case `issue-<n>`. A
-// closed issue has none: resolving or sending to its thread is refused as
-// aep-api refuses it (409 `issue_closed`), so closing an issue removes its
-// thread; reading its running turn is not refused.
+// issue's own agent (fixtures/issueAgent.ts). A closed issue has none:
+// resolving or sending to its thread is refused as the design agent refuses
+// it (409 `issue_closed`), so closing an issue removes its thread; reading its
+// running turn is not refused.
 
 const AUTHOR = { id: "u-developer", displayName: MOCK_USER.name };
 
@@ -97,55 +99,43 @@ function historyFor(conversationId: string): ConversationMessage[] {
         author: AUTHOR,
         content: t.instruction,
         ...(t.scope ? { scope: t.scope } : {}),
-        ...(t.prototypeFeedback ? { prototypeFeedback: t.prototypeFeedback } : {}),
       },
       ...t.reply,
     ]),
   ];
 }
 
-const viewOf = (view: string | null | undefined): ChatView => (view === "issues" || view === "issue" ? view : "main");
+/** A project chat: its view, and an issue's number. */
+type MockChat = { view: ChatView; issueNumber?: number };
 
-/** The issue number a request names, from its query (`issueNumber`). */
-const issueNumberOf = (url: string): number | undefined => {
-  const n = Number(new URL(url).searchParams.get("issueNumber"));
-  return Number.isInteger(n) && n > 0 ? n : undefined;
-};
-
-const issueClosed = (): Response =>
-  HttpResponse.json<ApiError>({ code: "issue_closed", message: "the issue is closed" }, { status: 409 });
+/** The chat a request's `view` and `issueNumber` query names, as the design agent reads it; null for a bad pair (400). */
+function chatOf(url: URL): MockChat | null {
+  const view = url.searchParams.get("view");
+  const raw = url.searchParams.get("issueNumber");
+  if (view === "issue") {
+    const n = Number(raw);
+    return raw !== null && Number.isInteger(n) && n > 0 ? { view, issueNumber: n } : null;
+  }
+  if (raw !== null) return null;
+  if (view === null) return { view: "main" };
+  return view === "issues" ? { view } : null;
+}
 
 function statusOf(turn: MockTurn): TurnStatus {
   const running = isRunning(turn);
   return {
     turnId: turn.turnId,
     conversationId: turn.conversationId,
-    useCase: turnUseCase(turn),
+    kind: "browser",
+    flow: "",
     status: running ? "running" : turn.failure ? "failed" : "completed",
     instruction: turn.instruction,
     authorId: AUTHOR.id,
     authorDisplayName: AUTHOR.displayName,
     createdAt: new Date(turn.startedAt).toISOString(),
-    updatedAt: new Date().toISOString(),
-    ...(running ? {} : { noChanges: !turn.effect?.file }),
+    ...(running ? {} : { finishedAt: new Date().toISOString() }),
     ...(!running && turn.failure ? { message: turn.failure } : {}),
   };
-}
-
-/**
- * Why a turn's `prototypeFeedback` is refused, as aep-api refuses it (400,
- * before any turn): a malformed batch, or one on anything but a room turn of
- * `/prototype` (bare, or naming the batch's component) without an anchor.
- */
-export function prototypeFeedbackProblem(body: TurnBody): string | null {
-  if (body.prototypeFeedback === undefined) return null;
-  if (!isPrototypeFeedback(body.prototypeFeedback)) return "prototypeFeedback is malformed";
-  const command = parsePrototypeCommand(body.instruction);
-  if (!command || (command.component !== null && command.component !== body.prototypeFeedback.component)) {
-    return "prototypeFeedback goes only with /prototype for its component";
-  }
-  if (body.collab !== true || body.anchor || body.intent) return "prototypeFeedback goes only on a room turn without an anchor";
-  return null;
 }
 
 /** A turn for the Issues view: the Issues agent's, filing the issue it drafted once the user says so. */
@@ -175,16 +165,15 @@ function startIssueTurn(projectName: string, issueNumber: number, body: TurnBody
   return recordTurn({ projectName, conversationId, view: "issue", issueNumber, instruction: scripted.display, frames, reply: scripted.reply });
 }
 
-/** Start a turn: what the mock agent does with the message, scheduled from now. */
-export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
-  if (body.view === "issues") return startIssuesTurn(projectName, body);
-  if (body.view === "issue" && body.issueNumber) return startIssueTurn(projectName, body.issueNumber, body);
+/** Start a turn in a chat (the main chat by default): what the mock agent does with the message, scheduled from now. */
+export function startMockTurn(projectName: string, body: TurnBody, chat: MockChat = { view: "main" }): MockTurn {
+  if (chat.view === "issues") return startIssuesTurn(projectName, body);
+  if (chat.view === "issue" && chat.issueNumber) return startIssueTurn(projectName, chat.issueNumber, body);
   const scope = scopeOfBody(body);
   const turnKey = `t${Date.now().toString(36)}`;
   const prototypeTurn = parsePrototypeCommand(body.instruction)
     ? scriptPrototypeTurn({
         instruction: body.instruction,
-        feedback: body.prototypeFeedback,
         webApps: webApplications(liveDesign(projectName).artifacts),
         doc: projectSpecDoc(projectName, specView(projectName)),
         turnKey,
@@ -198,7 +187,6 @@ export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
       frames: prototypeTurn.frames,
       reply: prototypeTurn.reply,
       ...(prototypeTurn.files ? { prototype: prototypeTurn.files } : {}),
-      ...(body.prototypeFeedback ? { prototypeFeedback: body.prototypeFeedback } : {}),
       ...(prototypeTurn.failure ? { failure: prototypeTurn.failure } : {}),
     });
   }
@@ -262,76 +250,69 @@ function streamOf(turn: MockTurn, from: number): Response {
   return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
 }
 
-function notFound(what: string): Response {
-  return HttpResponse.json<ApiError>({ code: "not_found", message: `${what} not found` }, { status: 404 });
+function problem(status: number, code: string, detail: string): Response {
+  return HttpResponse.json<Problem>(
+    { type: "about:blank", title: detail, status, code, detail },
+    { status, headers: { "Content-Type": "application/problem+json" } },
+  );
 }
 
+const POD = `${aeStudioUrls.designAgent}/v1/projects/:projectName`;
+
 export const conversationHandlers = [
-  http.get("*/api/v1/projects/:projectName/agents/conversations", ({ params, request }): Response => {
+  http.get(`${POD}/conversations/current`, ({ params, request }): Response => {
     const projectName = String(params.projectName);
-    const view = viewOf(new URL(request.url).searchParams.get("view"));
-    const issueNumber = issueNumberOf(request.url);
-    if (view === "issue" && (issueNumber === undefined || !issueThreadOpen(projectName, issueNumber))) return issueClosed();
-    return HttpResponse.json<ProjectConversationList>({
-      conversations: [
-        {
-          conversationId: conversationIdFor(projectName, view, issueNumber),
-          createdAt: "2026-09-29T09:00:00Z",
-          createdBy: "Developer",
-          current: true,
-        },
-      ],
+    const chat = chatOf(new URL(request.url));
+    if (!chat) return problem(400, "invalid_chat", "view and issueNumber name no chat");
+    if (chat.view === "issue" && !issueThreadOpen(projectName, chat.issueNumber!)) return problem(409, "issue_closed", "the issue is closed");
+    return HttpResponse.json<ProjectConversationView>({
+      conversationId: conversationIdFor(projectName, chat.view, chat.issueNumber),
+      createdAt: "2026-09-29T09:00:00Z",
+      createdBy: "Developer",
+      current: true,
     });
   }),
 
-  http.get("*/api/v1/projects/:projectName/agents/:conversationId/messages", ({ params }) =>
-    HttpResponse.json<GetConversationOutputBody>({ messages: historyFor(String(params.conversationId)) }),
+  http.get(`${POD}/conversations/:conversationId/messages`, ({ params }) =>
+    HttpResponse.json<ConversationMessages>({ messages: historyFor(String(params.conversationId)) }),
   ),
 
-  http.post("*/api/v1/projects/:projectName/agents/:conversationId/messages", async ({ params, request }): Promise<Response> => {
+  http.post(`${POD}/conversations/:conversationId/turns`, async ({ params, request }): Promise<Response> => {
     const projectName = String(params.projectName);
     const body = (await request.json()) as TurnBody;
-    if (!body.instruction?.trim()) {
-      return HttpResponse.json<ApiError>({ code: "invalid_request", message: "instruction is required" }, { status: 400 });
-    }
-    const feedbackProblem = prototypeFeedbackProblem(body);
-    if (feedbackProblem) {
-      return HttpResponse.json<ApiError>({ code: "invalid_request", message: feedbackProblem }, { status: 400 });
-    }
-    const view = viewOf(body.view);
-    const issueNumber = view === "issue" ? (body.issueNumber ?? undefined) : undefined;
-    if (view === "issue" && (issueNumber === undefined || !issueThreadOpen(projectName, issueNumber))) {
-      return HttpResponse.json<TurnConflict>({ code: "issue_closed" }, { status: 409 });
-    }
-    if (String(params.conversationId) !== conversationIdFor(projectName, view, issueNumber)) {
+    if (!body.instruction?.trim()) return problem(400, "invalid_turn", "instruction is required");
+    // The thread names its chat, as the design agent knows it.
+    const chat = chatOfConversation(projectName, String(params.conversationId));
+    if (!chat) {
       return HttpResponse.json<TurnConflict>({ code: "conversation_rotated" }, { status: 409 });
     }
-    const running = runningTurn(projectName, view, issueNumber);
+    if (chat.view === "issue" && !issueThreadOpen(projectName, chat.issueNumber!)) {
+      return HttpResponse.json<TurnConflict>({ code: "issue_closed" }, { status: 409 });
+    }
+    const running = runningTurn(projectName, chat.view, chat.issueNumber);
     if (running) {
       return HttpResponse.json<TurnConflict>({ code: "turn_in_progress", activeTurnId: running.turnId }, { status: 409 });
     }
-    const turn = startMockTurn(projectName, body);
+    const turn = startMockTurn(projectName, body, chat);
     return HttpResponse.json<TurnOutputBody>({ turnId: turn.turnId }, { status: 202 });
   }),
 
-  http.get("*/api/v1/projects/:projectName/turns/active", ({ params, request }): Response => {
-    const running = runningTurn(
-      String(params.projectName),
-      viewOf(new URL(request.url).searchParams.get("view")),
-      issueNumberOf(request.url),
-    );
+  http.get(`${POD}/turns/active`, ({ params, request }): Response => {
+    const chat = chatOf(new URL(request.url));
+    if (!chat) return problem(400, "invalid_chat", "view and issueNumber name no chat");
+    const running = runningTurn(String(params.projectName), chat.view, chat.issueNumber);
     return running ? HttpResponse.json<TurnStatus>(statusOf(running)) : new HttpResponse(null, { status: 204 });
   }),
 
-  http.get("*/api/v1/projects/:projectName/turns/:turnId/stream", ({ params, request }): Response => {
+  http.get(`${POD}/turns/:turnId/stream`, ({ params, request }): Response => {
     const turn = findTurn(String(params.turnId));
-    if (!turn) return notFound("Turn");
+    if (!turn) return problem(404, "turn_unknown", "Turn not found");
     const from = Number(new URL(request.url).searchParams.get("from") ?? 0) || 0;
     return streamOf(turn, from);
   }),
 
-  http.get("*/api/v1/projects/:projectName/turns/:turnId", ({ params }): Response => {
+  http.get(`${POD}/turns/:turnId`, ({ params }): Response => {
     const turn = findTurn(String(params.turnId));
-    return turn ? HttpResponse.json<TurnStatus>(statusOf(turn)) : notFound("Turn");
+    return turn ? HttpResponse.json<TurnStatus>(statusOf(turn)) : problem(404, "turn_unknown", "Turn not found");
   }),
 ];

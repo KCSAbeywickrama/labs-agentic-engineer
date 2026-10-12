@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
@@ -35,8 +36,32 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
+
+// specUnavailableReason answers why a git read failed when the cause is the
+// org's AE Studio being unable to answer for its repositories: GitHub is not
+// connected, the pod is not serving, or aep-api's own client is refused.
+// The poll degrades on these (spec.availability = "unavailable" with this
+// reason, build and deploy intact) rather than failing, because they are the
+// org's state, not a fault in this read, and the delivery stages still have
+// true answers. "" for every other error, which still fails the poll.
+//
+// The reasons are named after the edge's codes for the same sentinels, so the
+// console speaks of one cause in one word; this maps a sentinel to a status
+// fact, not to HTTP (the edge's classifier stays the only HTTP map).
+func specUnavailableReason(err error) gen.SpecStageUnavailableReason {
+	switch {
+	case errors.Is(err, sourcecontrol.ErrAEStudioAbsent):
+		return gen.SpecStageUnavailableReasonGithubNotConnected
+	case errors.Is(err, sourcecontrol.ErrAEStudioUnavailable):
+		return gen.SpecStageUnavailableReasonAeStudioUnavailable
+	case errors.Is(err, sourcecontrol.ErrAEStudioMisconfigured):
+		return gen.SpecStageUnavailableReasonAeStudioMisconfigured
+	}
+	return ""
+}
 
 // Stage status vocabularies (the contract enums).
 const (
@@ -86,47 +111,113 @@ type bindingsReader interface {
 // it lands, so the busiest moment in the journey is precisely the one git has
 // no record of.
 type specTurnRows interface {
-	Newest(ctx context.Context, orgID, projectID, useCase string) (*spec.AgentTurn, error)
-	// NewestCompletedFlow finds the newest successful run of one flow — the
-	// staleness check (#575) needs the last DESIGN run, so it can read the
-	// requirements as that run saw them.
-	NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*spec.AgentTurn, error)
+	Newest(ctx context.Context, orgID, projectID string) (*spec.AgentTurn, error)
+	// CompletedFlows lists the newest successful runs of the flows, the
+	// latest-finished first — the staleness check (#575) needs the last
+	// DESIGN run and the Address comments runs since, so it can read the
+	// requirements as they left them.
+	CompletedFlows(ctx context.Context, orgID, projectID string, flows []string, limit int) ([]spec.AgentTurn, error)
 }
 
-// designFlow is the `/<skill>` token a design re-derivation runs under. Only a
-// full re-derivation counts as reconciling the design with the requirements: a
-// targeted edit to one document leaves the SET inconsistent, so clearing the
-// staleness flag on one would drop the warning while the problem stood.
-const designFlow = "design"
+// designRunsWalked bounds the design runs the staleness check reads: the last
+// design run and the Address comments runs after it. A project with no design
+// run among them reads as not behind, like one that has never designed.
+const designRunsWalked = 10
 
 // designOutdated answers whether the requirements have moved since the design
 // was last derived from them.
 //
 // nowFingerprint is the requirements as they stand; the baseline is the same
-// reduction taken at the commit the newest successful design run read. No
-// design run on record means there is nothing for the design to be behind —
-// including the ordinary case of a project that has never designed at all.
+// reduction taken at the commit the newest successful design run LEFT (its
+// EndRef, L30; its BaseRef for a run that recorded none), so the run's own
+// requirement edits are not a move. An Address comments run after it moves the
+// baseline to where it left the requirements, but only when it started from
+// the baseline: its own edits are not a move either, while an edit made before
+// it still is. No design run on record means there is nothing for the design
+// to be behind — including the ordinary case of a project that has never
+// designed at all.
 //
 // A baseline that cannot be read is reported as an ERROR rather than as
 // "unchanged". The two failures are not symmetric: a spurious warning costs one
 // re-derivation, while a swallowed one lets the coding agents implement a
-// design the user has already changed their mind about.
+// design the user has already changed their mind about. The exception is a
+// baseline commit the pod refuses or no longer has (baseCommitRefused): no
+// retry or user action can read it, so, as the save path does, the fact is
+// skipped with a warning instead of failing every poll.
 func (s *Service) designOutdated(ctx context.Context, orgName, projectName, nowFingerprint string) (bool, error) {
 	if s.specTurns == nil {
 		return false, nil
 	}
-	lastDesign, err := s.specTurns.NewestCompletedFlow(ctx, orgName, projectName, designFlow)
+	// Only a design run reconciles the design with the requirements as a
+	// whole: an Address comments run only answers for its own edits.
+	runs, err := s.specTurns.CompletedFlows(ctx, orgName, projectName, spec.DesignRunFlows, designRunsWalked)
 	if err != nil {
-		return false, fmt.Errorf("newest design turn: %w", err)
+		return false, fmt.Errorf("newest design runs: %w", err)
 	}
-	if lastDesign == nil || lastDesign.BaseRef == "" {
+	last := slices.IndexFunc(runs, func(t spec.AgentTurn) bool { return t.Flow != spec.FlowAddressComments })
+	if last < 0 {
 		return false, nil
 	}
-	was, err := s.artifactSvc.RequirementsFingerprintAt(ctx, orgName, projectName, lastDesign.BaseRef)
-	if err != nil {
-		return false, fmt.Errorf("requirements at the last design run's base: %w", err)
+	design := runs[last]
+	at := design.EndRef
+	if at == "" {
+		at = design.BaseRef
 	}
-	return was != nowFingerprint, nil
+	baseline, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, at)
+	if !ok || err != nil {
+		return false, err
+	}
+	// The Address comments runs since, oldest first.
+	for i := last - 1; i >= 0; i-- {
+		run := runs[i]
+		if run.EndRef == "" {
+			continue
+		}
+		from, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, run.BaseRef)
+		if err != nil {
+			return false, err
+		}
+		if !ok || from != baseline {
+			continue
+		}
+		to, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, run.EndRef)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			baseline = to
+		}
+	}
+	return baseline != nowFingerprint, nil
+}
+
+// requirementsFingerprintAt is the requirements' fingerprint at a design run's
+// commit; ok is false for a commit the pod refuses or no longer has
+// (baseCommitRefused), which is skipped with a warning.
+func (s *Service) requirementsFingerprintAt(ctx context.Context, orgName, projectName, at string) (string, bool, error) {
+	if at == "" {
+		return "", false, nil
+	}
+	fp, err := s.artifactSvc.RequirementsFingerprintAt(ctx, orgName, projectName, at)
+	if err == nil {
+		return fp, true, nil
+	}
+	if baseCommitRefused(err) {
+		slog.WarnContext(ctx, "project status: a design run's commit is unreadable; staleness unchecked",
+			"org", orgName, "project", projectName, "commit", at, "error", err)
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("requirements at a design run's commit: %w", err)
+}
+
+// baseCommitRefused is a read of the design baseline that names a commit the
+// pod does not have (ErrRefNotFound) or whose ref it refuses outright
+// (ErrRefInvalid: its request validator's 400 on the `at`). Every other
+// failure, permanent ones included (a revoked GitHub token, a missing
+// repository, AE Studio not serving), is not a verdict on the commit and
+// reaches the caller.
+func baseCommitRefused(err error) bool {
+	return errors.Is(err, sourcecontrol.ErrRefNotFound) || errors.Is(err, sourcecontrol.ErrRefInvalid)
 }
 
 // SetStageSources wires the build/deploy stage inputs at the composition
@@ -161,28 +252,28 @@ func (s *Service) writeTarget(ctx context.Context, orgName, projectName string) 
 	return s.writeTargets.Resolve(ctx, orgName, projectName)
 }
 
-// Spec-stage agent activity (the spec.agent contract enum).
+// Spec-stage agent history (the spec.agent contract enum). Whether a turn is
+// running right now is the org's AE Studio pod's to say (the console reads
+// its active turn); the ledger holds finished turns only.
 const (
 	specAgentIdle         = ""
-	specAgentWorking      = "working"
 	specAgentFailed       = "failed"
 	specAgentNeverStarted = "never-started"
 )
 
-// specAgentState folds the project's newest turn row into the contract enum.
+// specAgentState folds the project's newest finished turn into the contract
+// enum.
 //
 // A COMPLETED turn reads as idle, not as "done": whatever it produced is in
 // git, so exists/version/dirty already describe it, and a second vocabulary
 // for the same fact would let the two disagree. Only the states git cannot see
-// survive — a turn in flight, a turn that died leaving nothing behind, and no
-// turn at all.
+// survive — a turn that died leaving nothing behind, and no turn at all.
 //
 // NO ROW is its own state rather than more idle. The two look identical in git
 // and need opposite handling: a project that has never run a turn needs a way
 // to begin, while one merely between turns is mid-interview and must not be
-// offered a restart that would supersede it. Collapsing them left a project
-// whose dispatch never landed showing a spinner for work that was never
-// coming, with nothing to click.
+// offered a restart that would supersede it.
+//
 // specAgentOf guards the fold on the source being WIRED. Without it an
 // unwired service would report `never-started` — a positive claim about turn
 // history it has no way to make — where the documented degradation is the
@@ -194,27 +285,11 @@ func specAgentOf(source specTurnRows, newest *spec.AgentTurn) string {
 	return specAgentState(newest)
 }
 
-// runningFlowOf reports WHICH work is in flight, for the spec rail to pulse the
-// right section (#575).
-//
-// Only a RUNNING turn has one. A finished turn's flow says nothing about what is
-// happening now, and reporting it would leave the rail pulsing whatever the last
-// run happened to be long after it ended.
-func runningFlowOf(newest *spec.AgentTurn) string {
-	if newest == nil || newest.Status != spec.TurnStatusRunning {
-		return ""
-	}
-	return newest.Flow
-}
-
 func specAgentState(newest *spec.AgentTurn) string {
-	if newest == nil {
+	switch {
+	case newest == nil:
 		return specAgentNeverStarted
-	}
-	switch newest.Status {
-	case spec.TurnStatusRunning:
-		return specAgentWorking
-	case spec.TurnStatusFailed:
+	case newest.Status == spec.TurnStatusFailed:
 		return specAgentFailed
 	default:
 		return specAgentIdle
@@ -240,12 +315,14 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		newestTurn  *spec.AgentTurn
 		deployVer   string
 		deployTotal int64
+		// unavailable is why the spec facts could not be read ("" when they were).
+		unavailable gen.SpecStageUnavailableReason
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	if s.specTurns != nil {
 		g.Go(func() error {
 			var err error
-			if newestTurn, err = s.specTurns.Newest(gctx, orgName, projectName, spec.UseCaseGeneral); err != nil {
+			if newestTurn, err = s.specTurns.Newest(gctx, orgName, projectName); err != nil {
 				return fmt.Errorf("newest agent turn: %w", err)
 			}
 			return nil
@@ -253,7 +330,14 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	}
 	g.Go(func() error {
 		var err error
-		if snap, err = s.artifactSvc.StatusSnapshot(gctx, orgName, projectName); err != nil {
+		snap, err = s.artifactSvc.StatusSnapshot(gctx, orgName, projectName)
+		if unavailable = specUnavailableReason(err); unavailable != "" {
+			// nil snap: the spec facts are unavailable (below).
+			snap = nil
+			return nil
+		}
+		switch {
+		case err != nil:
 			return fmt.Errorf("git snapshot: %w", err)
 		}
 		return nil
@@ -289,6 +373,10 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 			// strict join is for outages. Degrade to an unknown denominator
 			// instead of bricking every poll.
 			return nil
+		case specUnavailableReason(err) != "":
+			// AE Studio cannot answer for the repo: the denominator is
+			// unknown, the deploy stage's own facts still stand.
+			return nil
 		case err != nil:
 			return fmt.Errorf("component count at %s: %w", deployVer, err)
 		}
@@ -310,25 +398,42 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// retired per-call reads — minus their per-poll origin fetches.
 	// Staleness is checked only when a design exists — nothing can be behind
 	// the requirements before it has been written, and this keeps the extra
-	// tree read off every pre-design poll.
+	// tree read off every pre-design poll. The baseline read shares the
+	// snapshot's degrade: AE Studio failing either leaves the spec facts
+	// unavailable.
 	outdated := false
-	if snap.HasDesign {
+	if snap != nil && snap.HasDesign {
 		stale, err := s.designOutdated(ctx, orgName, projectName, snap.RequirementsFingerprint)
-		if err != nil {
+		switch {
+		case specUnavailableReason(err) != "":
+			snap, unavailable = nil, specUnavailableReason(err)
+		case err != nil:
 			return err
+		default:
+			outdated = stale
 		}
-		outdated = stale
 	}
-	status.Spec = gen.SpecStage{
-		Exists:         snap.HasSpec,
-		Version:        snap.SpecVersion,
-		Dirty:          snap.SpecDirty,
-		Design:         snap.HasDesign,
-		Agent:          specAgentOf(s.specTurns, newestTurn),
-		AgentFlow:      runningFlowOf(newestTurn),
-		DesignOutdated: outdated,
+	agent := specAgentOf(s.specTurns, newestTurn)
+	if snap == nil {
+		slog.WarnContext(ctx, "project status: AE Studio cannot answer for the repo; spec facts unavailable",
+			"org", orgName, "project", projectName, "reason", unavailable)
+		status.Spec = gen.SpecStage{
+			Agent:             agent,
+			Availability:      gen.SpecStageAvailabilityUnavailable,
+			UnavailableReason: unavailable,
+		}
+	} else {
+		status.Spec = gen.SpecStage{
+			Exists:         snap.HasSpec,
+			Version:        snap.SpecVersion,
+			Dirty:          snap.SpecDirty,
+			Design:         snap.HasDesign,
+			Agent:          agent,
+			DesignOutdated: outdated,
+			Availability:   gen.SpecStageAvailabilityAvailable,
+		}
+		applyFlatArtifactFields(status, snap)
 	}
-	applyFlatArtifactFields(status, snap)
 
 	// Build stage: the newest DEV RUN (ListByProject is newest-first).
 	//
@@ -356,8 +461,9 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		// landed and the failure already rides deploy.validation below. Without this
 		// the overview says "build failed" while the validation chip contradicts it.
 		// Covers every reason the phase can settle under, not just a red suite — an
-		// unreported run is equally not a build failure.
-		if delivery.IsValidationTerminalReason(latest.TerminalReason) {
+		// unreported run is equally not a build failure (delivery.EndedInValidation;
+		// the version ledger applies it to validation runs).
+		if delivery.EndedInValidation(latest.Kind, latest.TerminalReason) {
 			status.Build.Status = buildSucceeded
 		}
 	}

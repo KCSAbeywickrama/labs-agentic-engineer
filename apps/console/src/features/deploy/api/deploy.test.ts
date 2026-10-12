@@ -38,17 +38,17 @@ describe("designDependencies", () => {
   });
 
   it("reads no design as no components", async () => {
-    get.mockResolvedValueOnce({ data: undefined, error: { code: "not_found", message: "design not found" }, response: { status: 404 } });
+    get.mockResolvedValueOnce({ data: undefined, error: { code: "not_found", message: "design not found" }, response: new Response(null, { status: 404 }) });
     await expect(designDependencies("shop")).resolves.toEqual([]);
   });
 
   it("fails on a 404 that is not the design's absence", async () => {
-    get.mockResolvedValueOnce({ data: undefined, error: { code: "route_not_found", message: "no such route" }, response: { status: 404 } });
+    get.mockResolvedValueOnce({ data: undefined, error: { code: "route_not_found", message: "no such route" }, response: new Response(null, { status: 404 }) });
     await expect(designDependencies("shop")).rejects.toThrow("no such route");
   });
 
   it("fails on any other refusal", async () => {
-    get.mockResolvedValueOnce({ data: undefined, error: { code: "internal", message: "failed to read design dependencies" }, response: { status: 500 } });
+    get.mockResolvedValueOnce({ data: undefined, error: { code: "internal", message: "failed to read design dependencies" }, response: new Response(null, { status: 500 }) });
     await expect(designDependencies("shop")).rejects.toThrow("failed to read design dependencies");
   });
 });

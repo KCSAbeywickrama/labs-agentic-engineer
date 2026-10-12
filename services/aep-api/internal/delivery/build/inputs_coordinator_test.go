@@ -82,12 +82,11 @@ func (a *recordingAuth) DerivePlatformResourceFactsAtHead(context.Context, strin
 // ----- BuildProvisionInputs --------------------------------------------------
 
 func TestBuildProvisionInputs_DerivesUnsetExternalConfigFromDesign(t *testing.T) {
-	c := &InputsCoordinator{design: fakeDesign{comps: stripeExternal()}}
-	pins, fails, err := c.BuildProvisionInputs(ctx, "acme", "shop", []BuildInputItem{
+	c := &InputsCoordinator{design: fakeDesign{comps: stripeExternal()}, status: fakeStatus{}}
+	pins, err := c.BuildProvisionInputs(ctx, "acme", "shop", []BuildInputItem{
 		{Component: "o", Dependency: "stripe", Kind: "external-config",
 			Values: []ConfigValue{{Key: "STRIPE_KEY", Value: "sk_live"}, {Key: "STRIPE_ORG", Value: "org_1"}}}})
 	require.NoError(t, err)
-	require.Empty(t, fails)
 	require.Len(t, pins, 1)
 	require.Equal(t, "external-config", pins[0].Kind)
 	require.Equal(t, "stripe", pins[0].Dependency)
@@ -95,23 +94,100 @@ func TestBuildProvisionInputs_DerivesUnsetExternalConfigFromDesign(t *testing.T)
 	require.Empty(t, pins[0].SecretRefByEnv)
 }
 
-// A platform-resource input carries its params + approval through verbatim and
-// never touches the secret stager.
-func TestBuildProvisionInputs_PlatformResourcePassThrough(t *testing.T) {
-	c := &InputsCoordinator{design: fakeDesign{comps: nil}}
-	pins, fails, err := c.BuildProvisionInputs(ctx, "acme", "shop", []BuildInputItem{
-		{Component: "api", Dependency: "orders-db", Kind: "platform-resource",
-			Parameters: map[string]any{"instances": 2, "storage": "10Gi"}, Approved: true}})
+// readyByName reports a dependency as already provisioned or in flight when
+// its name is in the set — the preflight "already handled" bool.
+type readyByName map[string]bool
+
+func (r readyByName) Ready(_ context.Context, _, _, dep string) (bool, error) {
+	return r[dep], nil
+}
+
+// notesApp is a service and a web app sharing one Thunder sign-in client, with
+// a CNPG database on the service.
+func notesApp() []spec.DesignComponent {
+	return []spec.DesignComponent{
+		{Name: "api", ComponentType: spec.ComponentTypeService, Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindPlatformResource, Name: "notes-db", ResourceType: "postgres",
+				Parameters: map[string]any{"instances": 1, "storage": "1Gi"}},
+			{Kind: spec.DependencyKindPlatformResource, Name: "user-auth", ResourceType: "thunder-app"},
+		}},
+		{Name: "web", ComponentType: spec.ComponentTypeWebApplication, Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindPlatformResource, Name: "user-auth", ResourceType: "thunder-app"},
+		}},
+	}
+}
+
+// The console sends no inputs: the click is the consent. Every platform
+// resource in the design becomes one approved provision carrying the
+// design-authored parameters — the same item preflight reports — and a
+// resource two components declare is provisioned once.
+func TestBuildProvisionInputs_DerivesApprovedPlatformResourcesFromDesign(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: notesApp()}, status: fakeStatus{}}
+	pins, err := c.BuildProvisionInputs(ctx, "acme", "notes", nil)
 	require.NoError(t, err)
-	require.Empty(t, fails)
-	require.Len(t, pins, 1)
-	require.Equal(t, map[string]any{"instances": 2, "storage": "10Gi"}, pins[0].Parameters)
+	require.Len(t, pins, 2)
+	require.Equal(t, "platform-resource", pins[0].Kind)
+	require.Equal(t, "api", pins[0].Component)
+	require.Equal(t, "notes-db", pins[0].Dependency)
+	require.Equal(t, map[string]any{"instances": 1, "storage": "1Gi"}, pins[0].Parameters)
 	require.True(t, pins[0].Approved)
+	require.Equal(t, "user-auth", pins[1].Dependency)
+	require.True(t, pins[1].Approved)
+}
+
+// A resource already provisioned or in flight is left out, exactly as
+// preflight leaves it out, so a later version does not re-provision it.
+func TestBuildProvisionInputs_SkipsAlreadyProvisionedPlatformResource(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: notesApp()}, status: readyByName{"notes-db": true}}
+	pins, err := c.BuildProvisionInputs(ctx, "acme", "notes", nil)
+	require.NoError(t, err)
+	require.Len(t, pins, 1)
+	require.Equal(t, "user-auth", pins[0].Dependency)
+}
+
+// The design is authoritative: a request entry for the same resource, even an
+// unapproved one with other parameters, neither duplicates nor overrides it.
+func TestBuildProvisionInputs_RequestPlatformResourceDoesNotDuplicateOrOverride(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: notesApp()}, status: readyByName{"user-auth": true}}
+	pins, err := c.BuildProvisionInputs(ctx, "acme", "notes", []BuildInputItem{
+		{Component: "api", Dependency: "notes-db", Kind: "platform-resource",
+			Parameters: map[string]any{"instances": 3}, Approved: false}})
+	require.NoError(t, err)
+	require.Len(t, pins, 1)
+	require.Equal(t, "notes-db", pins[0].Dependency)
+	require.Equal(t, map[string]any{"instances": 1, "storage": "1Gi"}, pins[0].Parameters)
+	require.True(t, pins[0].Approved)
+}
+
+// An org-service entry carries the resolution drawer's approval through verbatim.
+func TestBuildProvisionInputs_OrgServicePassThrough(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: nil}, status: fakeStatus{}}
+	pins, err := c.BuildProvisionInputs(ctx, "acme", "shop", []BuildInputItem{
+		{Component: "api", Dependency: "billing", Kind: "org-service", Approved: true}})
+	require.NoError(t, err)
+	require.Len(t, pins, 1)
+	require.Equal(t, "org-service", pins[0].Kind)
+	require.Equal(t, "billing", pins[0].Dependency)
+	require.True(t, pins[0].Approved)
+}
+
+// A status read failure refuses the payload rather than guessing: provisioning
+// a resource that already exists, or skipping one that does not, are both wrong.
+func TestBuildProvisionInputs_StatusErrorReturnsError(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: notesApp()}, status: fakeStatus{err: errors.New("oc down")}}
+	_, err := c.BuildProvisionInputs(ctx, "acme", "notes", nil)
+	require.Error(t, err)
+}
+
+func TestBuildProvisionInputs_MissingStatusReaderReturnsError(t *testing.T) {
+	c := &InputsCoordinator{design: fakeDesign{comps: notesApp()}}
+	_, err := c.BuildProvisionInputs(ctx, "acme", "notes", nil)
+	require.Error(t, err)
 }
 
 func TestBuildProvisionInputs_MissingDesignReaderReturnsError(t *testing.T) {
 	c := &InputsCoordinator{}
-	_, _, err := c.BuildProvisionInputs(ctx, "acme", "shop", nil)
+	_, err := c.BuildProvisionInputs(ctx, "acme", "shop", nil)
 	require.Error(t, err)
 }
 

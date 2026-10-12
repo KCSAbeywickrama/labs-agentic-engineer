@@ -77,6 +77,7 @@ vi.mock("../../projects/api/queries", () => ({
   projectLabel: (p: { name: string }) => p.name,
 }));
 vi.mock("../../prototype/usePrototypes", () => ({ usePrototypes: () => undefined }));
+vi.mock("../../design/useDesignQuestions", () => ({ useDesignQuestions: () => [] }));
 vi.mock("../useStartInterview", () => ({ useStartInterview: () => ({ start: vi.fn(), ready: true, waiting: false }) }));
 const navigate = vi.fn(async (): Promise<void> => undefined);
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));

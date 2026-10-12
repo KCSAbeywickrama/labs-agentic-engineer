@@ -1,14 +1,13 @@
-title Onboarding Tracker
+title New Hire Onboarding Tracker
 
-component onboarding-webapp as "Onboarding Tracker" web-application
+component onboarding-webapp as "Onboarding Web App" web-application
 component onboarding-api as "Onboarding API" service
-component onboarding-db as "Onboarding Database" database
 
-east onboarding-auth as "Thunder Auth" identity-server
+east user-auth as "Thunder Auth" identity-server
 
-west -> onboarding-webapp
+north -> onboarding-webapp
+north -> onboarding-api
 
 onboarding-webapp -> onboarding-api
-onboarding-webapp -> onboarding-auth
-onboarding-api -> onboarding-auth
-onboarding-api -> onboarding-db
+onboarding-webapp -> user-auth
+onboarding-api -> user-auth

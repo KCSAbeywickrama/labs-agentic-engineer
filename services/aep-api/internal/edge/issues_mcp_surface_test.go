@@ -18,76 +18,78 @@ package edge
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/issues"
 )
 
-// The Issues agent's and an issue agent's tools are mounted behind their own
-// verifier: an issues or issue token opens them, a discovery token does not,
-// and neither issues-audience token opens the discovery surface.
-func TestIssuesMCPSurface_MountedBehindItsOwnAudience(t *testing.T) {
-	mgr, err := auth.NewTaskTokenManager(auth.TaskTokenConfig{
-		PrivateKey: string(encodePKCS1(t, mustGenerateRSAKey(t))),
-		Issuer:     "aep-bff", Audience: "git-service", TTL: time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewTaskTokenManager: %v", err)
-	}
-	// tools/list never reaches the issue service; any other call would panic.
-	var svc struct{ sourcecontrol.IssueService }
-	srv := httptest.NewServer(NewHandler(AppParams{
-		Config:    config.Config{},
-		Deps:      Deps{TaskTokens: mgr},
-		IssuesMCP: issues.NewUserMCPHandler(svc, issues.IssueAgentPorts{}),
-	}))
+// scopedIssues answers GetIssue with the scope the gate bound, so a test can
+// read which org, project and issue a call reached.
+type scopedIssues struct {
+	sourcecontrol.IssueService
+	got *auth.IssuesMCPScope
+}
+
+func (s scopedIssues) GetIssue(ctx context.Context, org, project string, n int) (*sourcecontrol.IssueInfo, error) {
+	*s.got = auth.IssuesMCPScope{OrgID: org, ProjectID: project, IssueNumber: n}
+	return &sourcecontrol.IssueInfo{Number: n, State: "open"}, nil
+}
+
+func (s scopedIssues) ListIssueComments(context.Context, string, string, int, int) ([]sourcecontrol.IssueComment, error) {
+	return nil, nil
+}
+
+// The Issues and issue chats' tools are mounted under ae-studio/ behind the
+// pod's credential: a recorded ae-studio-<org> token opens them, with the org
+// it is recorded for and the project and issue of the path; a publisher token
+// does not.
+func TestIssuesMCPSurface_MountedBehindThePodsCredential(t *testing.T) {
+	stack := newInternalStack(t)
+	var got auth.IssuesMCPScope
+	deps := stack.deps
+	deps.IssuesMCP = issues.NewUserMCPHandler(scopedIssues{got: &got}, issues.IssueAgentPorts{})
+	srv := httptest.NewServer(NewHandler(AppParams{InternalDeps: deps}))
 	t.Cleanup(srv.Close)
 
-	issuesTok, err := mgr.IssueIssuesMCPToken("acme", "acme-expenses")
-	if err != nil {
-		t.Fatal(err)
-	}
-	issueTok, err := mgr.IssueIssueMCPToken("acme", "acme-expenses", 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	discoveryTok, err := mgr.IssueMCPToken("acme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	post := func(path, bearer string) int {
+	post := func(path, bearer, body string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, srv.URL+path,
-			bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+path, bytes.NewReader([]byte(body)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("POST %s: %v", path, err)
 		}
-		resp.Body.Close()
-		return resp.StatusCode
+		defer resp.Body.Close()
+		var out bytes.Buffer
+		_, _ = out.ReadFrom(resp.Body)
+		return resp.StatusCode, out.String()
 	}
+	const list = `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+	studio := stack.mintStudio("org-acme")
 
-	if got := post("/internal/v1/issues/mcp", issuesTok); got != http.StatusOK {
-		t.Errorf("issues token on issues surface = %d, want 200", got)
+	status, body := post("/internal/v1/ae-studio/projects/expenses/issues/mcp", studio, list)
+	if status != http.StatusOK || !json.Valid([]byte(body)) || !bytes.Contains([]byte(body), []byte("create_issue")) {
+		t.Fatalf("Issues surface = %d %s", status, body)
 	}
-	if got := post("/internal/v1/issues/mcp", issueTok); got != http.StatusOK {
-		t.Errorf("issue token on issues surface = %d, want 200", got)
+	status, body = post("/internal/v1/ae-studio/projects/expenses/issues/7/mcp", studio,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_issue"}}`)
+	if status != http.StatusOK {
+		t.Fatalf("issue surface = %d %s", status, body)
 	}
-	if got := post("/internal/v1/mcp", issueTok); got != http.StatusUnauthorized {
-		t.Errorf("issue token on discovery surface = %d, want 401", got)
+	if want := (auth.IssuesMCPScope{OrgID: "org-acme", ProjectID: "expenses", IssueNumber: 7}); got != want {
+		t.Fatalf("scope = %+v, want %+v", got, want)
 	}
-	if got := post("/internal/v1/issues/mcp", discoveryTok); got != http.StatusUnauthorized {
-		t.Errorf("discovery token on issues surface = %d, want 401", got)
+	if status, _ := post("/internal/v1/ae-studio/projects/expenses/issues/mcp", stack.mint("org-acme"), list); status != http.StatusUnauthorized {
+		t.Fatalf("publisher token on the Issues surface = %d, want 401", status)
 	}
-	if got := post("/internal/v1/mcp", issuesTok); got != http.StatusUnauthorized {
-		t.Errorf("issues token on discovery surface = %d, want 401", got)
+	if status, _ := post("/internal/v1/ae-studio/projects/expenses/issues/0/mcp", studio, list); status != http.StatusNotFound {
+		t.Fatalf("issue 0 = %d, want 404", status)
 	}
 }

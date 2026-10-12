@@ -8,11 +8,17 @@ serves only what the documents cannot say.
 ## The room
 
 `features/spec/collab/specRoom.ts`: one Hocuspocus room per project
-(`spec-<org>-<project>`) for the whole app, counted by its users and closed a
-few seconds after the last lets go. Its lifecycle is the old console's
-`useCollabSpec` (rejoin fresh after a drop, back off, latch on a refused
-bearer). Files are keyed by their repo paths (`specs/requirements/prd.md`).
-`useSpecDoc` returns its doc once synced; a build flushes it first.
+(`spec-<org>-<project>`) on the org's AE Studio Room (`<collab>/v1/rooms`,
+from `GET /ae-studio`), for the whole app, counted by its users and closed a
+few seconds after the last lets go. Its lifecycle is the classic console's
+`useCollabSpec` (rejoin fresh after a drop, back off) plus what AE Studio added
+to it: Hocuspocus token sync (`sendToken()`, in place of the classic
+stateless `{type:"token"}` push), and renew once and rejoin when the Room drops
+the bearer, where the classic console stayed offline (console
+[ADR-0004](decisions/ADR-0004-the-console-calls-the-orgs-ae-studio-directly.md)).
+Files are keyed by their repo paths (`specs/requirements/prd.md`).
+`useSpecDoc` returns its doc once synced; a build flushes it first, and a save
+with warnings shows *Saved with warnings* on the spec.
 
 ## The spec
 
@@ -23,12 +29,23 @@ from `GET /spec/state`; documents' coverage from `sources/*.md`
 index, design work — is derived from that (`model/workspace.ts`,
 `designWork.ts`). Stage "Interviewing" is the chat's running `/interview`.
 
+The spec card's header holds its step forward (`SpecActions`,
+`model/specActions.ts`, D07 rule 6): while a feature is a stub, Interview
+<next stub> is the primary and Design is secondary; once every feature is
+interviewed, Design is the primary while something waits to be designed;
+before any is interviewed, Design is disabled with the reason. A stub's own
+page (Start interview) and a blocking question's page (Answer) keep their own
+primary.
+
 ## The design
 
 `useDesignModel` (`features/design/useDesignModel.ts`): the catalog from the
 room's design files (`model/catalog.ts`), dependencies from the build
-preflight, the running design from the chat. Commenting is mock-only
-(`DesignModel.commenting`) until it ships.
+preflight, the running design-review turn from the chat (`/design`, or
+`/address-comments`). The Design card's rail and its review are read from the
+room too: the files (`model/designFiles.ts`) and `specs/design/review.json`
+(`useDesignReview`), which the card writes back through the room's doc; see
+[design-card.md](design-card.md).
 
 ## Builds
 
@@ -39,6 +56,6 @@ standing.
 
 ## Mock mode
 
-`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files and the
-mock's approved design review; the agent's writes are applied to the local doc
-from the turn's stream.
+`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files, and the
+mock's design model; the agent's writes, the design's files among them, are
+applied to the local doc from the turn's stream.

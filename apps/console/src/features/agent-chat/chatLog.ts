@@ -30,7 +30,7 @@ import {
 } from "@aep/agent-stream";
 import { parseDesignCommand, parseInterviewCommand, parsePrototypeCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { ConversationMessage } from "./api/conversation";
-import { wireScope, type PrototypeFeedback, type WireScope } from "./turnScope";
+import { wireScope, type WireScope } from "./turnScope";
 import { parseQuestionsInput } from "./questionCards";
 
 // The project conversation as the chat shows it: a list of items, and the
@@ -38,12 +38,14 @@ import { parseQuestionsInput } from "./questionCards";
 // talks to the server or to React, so the chat store's rules are tested on
 // plain arrays.
 
-/** What a note offers next: open a version on the Builds card, interview a feature, review a prototype, or go back to Issues. */
+/** What a note offers next: open a version on the Builds card, interview a feature, review a prototype, answer the design's questions, or go back to Issues. */
 export type NoteAction =
   | { kind: "open-build"; label: string; version: string }
   | { kind: "interview"; label: string; featureId: string }
-  /** Review a prototype: one component's, or the Prototype tab when the turn made several. */
+  /** Review a prototype: one component's item on the Design card, or the card when the turn made several. */
   | { kind: "open-prototype"; label: string; component: string | null }
+  /** The Design card, where its questions are answered. */
+  | { kind: "open-design"; label: string }
   /** Go back to the Issues page, from the main chat's summary of the Issues chat. */
   | { kind: "open-issues"; label: string };
 
@@ -55,12 +57,6 @@ export type ChatItem =
       text: string;
       /** Who sent it, when that is not the signed-in user or not known. */
       author?: string;
-      /**
-       * The prototype review the message sent: the wire text is only the
-       * command, so the row reads as these requests. The history carries it
-       * (the turn journals it), so a reload and a teammate read the same.
-       */
-      prototypeFeedback?: PrototypeFeedback;
       /**
        * The scope the message was sent with, where known (sent from here, or
        * read back from the history). A question its turn asks is answered in
@@ -404,6 +400,9 @@ function failedToolCalls(history: ConversationMessage[]): Set<string> {
   return ids;
 }
 
+/** The turn id of an agent row read back from the history, which records none. */
+export const HISTORY_TURN = "history";
+
 /**
  * The server's history as chat items, in order: user rows, the agent's prose,
  * a line for each file it wrote, a card for each question it asked (so a
@@ -428,7 +427,6 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
         text,
         state: "sent",
         ...(m.author ? { author: m.author.displayName } : {}),
-        ...(m.prototypeFeedback ? { prototypeFeedback: m.prototypeFeedback } : {}),
         scope: wireScope(m.scope),
       });
       continue;
@@ -447,7 +445,7 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
     // Prose and tool calls in the order the agent made them.
     let prose = "";
     const flush = () => {
-      if (prose.trim()) out.push({ kind: "agent", id: `h${out.length}`, turnId: "history", text: prose.trim() });
+      if (prose.trim()) out.push({ kind: "agent", id: `h${out.length}`, turnId: HISTORY_TURN, text: prose.trim() });
       prose = "";
     };
     if (typeof m.content === "string") prose = m.content;
@@ -463,7 +461,7 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
         const questions = parseQuestionsInput(p.toolName, p.input);
         if (!questions) continue;
         flush();
-        out.push({ kind: "question", id: `h${out.length}`, turnId: "history", toolCallId, questions, streaming: false });
+        out.push({ kind: "question", id: `h${out.length}`, turnId: HISTORY_TURN, toolCallId, questions, streaming: false });
       } else if (isFileMutationTool(p.toolName)) {
         const path = (p.input as { path?: unknown } | undefined)?.path;
         if (typeof path !== "string") continue;
@@ -471,7 +469,7 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
         out.push({
           kind: "activity",
           id: `h${out.length}`,
-          turnId: "history",
+          turnId: HISTORY_TURN,
           toolCallId,
           op: opForTool(p.toolName),
           path,

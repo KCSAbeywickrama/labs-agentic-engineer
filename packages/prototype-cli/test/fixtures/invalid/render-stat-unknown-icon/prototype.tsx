@@ -17,15 +17,16 @@
  */
 
 // Fixture: a <Stat> icon that is not one of the kit's icons.
+// A cast hides the fault from the type stage, as an untyped value would, so only the render finds it.
 
-import { Heading, Screen, Stat, StatGroup, defineApp } from "@wso2/prototype-kit";
+import { Heading, Screen, Stat, StatGroup, defineApp, type StatIcon } from "@wso2/prototype-kit";
 
 function Home() {
   return (
     <Screen>
       <Heading id="heading.home" text="Home" />
       <StatGroup>
-        <Stat id="stat.open" label="Open" value="4" icon="Calender" />
+        <Stat id="stat.open" label="Open" value="4" icon={"Calender" as StatIcon} />
       </StatGroup>
     </Screen>
   );

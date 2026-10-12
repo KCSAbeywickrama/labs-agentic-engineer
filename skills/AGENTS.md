@@ -1,8 +1,9 @@
 # AGENTS.md — skills/
 
 The platform's skill library, one `<name>/SKILL.md` directory per skill.
-`aep-api` seeds it into each org's `org-skills` repo, which design agents
-read. A coding run reads its project's `.claude/skills/` mirror: enabled
+`aep-api` seeds it into each org's `org-skills` repo; the design agent reads a
+snapshot of it that `ae-studio-tools` writes in the org's AE Studio pod. A
+coding run reads its project's `.claude/skills/` mirror: enabled
 skills whose `audience` includes `coding`, plus pinned ones. The playground
 reads this tree directly; a cluster picks up edits after `make dev-update`.
 
@@ -10,7 +11,7 @@ reads this tree directly; a cluster picks up edits after `make dev-update`.
 
 - `organization` rides every design turn; `console` rides console turns.
 - A flow command inlines its skill and supporting skills
-  (`FLOW_SUPPORTING_SKILLS`, `services/agents/src/prompts/turn.ts`).
+  (`FLOW_SUPPORTING_SKILLS`, `components/dataplane/ae-system-project/ae-studio/ae-design-agent/src/prompts/turn.ts`).
 - `architecture` pins stack skills in `design.json` `skillsPinned`; a pinned
   body joins the coding run's system prompt.
 - `aep` (coding) and `validation-task` (validation) are always on, one per run.
@@ -26,9 +27,9 @@ reads this tree directly; a cluster picks up edits after `make dev-update`.
 ## Generated blocks
 
 `prototype`'s kit block (between `kit:start` and `kit:end`) is generated from
-`@wso2/prototype-kit`'s `reference.md`; run `pnpm --filter @aep/agents gen`,
-never edit it by hand. `services/agents/test/prototype-skill.test.ts` fails
-when it is stale.
+`@wso2/prototype-kit`'s `reference.md`; run
+`pnpm --filter @aep/ae-design-agent gen`, never edit it by hand. The design
+agent's `test/prototype-skill.test.ts` fails when it is stale.
 
 ## Who owns what
 
@@ -36,7 +37,8 @@ when it is stale.
 | --- | --- |
 | a tool's `--help` | that tool's verbs and flags |
 | `authorization-model` | the access invariants |
-| `aep/references/component-contract.md` | what every component obeys; the one file a fan-out subagent reads |
+| `aep/references/component-contract.md` | what every component obeys; the contract every fan-out subagent reads |
+| `prototype/references/implementing.md` | what a web application's screens must be, for the coding run; a web application's subagent also reads it |
 | `aep/SKILL.md` | the coding run: git, gh, issues, PRs |
 | `validation-task` | the validation run |
 | a stack skill | one stack's layout, Dockerfile, libraries, verify, pitfalls |

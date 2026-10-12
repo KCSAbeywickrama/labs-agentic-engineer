@@ -108,7 +108,8 @@ export function NextUp({
   const all = withBuild(items, nextUpBuild(build.offer));
   if (all.length === 0) return null;
   const onTurn = (item: NextUpItem) => {
-    if (item.kind === "build") return build.open;
+    // Held as every Build is (buildHold): while the agent works it waits, as a design or interview does.
+    if (item.kind === "build") return build.label ? build.open : null;
     if (item.kind === "design") return design.ready ? () => design.design() : null;
     if (item.kind !== "interview") return null;
     const { target } = item;

@@ -27,7 +27,7 @@ import { docLines, type DocLine } from "./docLines";
 import { applyAgentToolCall } from "./agentWrites";
 import { seedSpecDoc } from "./specDoc";
 import {
-  answerBlockingQuestion,
+  answerOpenQuestion,
   appendToSection,
   deleteLine,
   editFile,
@@ -108,7 +108,7 @@ describe("appendToSection", () => {
   });
 });
 
-describe("answering a blocking question", () => {
+describe("answering an open question", () => {
   const XERO = "Does finance post to one Xero organisation, or one per country?";
   const md = `## Decisions
 
@@ -126,7 +126,7 @@ describe("answering a blocking question", () => {
     const doc = docWith(md);
     let transactions = 0;
     doc.on("afterTransaction", () => transactions++);
-    expect(answerBlockingQuestion(doc, PATH, XERO, "Finance posts every claim to one Xero organisation.")).toBe(true);
+    expect(answerOpenQuestion(doc, PATH, XERO, "Finance posts every claim to one Xero organisation.")).toBe(true);
     expect(transactions).toBe(1);
     expect(readDocFile(doc, PATH)).toBe(
       "## Decisions\n\n- Each claim becomes one bill.\n- Finance posts every claim to one Xero organisation.\n\n## Open Questions\n\n1. Which currency do refunds use?",
@@ -135,15 +135,23 @@ describe("answering a blocking question", () => {
 
   it("takes the user's own words as the decision, and the list with its last entry", () => {
     const doc = docWith(`## Open Questions\n\n1. ${XERO} *blocking*\n`);
-    answerBlockingQuestion(doc, PATH, XERO, "  One organisation per legal entity.  ");
+    answerOpenQuestion(doc, PATH, XERO, "  One organisation per legal entity.  ");
     expect(readDocFile(doc, PATH)).toBe("## Open Questions\n\n## Decisions\n\n- One organisation per legal entity.");
+  });
+
+  it("answers an ordinary open question the same way", () => {
+    const doc = docWith(md);
+    expect(answerOpenQuestion(doc, PATH, "Which currency do refunds use?", "The claim's currency.")).toBe(true);
+    expect(readDocFile(doc, PATH)).toBe(
+      `## Decisions\n\n- Each claim becomes one bill.\n- The claim's currency.\n\n## Open Questions\n\n1. ${XERO} *blocking*\n   - Finance posts every claim to one Xero organisation.\n   - Each country has its own Xero organisation.`,
+    );
   });
 
   it("writes nothing when the question is no longer in the file, or the answer is empty", () => {
     const doc = docWith(md);
     const before = readDocFile(doc, PATH);
-    expect(answerBlockingQuestion(doc, PATH, "Some other question?", "Yes.")).toBe(false);
-    expect(answerBlockingQuestion(doc, PATH, XERO, "  ")).toBe(false);
+    expect(answerOpenQuestion(doc, PATH, "Some other question?", "Yes.")).toBe(false);
+    expect(answerOpenQuestion(doc, PATH, XERO, "  ")).toBe(false);
     expect(readDocFile(doc, PATH)).toBe(before);
   });
 });
@@ -177,8 +185,7 @@ describe("Acme Expenses, acted on", () => {
         productWide: view(doc).productWide,
         lines: readSpecLines(doc),
         dependencies: [],
-        comments: [],
-        artifacts: [],
+        waitingComments: 0,
         builds: [],
       }).rows.find((r) => r.id === "F3");
     const doc = seeded();
@@ -189,7 +196,7 @@ describe("Acme Expenses, acted on", () => {
     expect(specLeg(before.features).summary).toBe("1 question to answer");
     expect(offer(doc)?.detail).toEqual(["blocked by a question"]);
 
-    answerBlockingQuestion(doc, f3.path, question.question, question.options[0]!);
+    answerOpenQuestion(doc, f3.path, question.question, question.options[0]!);
     const after = view(doc);
     expect(after.features.find((f) => f.id === "F3")?.blocking).toEqual([]);
     expect(after.features.find((f) => f.id === "F3")?.chips).toEqual([]);
@@ -240,7 +247,7 @@ describe("the agent's file writes, applied to the local doc", () => {
     output: { ok: true, op: "edit", path: PATH },
   };
 
-  it("applies an edit to the room path, as the agents service matched it", () => {
+  it("applies an edit to the room path, as the design agent matched it", () => {
     const doc = docWith(stub);
     expect(applyAgentToolCall(doc, edit)).toBe(true);
     expect(readDocFile(doc, PATH)).toContain("- Deputies approve on leave. *assumed*");

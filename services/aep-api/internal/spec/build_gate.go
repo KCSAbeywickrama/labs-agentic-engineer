@@ -28,7 +28,11 @@ package spec
 //     between requirements and design);
 //   - every deployable component is ENRICHED (its design.json moved off the
 //     scaffold placeholder, a language decided) and carries its type-mandated
-//     artifact (service → openapi.yaml, web-application → wireframes.dsl);
+//     artifact (service → openapi.yaml, web-application → its prototype,
+//     prototype.json + prototype.tsx), and a web-application's prototype is
+//     sound and current with the design: each file passing the save gate's
+//     rules, and every role it offers a role of specs/design/security.json
+//     when that file exists;
 //   - a design with END-USER SIGN-IN carries specs/design/security.json, it parses,
 //     and every story its roles cite is a real story. The platform creates
 //     the roles and test users that file declares when the tag is built, so a
@@ -45,6 +49,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
@@ -70,34 +75,23 @@ const (
 	codeUnknownRoleStory = "UNKNOWN_ROLE_STORY"
 )
 
-// The security design's NON-BLOCKING codes. They ride Warning, which the
-// console renders beside a file, so they are spelled in the same error-code
-// vocabulary as everything above rather than as the message table's key —
-// the key names a SENTENCE, the code names a CHANNEL entry.
-const (
-	// codeSecurityHandleUsedNowhere — a catalog handle no operation and no
-	// screen requires.
-	codeSecurityHandleUsedNowhere = "SECURITY_HANDLE_USED_NOWHERE"
-	// codeSecurityHandleUnreachable — a handle an operation requires that no
-	// role grants.
-	codeSecurityHandleUnreachable = "SECURITY_HANDLE_UNREACHABLE"
-	// codeSecurityAssignToDirectoryChecked — INFO: a role delegates to a group
-	// the org directory already holds, so the platform creates nothing.
-	codeSecurityAssignToDirectoryChecked = "SECURITY_ASSIGN_TO_DIRECTORY_CHECKED"
-	// codeSecurityDesignNotice — the fallback for a non-blocking finding this
-	// file does not yet have a code for. A new securityspec rule reaches the
-	// channel with a readable message rather than being dropped; giving it its
-	// own code here is the follow-up.
-	codeSecurityDesignNotice = "SECURITY_DESIGN_NOTICE"
-)
-
-// securityNoticeCodes maps a securityspec message key to the Warning code that
-// carries it.
-var securityNoticeCodes = map[string]string{
-	securityspec.MsgHandleUsedNowhere:        codeSecurityHandleUsedNowhere,
-	securityspec.MsgHandleUnreachable:        codeSecurityHandleUnreachable,
-	securityspec.MsgAssignToDirectoryChecked: codeSecurityAssignToDirectoryChecked,
+// deployableCellTypes maps a cell node type to the design.json component type
+// it deploys as. Nodes typed otherwise (database, cache, identity-server, …)
+// are dependencies of components, never component directories.
+var deployableCellTypes = map[string]string{
+	"service":         "service",
+	"web-application": "web-application",
+	"web-app":         "web-application",
+	"worker":          "worker",
+	"scheduled-task":  "scheduled-task",
 }
+
+// scaffoldLanguageSentinel is what the AE Studio pod's scaffold writes for
+// `language`: a non-empty value (the schema demands one) that this gate
+// REFUSES. Language is a judgment call the platform never makes — the agent
+// fills it from the organization skill's Tech stack default, else the
+// requirements, else the platform stack default the architecture skill names.
+const scaffoldLanguageSentinel = "TBD"
 
 // scaffoldPlaceholderMarker is how the gate tells a scaffold that was never
 // enriched: the platform-authored description survives verbatim.
@@ -205,22 +199,83 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 				Message: fmt.Sprintf("component %q has no language decided — set it from the organization Tech stack default, the requirements, or the platform default", c.ID),
 			})
 		}
-		var artifact string
 		switch componentType {
 		case "service":
-			artifact = "openapi.yaml"
-		case "web-application":
-			artifact = "wireframes.dsl"
-		}
-		if artifact != "" {
-			artifactPath := "components/" + c.ID + "/" + artifact
+			artifactPath := "components/" + c.ID + "/openapi.yaml"
 			if strings.TrimSpace(designFiles[artifactPath]) == "" {
 				errs = append(errs, FileValidationError{
 					Path: artifactPath, Code: codeMissingComponentArtifact,
-					Message: fmt.Sprintf("component %q (%s) needs %s", c.ID, componentType, artifact),
+					Message: fmt.Sprintf("component %q (%s) needs openapi.yaml", c.ID, componentType),
 				})
 			}
+		case "web-application":
+			errs = append(errs, prototypeBuildErrors(designFiles, c.ID)...)
 		}
+	}
+	return errs
+}
+
+// prototypeBuildErrors judges a web-application's prototype at build time. It
+// is the contract the coding run builds the UI against, so it must be whole:
+// the manifest (prototype.json) and the screens (prototype.tsx) are one
+// artifact, and the coding agent builds the app from both. A whole one must
+// also pass the save gate's rules and be current with the design: every role
+// it offers is a role security.json declares, the roles the platform provisions
+// and the built app gates on.
+//
+// A design made before the prototype carries wireframes.dsl instead. The design
+// bundle does not read `.dsl` (decision L6), so such a project is refused here
+// like one with no design for the app, and running Design writes the prototype.
+func prototypeBuildErrors(designFiles map[string]string, component string) []FileValidationError {
+	manifestKey := prototypespec.ManifestPath(component)
+	sourceKey := prototypespec.SourcePath(component)
+	hasManifest := strings.TrimSpace(designFiles[manifestKey]) != ""
+	hasSource := strings.TrimSpace(designFiles[sourceKey]) != ""
+	switch {
+	case !hasManifest && !hasSource:
+		return []FileValidationError{{
+			Path: manifestKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s has no prototype yet: run Design", component),
+		}}
+	case !hasSource:
+		return []FileValidationError{{
+			Path: sourceKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no screens (prototype.tsx): run Design again", component),
+		}}
+	case !hasManifest:
+		return []FileValidationError{{
+			Path: manifestKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no manifest (prototype.json): run Design again", component),
+		}}
+	}
+
+	manifest, errs := componentPrototypeErrors(designFiles, component)
+	if manifest == nil {
+		return errs
+	}
+	raw := designFiles[securityspec.BundleKey]
+	if strings.TrimSpace(raw) == "" {
+		return errs
+	}
+	doc, err := securityspec.Parse([]byte(raw))
+	if err != nil {
+		return errs // validateRolesDocument reports the document itself
+	}
+	declared := make(map[string]bool, len(doc.Roles))
+	names := make([]string, 0, len(doc.Roles))
+	for _, role := range doc.Roles {
+		declared[role.Name] = true
+		names = append(names, role.Name)
+	}
+	for i, role := range manifest.Roles {
+		if declared[role.ID] {
+			continue
+		}
+		errs = append(errs, FileValidationError{
+			Path: manifestKey, Code: prototypespec.CodeUnknownReference,
+			Message: fmt.Sprintf("roles[%d].id: role %q is not a role in security.json — copy a role name from it verbatim (%s)",
+				i, role.ID, strings.Join(names, ", ")),
+		})
 	}
 	return errs
 }
@@ -280,7 +335,7 @@ func validateRolesDocument(designFiles map[string]string, spec reqspec.Spec) []F
 	var errs []FileValidationError
 	for _, finding := range securityspec.ReferenceFindings(doc, securityspec.DesignBundle(designFiles)) {
 		if finding.Severity != securityspec.SeverityError {
-			continue // warnings and info ride buildGateWarnings, never a refusal
+			continue // warnings and info never refuse a build
 		}
 		errs = append(errs, FileValidationError{
 			Path: securityspec.BundleKey, Code: codeInvalidRolesDocument, Message: finding.Message,
@@ -301,44 +356,6 @@ func validateRolesDocument(designFiles map[string]string, spec reqspec.Spec) []F
 		}
 	}
 	return errs
-}
-
-// buildGateWarnings are the security design's NON-BLOCKING findings over a
-// whole design bundle — the two coverage warnings the design asks the Security
-// page to render inline ("declared, used nowhere", "unreachable by any role")
-// and the INFO note that a role's assignTo group is one the org directory
-// already holds. None of them refuses anything: the design may legitimately be
-// ahead of the code, and all three are the shape of a typo rather than proof of
-// one. The errors are the gate's business and are excluded here — one defect,
-// one message.
-//
-// They ride the existing soft-warning type rather than a new endpoint: the
-// apply path attaches them to ApplyResult.Warnings, which is the console's
-// channel for them.
-//
-// Paths are BUNDLE-relative (`security.json`), like every other row this file
-// produces; a caller whose channel speaks repo paths prefixes DesignDir.
-func buildGateWarnings(designFiles map[string]string) []Warning {
-	raw, present := designFiles[securityspec.BundleKey]
-	if !present || strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	doc, err := securityspec.Parse([]byte(raw))
-	if err != nil {
-		return nil // a document that does not parse is the gate's business, not a warning's
-	}
-	var out []Warning
-	for _, finding := range securityspec.ReferenceFindings(doc, securityspec.DesignBundle(designFiles)) {
-		if finding.Severity == securityspec.SeverityError {
-			continue
-		}
-		code, ok := securityNoticeCodes[finding.Key]
-		if !ok {
-			code = codeSecurityDesignNotice
-		}
-		out = append(out, Warning{Path: securityspec.BundleKey, Code: code, Message: finding.Message})
-	}
-	return out
 }
 
 // hasEndUserSignIn reports whether any component's design.json carries
@@ -380,20 +397,6 @@ func notAStory(spec reqspec.Spec, id, verb string) string {
 	default:
 		return c.Describe(id) + "; " + verb + " a real story or drop it"
 	}
-}
-
-// componentStoryClaims maps each cell component to the stories its design.json
-// claims — the ONE claims read both the gate (coverage union) and
-// BuildScopeAtTag (per-component scope) consume, so they can never disagree on
-// where claims come from.
-func componentStoryClaims(facts *CellFacts, designFiles map[string]string) map[string][]string {
-	out := map[string][]string{}
-	for _, c := range facts.Components {
-		if stories := designJSONStories(designFiles["components/"+c.ID+"/design.json"]); len(stories) > 0 {
-			out[c.ID] = stories
-		}
-	}
-	return out
 }
 
 // designJSONStories reads the story IDs a component's design.json claims.

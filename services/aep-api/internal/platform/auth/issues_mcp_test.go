@@ -17,222 +17,95 @@
 package auth
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
-// scopeEchoHandler writes the bound issues scope as "org/project".
+// scopeEchoHandler answers the scope IssuesMCPGate bound, as JSON.
 func scopeEchoHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := IssuesMCPScopeFromContext(r.Context())
 		if !ok {
-			http.Error(w, "no scope in context", http.StatusInternalServerError)
+			http.Error(w, "no scope", http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write([]byte(scope.OrgID + "/" + scope.ProjectID))
+		_ = json.NewEncoder(w).Encode(scope)
 	})
 }
 
-func serveIssues(v *IssuesMCPVerifier, header string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/internal/v1/issues/mcp", nil)
+// serveIssues routes path through the gate the way the edge mounts it: the
+// Issues surface and an issue's.
+func serveIssues(v *StudioClientVerifier, path, header string) *httptest.ResponseRecorder {
+	mux := http.NewServeMux()
+	gate := IssuesMCPGate(v, scopeEchoHandler())
+	mux.Handle("POST /ae-studio/projects/{projectName}/issues/mcp", gate)
+	mux.Handle("POST /ae-studio/projects/{projectName}/issues/{issueNumber}/mcp", gate)
+	req := httptest.NewRequest(http.MethodPost, path, nil)
 	if header != "" {
 		req.Header.Set("Authorization", header)
 	}
-	w := httptest.NewRecorder()
-	v.Middleware(scopeEchoHandler()).ServeHTTP(w, req)
-	return w
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
 }
 
-func TestIssuesMCP_TokenCarriesAudienceAndProject(t *testing.T) {
-	mgr := mcpTestManager(t)
-	tok, err := mgr.IssueIssuesMCPToken("acme", "acme-expenses")
-	if err != nil {
-		t.Fatalf("IssueIssuesMCPToken: %v", err)
-	}
-	claims, err := mgr.Verify(tok)
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if !hasAudience(claims.Audience, AudienceIssuesMCP) || len(claims.Audience) != 1 {
-		t.Errorf("aud = %v, want [%s]", claims.Audience, AudienceIssuesMCP)
-	}
-	if claims.OcOrgID != "acme" || claims.ProjectID != "acme-expenses" {
-		t.Errorf("claims org/project = %q/%q", claims.OcOrgID, claims.ProjectID)
-	}
-	ttl := claims.ExpiresAt.Sub(claims.IssuedAt.Time)
-	if ttl != mcpTokenTTL {
-		t.Errorf("ttl = %v, want %v", ttl, mcpTokenTTL)
-	}
-}
+// A recorded ae-studio client token binds the org it is recorded for; the
+// project and the issue are the path's.
+func TestIssuesMCPGate_BindsTheOrgAndThePathsScope(t *testing.T) {
+	v, sign := newStudioVerifierStack(t, storedStudioClients{"acme": "ae-studio-acme"})
+	tok := "Bearer " + sign("ae-studio-acme", "acme")
 
-func TestIssuesMCP_ValidTokenBindsScope(t *testing.T) {
-	mgr := mcpTestManager(t)
-	tok, err := mgr.IssueIssuesMCPToken("acme", "acme-expenses")
-	if err != nil {
-		t.Fatalf("IssueIssuesMCPToken: %v", err)
+	var got IssuesMCPScope
+	rec := serveIssues(v, "/ae-studio/projects/expenses/issues/mcp", tok)
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+		t.Fatalf("Issues surface = %d %s", rec.Code, rec.Body)
 	}
-	w := serveIssues(NewIssuesMCPVerifier(mgr), "Bearer "+tok)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body %q", w.Code, w.Body.String())
+	if got != (IssuesMCPScope{OrgID: "acme", ProjectID: "expenses"}) {
+		t.Fatalf("scope = %+v", got)
 	}
-	if got := w.Body.String(); got != "acme/acme-expenses" {
-		t.Errorf("bound scope = %q, want acme/acme-expenses", got)
+	rec = serveIssues(v, "/ae-studio/projects/expenses/issues/7/mcp", tok)
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+		t.Fatalf("issue surface = %d %s", rec.Code, rec.Body)
+	}
+	if got != (IssuesMCPScope{OrgID: "acme", ProjectID: "expenses", IssueNumber: 7}) {
+		t.Fatalf("scope = %+v", got)
 	}
 }
 
-func TestIssuesMCP_401Matrix(t *testing.T) {
-	mgr := mcpTestManager(t)
-	discovery, err := mgr.IssueMCPToken("acme")
-	if err != nil {
-		t.Fatalf("IssueMCPToken: %v", err)
-	}
-	// Right audience + org, but no project claim (IssueServiceToken never sets one).
-	projectless, err := mgr.IssueServiceToken(AudienceIssuesMCP, "acme", 5*time.Minute)
-	if err != nil {
-		t.Fatalf("IssueServiceToken: %v", err)
-	}
-	orgless, err := mgr.IssueIssuesMCPToken("", "acme-expenses")
-	if err != nil {
-		t.Fatalf("IssueIssuesMCPToken (org-less): %v", err)
-	}
-	expClaims := TaskClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    mgr.issuer,
-			Audience:  jwt.ClaimStrings{AudienceIssuesMCP},
-			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
-		},
-		OcOrgID:   "acme",
-		ProjectID: "acme-expenses",
-	}
-	expTok := jwt.NewWithClaims(jwt.SigningMethodRS256, expClaims)
-	expTok.Header["kid"] = mgr.keyID
-	expired, err := expTok.SignedString(mgr.privateKey)
-	if err != nil {
-		t.Fatalf("sign expired: %v", err)
-	}
-
-	cases := map[string]string{
-		"missing":         "",
-		"not-bearer":      "Basic abc",
-		"garbage":         "Bearer not-a-jwt",
-		"discovery-token": "Bearer " + discovery,
-		"project-less":    "Bearer " + projectless,
-		"org-less":        "Bearer " + orgless,
-		"expired":         "Bearer " + expired,
-	}
-	v := NewIssuesMCPVerifier(mgr)
-	for name, header := range cases {
-		t.Run(name, func(t *testing.T) {
-			w := serveIssues(v, header)
-			if w.Code != http.StatusUnauthorized {
-				t.Errorf("status = %d, want 401 (body %q)", w.Code, w.Body.String())
-			}
-		})
-	}
-}
-
-func TestIssuesMCP_NilManager503(t *testing.T) {
-	w := serveIssues(NewIssuesMCPVerifier(nil), "Bearer x")
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", w.Code)
-	}
-}
-
-// An issues token must not open the org-wide discovery surface, even with the
-// publisher fallback wired.
-func TestIssuesMCP_TokenRejectedByAgentsScopedVerifier(t *testing.T) {
-	mgr := mcpTestManager(t)
-	tok, err := mgr.IssueIssuesMCPToken("acme", "acme-expenses")
-	if err != nil {
-		t.Fatalf("IssueIssuesMCPToken: %v", err)
-	}
-	pub, _ := newPublisherVerifier(t)
-	for name, v := range map[string]*AgentsScopedVerifier{
-		"bff-only":       NewAgentsScopedVerifier(mgr, nil),
-		"with-publisher": NewAgentsScopedVerifier(mgr, pub),
+// Every credential refusal is the same 401; an issue number that is not a
+// positive integer names no surface (404).
+func TestIssuesMCPGate_Refusals(t *testing.T) {
+	v, sign := newStudioVerifierStack(t, storedStudioClients{"acme": "ae-studio-acme"})
+	for name, c := range map[string]struct {
+		path, header string
+		want         int
+	}{
+		"no header":                {"/ae-studio/projects/p/issues/mcp", "", http.StatusUnauthorized},
+		"not a bearer":             {"/ae-studio/projects/p/issues/mcp", "Basic x", http.StatusUnauthorized},
+		"publisher audience":       {"/ae-studio/projects/p/issues/mcp", "Bearer " + sign("aep-publisher-acme", "acme"), http.StatusUnauthorized},
+		"client not recorded":      {"/ae-studio/projects/p/issues/mcp", "Bearer " + sign("ae-studio-other", "other"), http.StatusUnauthorized},
+		"issue number zero":        {"/ae-studio/projects/p/issues/0/mcp", "Bearer " + sign("ae-studio-acme", "acme"), http.StatusNotFound},
+		"issue number not numeric": {"/ae-studio/projects/p/issues/x/mcp", "Bearer " + sign("ae-studio-acme", "acme"), http.StatusNotFound},
 	} {
-		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/internal/v1/mcp", nil)
-			req.Header.Set("Authorization", "Bearer "+tok)
-			if w := serveWith(v, req); w.Code != http.StatusUnauthorized {
-				t.Errorf("status = %d, want 401", w.Code)
-			}
-		})
-	}
-}
-
-// An issue's token carries the issue number beside the org + project; the
-// verifier binds all three. The Issues view's token binds number 0.
-func TestIssuesMCP_IssueTokenBindsTheIssueNumber(t *testing.T) {
-	mgr := mcpTestManager(t)
-	tok, err := mgr.IssueIssueMCPToken("acme", "acme-expenses", 7)
-	if err != nil {
-		t.Fatalf("IssueIssueMCPToken: %v", err)
-	}
-	claims, err := mgr.Verify(tok)
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if !hasAudience(claims.Audience, AudienceIssuesMCP) || claims.IssueNumber != 7 {
-		t.Errorf("aud/issueNumber = %v/%d, want [%s]/7", claims.Audience, claims.IssueNumber, AudienceIssuesMCP)
-	}
-	if ttl := claims.ExpiresAt.Sub(claims.IssuedAt.Time); ttl != mcpTokenTTL {
-		t.Errorf("ttl = %v, want %v", ttl, mcpTokenTTL)
-	}
-
-	v := NewIssuesMCPVerifier(mgr)
-	scope, err := v.resolveScope("Bearer " + tok)
-	if err != nil {
-		t.Fatalf("resolveScope: %v", err)
-	}
-	if want := (IssuesMCPScope{OrgID: "acme", ProjectID: "acme-expenses", IssueNumber: 7}); scope != want {
-		t.Errorf("scope = %+v, want %+v", scope, want)
-	}
-
-	issuesTok, err := mgr.IssueIssuesMCPToken("acme", "acme-expenses")
-	if err != nil {
-		t.Fatalf("IssueIssuesMCPToken: %v", err)
-	}
-	if scope, err := v.resolveScope("Bearer " + issuesTok); err != nil || scope.IssueNumber != 0 {
-		t.Errorf("issues-view scope = %+v (%v), want issue number 0", scope, err)
-	}
-}
-
-// Only a positive number is an issue: the mint refuses anything else, so a
-// zero or negative claim can never read as some issue's token.
-func TestIssuesMCP_IssueTokenRefusesANonPositiveNumber(t *testing.T) {
-	mgr := mcpTestManager(t)
-	for _, n := range []int{0, -3} {
-		if tok, err := mgr.IssueIssueMCPToken("acme", "acme-expenses", n); err == nil {
-			t.Errorf("IssueIssueMCPToken(%d) = %q, want an error", n, tok)
+		if rec := serveIssues(v, c.path, c.header); rec.Code != c.want {
+			t.Errorf("%s = %d, want %d", name, rec.Code, c.want)
 		}
 	}
 }
 
-// A hand-signed negative claim is refused by the verifier.
-func TestIssuesMCP_NegativeIssueClaimIs401(t *testing.T) {
-	mgr := mcpTestManager(t)
-	claims := TaskClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    mgr.issuer,
-			Audience:  jwt.ClaimStrings{AudienceIssuesMCP},
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
-		},
-		OcOrgID: "acme", ProjectID: "acme-expenses", IssueNumber: -1,
+// A recorded client that could not be read is no verdict on the caller: 503.
+func TestIssuesMCPGate_LookupFailureIs503(t *testing.T) {
+	v, sign := newStudioVerifierStack(t, storedStudioClients{"!err": "db down"})
+	if rec := serveIssues(v, "/ae-studio/projects/p/issues/mcp", "Bearer "+sign("ae-studio-acme", "acme")); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("lookup failure = %d, want 503", rec.Code)
 	}
-	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	tok.Header["kid"] = mgr.keyID
-	signed, err := tok.SignedString(mgr.privateKey)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	if w := serveIssues(NewIssuesMCPVerifier(mgr), "Bearer "+signed); w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
+}
+
+// A nil verifier refuses every call.
+func TestIssuesMCPGate_NilVerifierRefuses(t *testing.T) {
+	if rec := serveIssues(nil, "/ae-studio/projects/p/issues/mcp", "Bearer x"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("nil verifier = %d, want 401", rec.Code)
 	}
 }

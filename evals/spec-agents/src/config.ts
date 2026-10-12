@@ -40,6 +40,13 @@ export const PROJECTS_HOME = join(REPO_ROOT, "playground", ".projects", "spec-ag
 export const SCENARIOS_DIR = join(PACKAGE_ROOT, "scenarios");
 export const FIXTURES_DIR = join(SCENARIOS_DIR, "fixtures");
 
+/**
+ * The organization skill the agent under eval reads (the playground reads the
+ * repo's `skills/` every turn): its settled sections are the judge's org
+ * defaults.
+ */
+export const ORG_SKILL_PATH = join(REPO_ROOT, "skills", "organization", "SKILL.md");
+
 /** The human review queue: one markdown sheet per review-or-worse run. */
 export const REVIEWS_DIR = join(PACKAGE_ROOT, "eval-reviews");
 

@@ -242,8 +242,9 @@ type loop struct {
 	// lastResult is what the previous cycle produced — it selects the next
 	// cycle's kind and feeds the no-progress rule.
 	lastResult cycleResult
-	// workBefore is the working-set size when the previous cycle was dispatched.
-	workBefore int
+	// unitsBefore is the progress units (progressUnits) when the previous
+	// cycle was dispatched.
+	unitsBefore int
 
 	// prNumber / mergeSHA are the current cycle's landing, read from the cycle
 	// record rather than from the signal that announced it.
@@ -423,7 +424,8 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			continue
 		}
 
-		if noProgress(l.lastResult, l.workBefore, work) {
+		units := progressUnits(work, snap)
+		if noProgress(l.lastResult, l.unitsBefore, units) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoProgress)
 		}
 
@@ -445,7 +447,7 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, reason)
 		}
 
-		l.workBefore = work
+		l.unitsBefore = units
 		res, err := l.runCycle(ctx, kind, noAnchorIssue)
 		if err != nil {
 			return l.result(), err
@@ -455,6 +457,8 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateCancelled, "")
 		case cycleAgentDead:
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+		case cycleAgentStartFailed:
+			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonAgentStartFailed)
 		case cycleQuotaBlocked:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
 		case cyclePublisherCredentials:
@@ -974,7 +978,7 @@ func (l *loop) setState(ctx workflow.Context, state string) error {
 
 func (l *loop) settleRun(ctx workflow.Context, state, reason string) error {
 	return workflow.ExecuteActivity(activityCtx(ctx), (*Activities).SettleRun,
-		SettleRunInput{RunID: l.in.RunID, State: state, Reason: reason, OrgID: l.in.OrgID}).Get(ctx, nil)
+		SettleRunInput{RunID: l.in.RunID, State: state, Reason: reason}).Get(ctx, nil)
 }
 
 func (l *loop) bump(ctx workflow.Context, counter delivery.RunBudget) error {

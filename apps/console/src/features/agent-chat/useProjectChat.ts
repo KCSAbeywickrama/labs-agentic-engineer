@@ -20,8 +20,8 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
+import { isDesignAgentReady, subscribeDesignAgentReady } from "../../api/aeStudio";
 import { designKey } from "../design/api/designModel";
-import { specKey } from "../spec/api/specModel";
 import { applyAgentWrite } from "../spec/collab/specDoc";
 import { flushSpecRoom } from "../spec/collab/specRoom";
 import { fetchConversationMessages, fetchCurrentConversationId } from "./api/conversation";
@@ -32,10 +32,12 @@ import { createChatStore, type ProjectChat } from "./chatStore";
 import { questionsLink, viewTurnBody, type ChatView } from "./chatView";
 import { markIssueClosed, onIssueClosedMark } from "./closedIssues";
 import { opensQuestionsCard } from "./openQuestions";
+import { readSpecStateUntilRecorded, RECORD_READ_DELAYS_MS } from "./turnRecord";
 import { shellScope } from "../shell/scope";
 
-// The app's chat stores, on the real transport, and the React side of them:
-// the project's main chat, the Issues Page's, and one per issue.
+// The app's chat stores, on the real transport (the org's design agent in
+// its AE Studio pod), and the React side of them: the project's main chat,
+// the Issues Page's, and one per issue.
 
 /** The project's main chat: it writes the spec room, so a turn flushes the room first. */
 export const chatStore = createChatStore({
@@ -105,7 +107,7 @@ function issueChatStore(issueNumber: number): ChatStore {
       conversationId: (projectName) => closedOn(projectName, fetchCurrentConversationId(projectName, "issue", issueNumber)),
       history: fetchConversationMessages,
       startTurn: (projectName, conversationId, body) =>
-        closedOn(projectName, startTurn(projectName, conversationId, viewTurnBody("issue", body, issueNumber))),
+        closedOn(projectName, startTurn(projectName, conversationId, viewTurnBody("issue", body))),
       activeTurn: (projectName) => getActiveTurn(projectName, "issue", issueNumber),
       turn: getTurn,
       openStream: openTurnStream,
@@ -142,12 +144,19 @@ export function chatStoreFor(view: ChatView, issueNumber?: number): ChatStore {
   return view === "issues" ? issuesChatStore : chatStore;
 }
 
-/** A project's chat in a view (the main chat by default; an issue's by its number), kept current while the caller is mounted. */
+/**
+ * A project's chat in a view (the main chat by default; an issue's by its
+ * number), kept current while the caller is mounted and AE Studio is ready:
+ * the conversation lives on the design agent, so nothing is asked of it
+ * before then (the chat stays loading), and a chat that failed while AE
+ * Studio restarted loads again once it is back.
+ */
 export function useProjectChat(projectName: string, view: ChatView = "main", issueNumber?: number): ProjectChat {
   const store = chatStoreFor(view, issueNumber);
   const subscribe = useCallback((fn: () => void) => store.subscribe(projectName, fn), [store, projectName]);
   const chat = useSyncExternalStore(subscribe, () => store.get(projectName));
-  useEffect(() => store.watch(projectName), [store, projectName]);
+  const ready = useSyncExternalStore(subscribeDesignAgentReady, isDesignAgentReady);
+  useEffect(() => (ready ? store.watch(projectName) : undefined), [store, projectName, ready]);
   return chat;
 }
 
@@ -222,7 +231,9 @@ export function canSend(chat: ProjectChat): boolean {
 
 /**
  * When a turn ends, read again what the agent may have changed. The spec
- * model holds each feature's stage, which an interview moves on; the design
+ * state holds what the turn's record decides (each designed feature's basis,
+ * each design file's revision), which lands after the turn's end, so after a
+ * completed turn it is read until that changes (turnRecord.ts); the design
  * model, what a design turn wrote and replied (the overview's track is worked
  * out from both); the Issues agent files issues, so its turn ends on the
  * issue list; an issue's agent comments on, edits and closes its issue, so its
@@ -233,9 +244,17 @@ export function canSend(chat: ProjectChat): boolean {
 export function useRefreshOnTurnEnd(): void {
   const queryClient = useQueryClient();
   useEffect(() => {
-    const stopMain = chatStore.onTurnEnd((projectName) => {
-      void queryClient.invalidateQueries({ queryKey: specKey(projectName) });
+    // The reads after each project's last turn; a later turn's end takes over from them.
+    const reads = new Map<string, AbortController>();
+    const stopMain = chatStore.onTurnEnd((projectName, outcome) => {
       void queryClient.invalidateQueries({ queryKey: designKey(projectName) });
+      reads.get(projectName)?.abort();
+      const controller = new AbortController();
+      reads.set(projectName, controller);
+      const delays = outcome === "completed" ? RECORD_READ_DELAYS_MS : [];
+      void readSpecStateUntilRecorded(queryClient, projectName, delays, controller.signal).finally(() => {
+        if (reads.get(projectName) === controller) reads.delete(projectName);
+      });
     });
     const stopIssues = issuesChatStore.onTurnEnd((projectName) => {
       void queryClient.invalidateQueries({ queryKey: issuesListKey(projectName) });
@@ -253,6 +272,7 @@ export function useRefreshOnTurnEnd(): void {
       stopIssues();
       issueTurnEnds.delete(issueChanged);
       stopClosed();
+      for (const controller of reads.values()) controller.abort();
     };
   }, [queryClient]);
 }

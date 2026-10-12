@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/internal/platform/agentfold"
 	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
@@ -59,6 +58,10 @@ func (e *DesignValidationError) Error() string {
 	return "design validation failed: " + strings.Join(parts, "; ")
 }
 
+// reviewBundleKey is the review file's key inside the design bundle (paths
+// there are relative to specs/design/).
+var reviewBundleKey = strings.TrimPrefix(designspec.ReviewPath, designPrefix)
+
 // Save-gate error codes not owned by designspec.
 const (
 	// codeInvalidOpenAPI — a component openapi.yaml does not parse as YAML.
@@ -81,6 +84,9 @@ const (
 //   - security.json, when present: the security design validates against the
 //     same published schema and referential rules the agent's write gate
 //     applies;
+//   - review.json, when present: the Design step's comments and checks
+//     validate against the same published schema and cross-entry rules the
+//     agent's write gate applies (designspec.ValidateDesignReview);
 //   - prototype.json / prototype.tsx, when present: the manifest against the
 //     kit's published schema and reference rules, the source against a static
 //     floor (syntax, allowed imports, size). The render check stays in the
@@ -128,11 +134,10 @@ func validateDesignBundle(files map[string]string) error {
 	// single definition the agent's write gate uses, so a document that passes
 	// one gate passes the other.
 	//
-	// The rules that read a SIBLING file (a component the cell declares, a
-	// screen the wireframe declares, the operation behind a screen) are
-	// deliberately not run here: the design lineup writes security.json before
-	// those files exist, and a save refused on a file that is not written yet
-	// would be unfixable. The build gate runs the whole list against the tag,
+	// The rules that read a SIBLING file (a component the cell declares, the
+	// owner component's openapi.yaml) are deliberately not run here: the
+	// design lineup writes security.json before those files exist, and a save
+	// refused on a file that is not written yet would be unfixable. The build gate runs the whole list against the tag,
 	// where every file is present by construction.
 	for _, name := range DependencyNamesIn(files) {
 		key := dependencyDesignKey(name)
@@ -150,15 +155,15 @@ func validateDesignBundle(files map[string]string) error {
 			continue
 		}
 		// The shape rules the schema cannot say — the same ones the agent's
-		// write-gate and the fold enforce — so a file the platform commits is
-		// one the agent can keep editing.
+		// write-gate enforces — so a file the platform commits is one the
+		// agent can keep editing.
 		for _, file := range []string{key, dependencyDirPrefix + name + "/" + SdkManifestFile} {
 			body, present := files[file]
 			if !present {
 				continue
 			}
-			if code, msg := agentfold.CheckDependencyFileForSave("specs/design/"+file, body); code != "" {
-				verrs = append(verrs, FileValidationError{Path: file, Code: code, Message: msg})
+			if ve := designspec.CheckDependencyFile("specs/design/"+file, body); ve != nil {
+				verrs = append(verrs, FileValidationError{Path: file, Code: ve.Code, Message: ve.Message})
 			}
 		}
 	}
@@ -172,6 +177,17 @@ func validateDesignBundle(files map[string]string) error {
 				code, msg = ve.Code, ve.Message
 			}
 			verrs = append(verrs, FileValidationError{Path: securityspec.BundleKey, Code: code, Message: msg})
+		}
+	}
+
+	if raw, ok := files[reviewBundleKey]; ok {
+		if err := designspec.ValidateDesignReview([]byte(raw)); err != nil {
+			var ve *designspec.ValidationError
+			if errors.As(err, &ve) {
+				verrs = append(verrs, FileValidationError{Path: reviewBundleKey, Code: ve.Code, Message: ve.Message})
+			} else {
+				verrs = append(verrs, FileValidationError{Path: reviewBundleKey, Code: designspec.CodeSchemaViolation, Message: err.Error()})
+			}
 		}
 	}
 
@@ -205,25 +221,40 @@ func validateDesignBundle(files map[string]string) error {
 }
 
 // prototypeFileErrors judges each component's prototype.json and prototype.tsx
-// that the bundle holds. A prototype is optional and the agent writes its two
-// files one after the other, so a missing half is not an error here (nothing is
-// refused for a file that is not written yet); a present file must be sound.
+// that the bundle holds. A save never requires a prototype (the build gate
+// does), and the agent writes its two files one after the other, so a missing
+// half is not an error here (nothing is refused for a file that is not written
+// yet); a present file must be sound.
 // The agent's write gate runs the same rules and the render check on top, so
 // this is what stops a hand-pushed file from skipping them.
 func prototypeFileErrors(files map[string]string) []FileValidationError {
 	var verrs []FileValidationError
 	for _, name := range ComponentNamesIn(files) {
-		manifestKey := prototypespec.ManifestPath(name)
-		if raw, ok := files[manifestKey]; ok {
-			_, findings := prototypespec.ParseManifest([]byte(raw))
-			verrs = append(verrs, prototypeFileErrorsFrom(manifestKey, findings)...)
-		}
-		sourceKey := prototypespec.SourcePath(name)
-		if raw, ok := files[sourceKey]; ok {
-			verrs = append(verrs, prototypeFileErrorsFrom(sourceKey, prototypespec.CheckSource(raw))...)
-		}
+		_, errs := componentPrototypeErrors(files, name)
+		verrs = append(verrs, errs...)
 	}
 	return verrs
+}
+
+// componentPrototypeErrors judges the prototype files of one component that the
+// bundle holds, and returns the manifest when it is present and sound. The
+// save gate and the build gate share it, so both apply one rule set.
+func componentPrototypeErrors(files map[string]string, component string) (*prototypespec.Manifest, []FileValidationError) {
+	var (
+		manifest *prototypespec.Manifest
+		verrs    []FileValidationError
+	)
+	manifestKey := prototypespec.ManifestPath(component)
+	if raw, ok := files[manifestKey]; ok {
+		m, findings := prototypespec.ParseManifest([]byte(raw))
+		manifest = m
+		verrs = append(verrs, prototypeFileErrorsFrom(manifestKey, findings)...)
+	}
+	sourceKey := prototypespec.SourcePath(component)
+	if raw, ok := files[sourceKey]; ok {
+		verrs = append(verrs, prototypeFileErrorsFrom(sourceKey, prototypespec.CheckSource(raw))...)
+	}
+	return manifest, verrs
 }
 
 func prototypeFileErrorsFrom(key string, findings []prototypespec.Finding) []FileValidationError {

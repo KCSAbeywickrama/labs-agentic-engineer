@@ -48,9 +48,8 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir=/pnpm/store --filter @aep/console...
 
 # Workspace deps whose exports resolve to ./dist must be compiled first
-# (@aep/excalidraw-dsl — the wireframe DSL + layout gate, built FIRST because
-# @aep/agent-stream imports it; @wso2/prototype-kit — the prototype manifest
-# and source rules @aep/agent-stream's write gate imports, built before it,
+# (@wso2/prototype-kit — the prototype manifest and source rules
+# @aep/agent-stream's write gate imports, built before it,
 # and the prototype review's frame host; @aep/ui-theme — the console's Oxygen
 # theme, which the Oxygen prototype theme bundles too; @wso2/prototype-theme-oxygen
 # — the Oxygen frame runtime the review runs a prototype on;
@@ -69,7 +68,6 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # fails ONLY here, as TS2307 plus a cascade of implicit-any and
 # undefined-narrowing errors in files that never mention it. Adding a dep to
 # apps/console/package.json means adding a line below.
-RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @wso2/prototype-kit build
 RUN pnpm --filter @aep/ui-theme build
 RUN pnpm --filter @wso2/prototype-theme-oxygen build

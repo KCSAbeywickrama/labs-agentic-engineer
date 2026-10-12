@@ -21,50 +21,23 @@ import (
 	"testing"
 )
 
-func TestToolResultDecoders(t *testing.T) {
-	planOk := `{"ok":true,"op":"plan","component":"svc","title":"Do it","dependsOn":["a"],"origin":"spec-plan","rationale":"why"}`
-	ok, op, err := ToolResultOK(json.RawMessage(planOk))
-	if err != nil || !ok || op != "plan" {
-		t.Fatalf("ToolResultOK = (%v,%q,%v)", ok, op, err)
-	}
-	p, err := DecodePlanTaskOk(json.RawMessage(planOk))
+func TestDecodeBuildPlanOk(t *testing.T) {
+	ok := `{"ok":true,"op":"build","items":[{"item":"foundation","components":["api"],"note":"Set up."},{"item":"F1","components":["api","web"],"note":"Claims."}]}`
+	p, err := DecodeBuildPlanOk(json.RawMessage(ok))
 	if err != nil {
-		t.Fatalf("DecodePlanTaskOk: %v", err)
+		t.Fatalf("DecodeBuildPlanOk: %v", err)
 	}
-	if p.Component != "svc" || p.Origin != OriginSpecPlan {
-		t.Fatalf("planOk fields: %+v", p)
+	if len(p.Items) != 2 || p.Items[1].Item != "F1" || len(p.Items[1].Components) != 2 {
+		t.Fatalf("items: %+v", p.Items)
 	}
-
-	updateOk := `{"ok":true,"op":"update","ref":{"title":"Do it"},"set":{"body":"b"}}`
-	u, err := DecodeUpdateTaskOk(json.RawMessage(updateOk))
-	if err != nil {
-		t.Fatalf("DecodeUpdateTaskOk: %v", err)
-	}
-	if u.Ref.Title == nil || *u.Ref.Title != "Do it" {
-		t.Fatalf("updateOk ref: %+v", u.Ref)
-	}
-	// An omitted set field decodes to a nil pointer (leave-unchanged semantics).
-	if u.Set.Title != nil || u.Set.DependsOn != nil || u.Set.Rationale != nil {
-		t.Fatalf("omitted set fields should be nil: %+v", u.Set)
-	}
-
-	// A plan result cannot be decoded as an update result and vice versa.
-	if _, err := DecodeUpdateTaskOk(json.RawMessage(planOk)); err == nil {
-		t.Fatalf("expected op mismatch error decoding plan as update")
-	}
-
-	// The resolved ref union is enforced (exactly one of issueNumber/title).
-	if _, err := DecodeUpdateTaskOk(json.RawMessage(`{"ok":true,"op":"update","ref":{"issueNumber":1,"title":"x"},"set":{}}`)); err == nil {
-		t.Fatalf("expected error for both ref branches")
-	}
-	if _, err := DecodeUpdateTaskOk(json.RawMessage(`{"ok":true,"op":"update","ref":{},"set":{}}`)); err == nil {
-		t.Fatalf("expected error for neither ref branch")
-	}
-
-	// A failed tool result (ok:false, self-correction) is skipped by the tap.
-	toolErr := `{"ok":false,"op":"plan","code":"UNKNOWN_COMPONENT","message":"no such component"}`
-	ok, _, err = ToolResultOK(json.RawMessage(toolErr))
-	if err != nil || ok {
-		t.Fatalf("ToolResultOK(err) = (%v,%v)", ok, err)
+	for name, raw := range map[string]string{
+		"a refused call":      `{"ok":false,"op":"build","code":"MISSING_ITEM","message":"F2 is left out"}`,
+		"another op":          `{"ok":true,"op":"plan","items":[{"item":"F1","components":["api"],"note":""}]}`,
+		"an empty checklist":  `{"ok":true,"op":"build","items":[]}`,
+		"not a result at all": `[]`,
+	} {
+		if _, err := DecodeBuildPlanOk(json.RawMessage(raw)); err == nil {
+			t.Errorf("%s decoded as a build plan", name)
+		}
 	}
 }

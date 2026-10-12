@@ -17,26 +17,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { DesignArtifact, DesignDependency } from "../api/designModel";
-import { artifactMarker, blockingDependencies, dependencyKey, filterArtifacts, openArtifact } from "./artifacts";
-
-function artifact(id: string, over: Partial<DesignArtifact> = {}): DesignArtifact {
-  return {
-    id,
-    title: id,
-    depth: "business",
-    features: ["F1", "F2"],
-    addedIn: 1,
-    changedIn: 1,
-    source: { kind: "security", rows: [] },
-    ...over,
-  };
-}
-
-const prototype = artifact("prototype");
-const architecture = artifact("architecture", { depth: "technical" });
-const acceptanceF1 = artifact("acceptance-F1", { features: ["F1"] });
-const all = [prototype, architecture, acceptanceF1];
+import type { DesignDependency } from "../api/designModel";
+import { blockingDependencies, COMMENTS_KEY, dependencyKey, openPane } from "./artifacts";
+import { designItems } from "./designFiles";
 
 const xero: DesignDependency = {
   featureId: "F3",
@@ -47,36 +30,23 @@ const xero: DesignDependency = {
   answer: null,
 };
 
-describe("filterArtifacts", () => {
-  it("shows every artifact under All, and one depth under Business or Technical, counting the rest", () => {
-    expect(filterArtifacts(all, "all")).toEqual({ shown: all, hidden: 0 });
-    expect(filterArtifacts(all, "business")).toEqual({ shown: [prototype, acceptanceF1], hidden: 1 });
-    expect(filterArtifacts(all, "technical")).toEqual({ shown: [architecture], hidden: 2 });
-  });
-});
-
-describe("artifactMarker", () => {
-  it("marks what the latest design turn added or changed, and nothing after a later turn", () => {
-    expect(artifactMarker(artifact("a", { addedIn: 2, changedIn: 2 }), 2, [])).toBe("new");
-    expect(artifactMarker(artifact("a", { addedIn: 1, changedIn: 2 }), 2, [])).toBe("changed");
-    expect(artifactMarker(artifact("a", { addedIn: 1, changedIn: 2 }), 3, [])).toBeNull();
-  });
-
-  it("marks every artifact covering an out-of-date feature, over new or changed", () => {
-    expect(artifactMarker(artifact("a", { addedIn: 2, changedIn: 2 }), 2, ["F2"])).toBe("out of date");
-    expect(artifactMarker(acceptanceF1, 1, ["F2"])).toBe("new");
-  });
-});
+const items = designItems({ "specs/design/design.cell": "title Acme\n", "specs/design/decisions.md": "# Technical decisions\n" });
 
 describe("dependencies", () => {
-  it("blocks only while unanswered", () => {
+  it("block only while unanswered", () => {
     expect(blockingDependencies([xero, { ...xero, featureId: "F4", answer: "We have our own contract" }])).toEqual([xero]);
   });
+});
 
-  it("opens the named artifact or dependency, else the first artifact", () => {
-    expect(openArtifact(all, [xero], "architecture")).toEqual({ kind: "artifact", artifact: architecture });
-    expect(openArtifact(all, [xero], dependencyKey("F3"))).toEqual({ kind: "dependency", dependency: xero });
-    expect(openArtifact(all, [xero], "gone")).toEqual({ kind: "artifact", artifact: prototype });
-    expect(openArtifact([], [], undefined)).toBeNull();
+describe("what the Design card opens", () => {
+  it("opens the Overview with no key, and for a key nothing has any more", () => {
+    expect(openPane(items, [xero], undefined)).toEqual({ kind: "overview" });
+    expect(openPane(items, [xero], "gone")).toEqual({ kind: "overview" });
+  });
+
+  it("opens every comment, a file by its key, or a blocking dependency", () => {
+    expect(openPane(items, [xero], COMMENTS_KEY)).toEqual({ kind: "comments" });
+    expect(openPane(items, [xero], "decisions")).toEqual({ kind: "item", item: items[1] });
+    expect(openPane(items, [xero], dependencyKey("F3"))).toEqual({ kind: "blocking", dependency: xero });
   });
 });

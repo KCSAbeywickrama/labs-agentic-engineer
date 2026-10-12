@@ -1,7 +1,7 @@
 # @aep/agent-stream
 
 The single **client-side consumption surface** for the spec agent's turn stream.
-The agents service produces the stream; the console, the evals, and the
+The design agent (`@aep/ae-design-agent`) produces the stream; the console, the evals, and the
 playground fold it — all through **one** definition here, so fold semantics can't
 diverge between implementations. The package has **zero server-side dependencies**
 (no Express, no AI SDK), so it is safe to bundle into the browser.
@@ -14,10 +14,11 @@ diverge between implementations. The package has **zero server-side dependencies
 | `TurnRequest`, `WorkspaceRef`, `Toolset`, `*Input`, `OpResult`, `Change` | the turn-request body (workspace ref + `toolset`) + SSE payload shapes |
 | `FileBundle`, `applyToolCall`, `toChange`, `isFileMutationTool` | the fold: reconstruct file state from the streamed tool-calls |
 | `checkComponentDesign`, `componentDesignSchema`, `COMPONENT_DESIGN_JSON_RE` | the component `design.json` write-gate (travels with `FileBundle`) |
-| `PLAN_TASK`/`UPDATE_TASK`, `PlanTaskInput`/`UpdateTaskInput`, `*Result`, `TaskContextFile` | the plan-turn tool contract (tasks-github-native §9.3) |
-| `planTaskInputSchema`, `updateTaskInputSchema` | the plan-tool Zod inputs (the agents service tool `inputSchema`s + the JSON-schema source) |
-| `parseKnownComponents`, `parseTaskContextFile` | the read-only plan context convention (`specs/design/components/…` + `tasks/<n>.md`) |
-| `componentDesignJsonSchema()`, `planTaskJsonSchema()`, `updateTaskJsonSchema()` | the schemas as JSON Schema, for the Go BFF |
+| `checkDesignReview`, `designReviewSchema`, `DesignReview`, `DESIGN_REVIEW_PATH` | `specs/design/review.json`, the Design step's comments and checks; its JSDoc (`src/contracts/design-review.ts`) has the lifecycle and the hash rule |
+| `PLAN_BUILD`, `BuildPlanInput`/`BuildPlanItem`, `BuildPlanResult` | the plan-turn tool contract |
+| `buildPlanInputSchema` | the plan-tool Zod input (the design agent's tool `inputSchema` + the JSON-schema source) |
+| `parseKnownComponents` | the read-only plan context convention (`specs/design/components/…`) |
+| `componentDesignJsonSchema()`, `designReviewJsonSchema()`, `buildPlanJsonSchema()` | the schemas as JSON Schema |
 | `streamTurn(baseUrl, id, body, { headers })` | the reference SSE reader (transport-only; caller supplies auth + key headers) |
 
 ## Write gates
@@ -30,12 +31,12 @@ self-correctable error instead, so the model fixes it in the same turn:
 |---|---|---|
 | `*.yaml` / frontmatter | parse-only YAML reparse | `INVALID_YAML` |
 | `components/*/design.json` | `checkComponentDesign` (JSON + schema + `name` = directory) | `INVALID_JSON`, `SCHEMA_VIOLATION` |
-| `wireframes.dsl` | flow-dialect syntax (invalid lines would be silently dropped) | `INVALID_DSL` |
 | `components/*/openapi.yaml` | OpenAPI 3.x, has paths, has operations | `INVALID_OPENAPI` |
 | `components/*/design.json` | every dependency names a node `design.cell` declares | `UNKNOWN_DEPENDENCY` |
 | `security.json` | `checkSecurityDesign` (v3 schema + the referential rules: a grant names a catalog handle, a role is not also a group, a test user names a declared role) | `INVALID_JSON`, `SCHEMA_VIOLATION` |
+| `review.json` | `checkDesignReview` (schema + the rules across entries: one entry per artifact path, unique comment ids, an addressed comment carries its reply, only a prototype's comments carry an anchor) | `INVALID_JSON`, `SCHEMA_VIOLATION` |
 | `dependencies/*/dependency.json` | `checkDependencyDesign` (schema + the user's authorization record rides through) | `INVALID_JSON`, `SCHEMA_VIOLATION` |
-| `components/*/prototype.json`, `prototype.tsx` | the kit's rules (`@wso2/prototype-kit/manifest` and `/source`): manifest JSON, version, shape, references; then, against the manifest in the bundle, the source's static rules and literal references. The manifest is written first; a manifest written beside an existing source is checked against it. Drawing every screen for every role and state is the host's asynchronous stage: `writeWithRenderCheck(bundle, write, render)` (the agents service passes the kit's isolated render check on the Oxygen theme) plans the write (`planAdd`/`planEdit`), draws the pair it would leave, then makes it. Findings ride on the error as `findings` | `INVALID_PROTOTYPE` |
+| `components/*/prototype.json`, `prototype.tsx` | the kit's rules (`@wso2/prototype-kit/manifest` and `/source`): manifest JSON, version, shape, references; then, against the manifest in the bundle, the source's static rules and literal references. The manifest is written first; a manifest written beside an existing source is checked against it. Drawing every screen for every role and state is the host's asynchronous stage: `writeWithRenderCheck(bundle, write, render)` (the design agent passes the kit's isolated render check on the Oxygen theme) plans the write (`planAdd`/`planEdit`), draws the pair it would leave, then makes it. Findings ride on the error as `findings` | `INVALID_PROTOTYPE` |
 | `domain-model.md` | exactly one mermaid `erDiagram`, in the prescribed subset | `INVALID_DIAGRAM` |
 | `flows/*.md` | exactly one mermaid `sequenceDiagram`; every participant resolves — by its id or by its `as` alias — to a node `design.cell` declares or an actor the PRD names | `INVALID_DIAGRAM`, `UNKNOWN_PARTICIPANT` |
 
@@ -51,11 +52,11 @@ would reject a write the agent is only relaying.
 
 ## Published JSON Schema
 
-The Zod schemas are published as JSON Schema so the Go BFF validates against the
-same definitions the agents service uses — one schema, not two hand-kept copies.
+The Zod schemas are published as JSON Schema so the Go services (`aep-api`, `ae-studio-tools`) validate against the
+same definitions the design agent uses — one schema, not two hand-kept copies.
 The checked-in artifacts live under `packages/contracts/schemas/`:
-`component-design.schema.json` (design.json save-gate), `plan-task.schema.json`
-and `update-task.schema.json` (the plan tool inputs the BFF plan tap vendors).
+`component-design.schema.json` (design.json save-gate), `design-review.schema.json`
+(review.json save-gate) and `build-plan.schema.json` (the plan tool input).
 
 Regenerate them after changing a schema:
 

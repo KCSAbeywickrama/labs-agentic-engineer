@@ -29,16 +29,16 @@ import {
   componentDesignJsonSchema,
   dependencyDesignJsonSchema,
   securityDesignJsonSchema,
-  planTaskJsonSchema,
-  updateTaskJsonSchema,
+  designReviewJsonSchema,
+  buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
   DEPENDENCY_DESIGN_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_SCHEMA_ARTIFACT,
-  PLAN_TASK_SCHEMA_ARTIFACT,
-  UPDATE_TASK_SCHEMA_ARTIFACT,
+  DESIGN_REVIEW_SCHEMA_ARTIFACT,
+  BUILD_PLAN_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_MESSAGES_ARTIFACT,
   OPENAPI_SECURITY_MESSAGES_ARTIFACT,
@@ -52,8 +52,8 @@ const artifacts: [string, string, () => Record<string, unknown>][] = [
   ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
   ["dependency-design.schema.json", DEPENDENCY_DESIGN_SCHEMA_ARTIFACT, dependencyDesignJsonSchema],
   ["security-design.schema.json", SECURITY_DESIGN_SCHEMA_ARTIFACT, securityDesignJsonSchema],
-  ["plan-task.schema.json", PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema],
-  ["update-task.schema.json", UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema],
+  ["design-review.schema.json", DESIGN_REVIEW_SCHEMA_ARTIFACT, designReviewJsonSchema],
+  ["build-plan.schema.json", BUILD_PLAN_SCHEMA_ARTIFACT, buildPlanJsonSchema],
   ["agent-afm.schema.json", AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema],
   // The security-gate message catalog is vendored by the BFF, which formats the
   // same templates so both gates say the same sentence about the same document.
@@ -77,12 +77,9 @@ for (const [name, path, render] of artifacts) {
   });
 }
 
-test("plan-task/update-task schemas expose their routable fields first (streaming order)", () => {
-  const plan = planTaskJsonSchema() as { properties?: Record<string, unknown> };
-  assert.deepEqual(Object.keys(plan.properties ?? {}), ["component", "feature", "title", "dependsOn", "origin", "rationale"]);
-  const update = updateTaskJsonSchema() as { properties?: { set?: { properties?: Record<string, unknown> } } };
-  // `body` (the long free-text field) streams last within `set`.
-  assert.deepEqual(Object.keys(update.properties?.set?.properties ?? {}), ["title", "dependsOn", "rationale", "body"]);
+test("the build-plan item streams its routable fields first and the note last", () => {
+  const plan = buildPlanJsonSchema() as { properties?: { items?: { items?: { properties?: Record<string, unknown> } } } };
+  assert.deepEqual(Object.keys(plan.properties?.items?.items?.properties ?? {}), ["item", "components", "note"]);
 });
 
 test("the schema is a strict object exposing the ComponentDesign fields", () => {

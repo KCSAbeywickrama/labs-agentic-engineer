@@ -37,8 +37,8 @@ const validationReportPath = "tests/acceptance/report.json"
 type Reads struct {
 	runs   RunReader
 	cycles CycleReader
-	// recordings answers RunCycleView.recording. Optional: nil reports `none`
-	// for every cycle, which is exactly right on a boot that records nothing.
+	// recordings answers RunCycleView.recording. Optional: nil reports
+	// `unavailable` for every cycle — a boot with no feed can serve none.
 	recordings RecordingReader
 }
 
@@ -130,11 +130,11 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle, recordings 
 }
 
 // RecordingOf resolves one cycle's recording state through an optional reader.
-// A nil reader answers `none`: the platform has no record of this cycle's feed,
-// which is what a boot with no recording store honestly has.
+// A nil reader answers `unavailable`: a boot with no feed can serve no cycle's
+// log.
 func RecordingOf(recordings RecordingReader, c *delivery.RunCycle) gen.RunCycleViewRecording {
 	if recordings == nil {
-		return gen.RunCycleViewRecordingNone
+		return gen.RunCycleViewRecordingUnavailable
 	}
 	return recordings.RecordingState(c)
 }
@@ -178,16 +178,12 @@ func validationView(verdict string, issue int) gen.RunValidation {
 // differently.
 //
 // `recording` is passed IN rather than derived here, and that is the seam: it is
-// the only field on this shape that is not a column of the row. It answers what
+// the only field on this shape that is not derived from the row. It answers what
 // the PLATFORM can serve of the cycle's feed — `none` when it has no record at
 // all, `lost` when it had one and cannot serve it — and those two are the same
 // empty screen and very different bugs, so a projection that could not be told
 // the difference would have to guess.
 func CycleView(c *delivery.RunCycle, recording gen.RunCycleViewRecording) gen.RunCycleView {
-	resolves := make([]int64, 0, len(c.Resolves))
-	for _, n := range c.Resolves {
-		resolves = append(resolves, int64(n))
-	}
 	return gen.RunCycleView{
 		ID:           c.ID,
 		Kind:         gen.RunCycleViewKind(c.Kind),
@@ -197,7 +193,8 @@ func CycleView(c *delivery.RunCycle, recording gen.RunCycleViewRecording) gen.Ru
 		PrNumber:     int64(c.PRNumber),
 		PrURL:        c.PRURL,
 		PrDraft:      c.PRDraft,
-		Resolves:     resolves,
+		Resolves:     issueNumbersView(c.Resolves),
+		Advances:     issueNumbersView(c.Advances),
 		MergeSha:     c.MergeSHA,
 		MergeVerdict: gen.RunCycleViewMergeVerdict(c.MergeVerdict),
 		MergeReason:  c.MergeReason,
@@ -208,8 +205,26 @@ func CycleView(c *delivery.RunCycle, recording gen.RunCycleViewRecording) gen.Ru
 		ValidationVerdict: gen.RunCycleViewValidationVerdict(c.ValidationVerdict),
 		ValidationIssue:   int64(c.ValidationIssue),
 		Recording:         recording,
+		StartupWait:       startupWaitView(c),
 		CreatedAt:         c.CreatedAt,
 		EndedAt:           c.EndedAt,
+	}
+}
+
+// startupWaitView projects the watcher's durable startup wait, nil when there
+// is none to show. Only an OPEN cycle waits: once the cycle has ended, an agent
+// that never started is told by agentReason (`startup_failed:…`), and a wait
+// left on the row would read as one still going. failsAt is the deadline the
+// watcher applies (delivery.RunCycle.StartupDeadline), so the console's "fails
+// at" and the close agree.
+func startupWaitView(c *delivery.RunCycle) *gen.RunCycleStartupWait {
+	if c.EndedAt != nil || c.StartupWaitReason == "" || c.StartupWaitSince == nil {
+		return nil
+	}
+	return &gen.RunCycleStartupWait{
+		Reason:  c.StartupWaitReason,
+		Since:   *c.StartupWaitSince,
+		FailsAt: c.StartupDeadline(),
 	}
 }
 
@@ -238,4 +253,15 @@ func failureView(row *delivery.MilestoneRun) *gen.RunFailure {
 		ResetAt:     f.ResetAt,
 		WorkflowID:  delivery.MilestoneRunWorkflowID(row.Kind, row.OrgID, row.ProjectID, row.MilestoneNumber),
 	}
+}
+
+// issueNumbersView is a recorded issue list on the wire. The generated field
+// is `omitempty`, so an empty list is absent from the JSON, never null: a
+// reader treats an absent field as no issues.
+func issueNumbersView(ns delivery.IssueNumbers) []int64 {
+	out := make([]int64, 0, len(ns))
+	for _, n := range ns {
+		out = append(out, int64(n))
+	}
+	return out
 }

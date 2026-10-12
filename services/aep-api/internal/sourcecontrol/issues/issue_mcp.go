@@ -33,8 +33,8 @@ import (
 )
 
 // An issue's agent: the tools of one issue's own chat. The issue is the one
-// the token claims (auth.IssuesMCPScope.IssueNumber) — no tool takes a number.
-// Whether a write may run is the agents service's confirmation gate, not this
+// the route names (auth.IssuesMCPScope.IssueNumber) — no tool takes a number.
+// Whether a write may run is the design agent's confirmation gate, not this
 // handler's: by the time a write lands here the user has confirmed it.
 
 // IssueAgentPorts are what an issue's agent reaches beyond the issue service.

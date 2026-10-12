@@ -17,6 +17,7 @@
 package delivery
 
 import (
+	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
@@ -50,6 +51,15 @@ const (
 // IssueNumbers is a jsonb-serialized list of GitHub issue numbers. Named so the
 // column's shape is declared once rather than spelled out at each field.
 type IssueNumbers []int
+
+// CycleWork is what the merge policy found a cycle's pull request worked: the
+// issues it resolves (the merge closes them) and the build issue it advances
+// (the merge lands part of it). A struct rather than two issue lists side by
+// side, so a writer cannot record one set in the other's column.
+type CycleWork struct {
+	Resolves []int
+	Advances []int
+}
 
 // RunCycle is one dispatch within a MilestoneRun: the platform hands the
 // coding agent a milestone reference, the agent opens one PR, and the PR
@@ -112,6 +122,16 @@ type RunCycle struct {
 	// boundary read the supervisor dispatches on returns COUNTS, so nothing else
 	// in the system can attribute a closed issue to the cycle that closed it.
 	Resolves IssueNumbers `gorm:"type:jsonb;serializer:json" json:"resolves,omitempty"`
+
+	// Advances is the merge policy's ADVANCED set: the version's build issue
+	// this cycle's pull request finished some items of (`Advances #N`). The
+	// merge lands them and leaves the issue open, its done items ticked.
+	//
+	// It is kept apart from Resolves because Resolves is what the merge CLOSES,
+	// and its readers render it so: folding the build issue in would show a
+	// half-built version's issue as finished. Without it, a cycle merged on
+	// `Advances #N` alone would record that it worked nothing.
+	Advances IssueNumbers `gorm:"type:jsonb;serializer:json" json:"advances,omitempty"`
 
 	// ValidationVerdict is what THIS validation attempt concluded, derived from the
 	// report at this cycle's own MergeSHA. Empty on every other kind, and until the
@@ -219,11 +239,104 @@ type RunCycle struct {
 	// which may have moved since. Empty on a cycle not yet dispatched.
 	Environment string `gorm:"type:text" json:"-"`
 
+	// ComponentUID is the UID of the OpenChoreo Component the cycle's Job runs
+	// as, copied at launch (NoteLaunch). Observer reads address the
+	// Component by this UID; the settler deletes by NAME. Empty on a cycle
+	// not yet dispatched or one that predates the column.
+	ComponentUID string `gorm:"type:text;not null;default:''" json:"-"`
+	// JobSuspendedAt, PodGoneAt and ComponentDeletedAt are the settle facts:
+	// when the Job was suspended, when its pod was first seen gone (cleared if
+	// it reappears) and when its Component was deleted. Each is written once.
+	JobSuspendedAt     *time.Time `gorm:"column:job_suspended_at" json:"-"`
+	PodGoneAt          *time.Time `gorm:"column:pod_gone_at" json:"-"`
+	ComponentDeletedAt *time.Time `gorm:"column:component_deleted_at" json:"-"`
+	// SettleCheckedAt is when the settler last visited the closed cycle. The
+	// settle sweep lists the least recently checked first (never-checked
+	// before all), so rows that never settle cannot starve a later one.
+	SettleCheckedAt *time.Time `gorm:"column:settle_checked_at" json:"-"`
+	// DispatchedAt is when the CURRENT attempt was dispatched (NoteDispatch).
+	// A re-dispatch reuses the cycle's Component, so the previous attempt's
+	// finished pod can still be in its tree; the watcher ignores a pod created
+	// before this. Nil on a cycle not yet dispatched or one that predates the
+	// column.
+	DispatchedAt *time.Time `gorm:"column:dispatched_at" json:"-"`
+
+	// StartupWaitReason and StartupWaitSince say why the current attempt's pod
+	// is stuck before Running, while it is: the pod's own waiting reason
+	// (`Unschedulable`, `ImagePullBackOff`, `CreateContainerConfigError`, …)
+	// and when the watcher first saw the attempt stuck. Written by the watcher
+	// (NoteStartupWait) on an open cycle, cleared when the pod runs or is no
+	// longer stuck and by a re-dispatch. Durable so the run view can show the
+	// wait without reading the cluster; past StartupDeadline the cycle closes
+	// `startup_failed:<reason>` and the run view stops showing it. While
+	// OpenChoreo has not applied the attempt's Job the reason is the
+	// platform's own `NotYetApplied`, not a Kubernetes one.
+	StartupWaitReason string     `gorm:"column:startup_wait_reason;type:text;not null;default:''" json:"-"`
+	StartupWaitSince  *time.Time `gorm:"column:startup_wait_since" json:"-"`
+	// StartupClockAt is when the current attempt's startup grace began: the
+	// later of its dispatch and the creation of the attempt's pod (or, before
+	// there is one, its Job) as the watcher first saw it in the resource tree.
+	// Written once per attempt (NoteStartupClock), cleared by a re-dispatch.
+	// Nil while OpenChoreo has not applied the attempt's Job: the attempt is
+	// then bounded by CycleApplyCap from its dispatch (StartupDeadline).
+	StartupClockAt *time.Time `gorm:"column:startup_clock_at" json:"-"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	// EndedAt stamps the cycle closed. A nil EndedAt is the "still open" guard
 	// every mutator is fenced on.
 	EndedAt *time.Time `json:"endedAt,omitempty"`
+}
+
+// CycleReasonCancelled is the terminal agent reason of a cycle ended by a
+// cancel (FinishCancelled), not by the agent itself.
+const CycleReasonCancelled = "cancelled"
+
+// CycleReasonStartupFailedPrefix starts the terminal agent reason of a cycle
+// whose pod never reached Running by its StartupDeadline:
+// `startup_failed:<reason>[: <message>]`. Nothing ran, so the agent never
+// started: the run settles RunReasonAgentStartFailed, and the cycle's Job is
+// suspended so its pod cannot start later on a closed cycle.
+const CycleReasonStartupFailedPrefix = "startup_failed:"
+
+// CycleStartupGrace is how long an attempt's pod may take to reach Running,
+// counted from when its Job or pod exists (StartupClockAt), before the watcher
+// closes the cycle startup_failed. Generous because it has to cover an image
+// pull on a cold node.
+const CycleStartupGrace = 10 * time.Minute
+
+// CycleApplyCap bounds an attempt whose Job OpenChoreo has not applied yet,
+// counted from its dispatch: past it the watcher closes the cycle
+// `startup_failed:not_applied`. Longer than the grace because Cloud OpenChoreo
+// applies a release 8-13 min after it is requested.
+const CycleApplyCap = 30 * time.Minute
+
+// IsStartupFailure reports whether a cycle's agent reason says its agent never
+// started (CycleReasonStartupFailedPrefix).
+func IsStartupFailure(agentReason string) bool {
+	return strings.HasPrefix(agentReason, CycleReasonStartupFailedPrefix)
+}
+
+// AttemptStart is when the current attempt was dispatched (DispatchedAt), or,
+// on a row that predates that column, its last write (the dispatch was the
+// last write such a row received while waiting). The apply cap counts from it,
+// and the start clock is never earlier.
+func (c RunCycle) AttemptStart() time.Time {
+	if c.DispatchedAt != nil {
+		return *c.DispatchedAt
+	}
+	return c.UpdatedAt
+}
+
+// StartupDeadline is when the watcher fails the current attempt if its pod has
+// not reached Running: StartupClockAt plus CycleStartupGrace once the Job or
+// pod exists, else AttemptStart plus CycleApplyCap. The run view shows the
+// same deadline, so the console's "fails at" and the close agree.
+func (c RunCycle) StartupDeadline() time.Time {
+	if c.StartupClockAt != nil {
+		return c.StartupClockAt.Add(CycleStartupGrace)
+	}
+	return c.AttemptStart().Add(CycleApplyCap)
 }
 
 // TableName pins the table name so a struct rename cannot silently move the

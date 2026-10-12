@@ -43,7 +43,7 @@ func admitRun(t *testing.T, repo delivery.MilestoneRunRepository, org, project s
 // dispatch activity does — the host its capture is then priced against.
 func dispatchedOn(t *testing.T, cycles delivery.RunCycleRepository, c *delivery.RunCycle, host string) {
 	t.Helper()
-	if _, err := cycles.NoteLaunch(context.Background(), c.ID, host, "development"); err != nil {
+	if _, err := cycles.NoteLaunch(context.Background(), c.ID, host, "development", ""); err != nil {
 		t.Fatalf("NoteLaunch(%s): %v", c.ID, err)
 	}
 }
@@ -64,7 +64,7 @@ func TestRunCycleRepository_NoteLaunchRecordsHostAndEnvironment(t *testing.T) {
 	if err := cycles.Append(ctx, cycle); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.AnthropicHost, "dev-b")
+	row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.AnthropicHost, "dev-b", "")
 	if err != nil || row == nil {
 		t.Fatalf("NoteLaunch(open) = (%+v, %v), want the updated row", row, err)
 	}
@@ -76,7 +76,7 @@ func TestRunCycleRepository_NoteLaunchRecordsHostAndEnvironment(t *testing.T) {
 	if _, err := cycles.Finish(ctx, cycle.ID, "deadbeef"); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	if row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.OllamaHost, "staging"); err != nil || row != nil {
+	if row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.OllamaHost, "staging", ""); err != nil || row != nil {
 		t.Fatalf("NoteLaunch(closed) = (%+v, %v), want (nil, nil)", row, err)
 	}
 	var env string
@@ -175,7 +175,7 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 
 	// The merge policy's matched set is the cycle's only record of what it
 	// worked; a verdict is written only when the pull request did NOT merge.
-	declined, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{7, 8},
+	declined, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{7, 8}, Advances: []int{3}},
 		delivery.CycleMergeDeclined, "no resolved issue is this run's work in this milestone")
 	if err != nil || declined == nil {
 		t.Fatalf("NoteMergeDecision(declined) = (%+v, %v)", declined, err)
@@ -183,18 +183,21 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 	if len(declined.Resolves) != 2 || declined.Resolves[0] != 7 || declined.Resolves[1] != 8 {
 		t.Fatalf("resolves = %v, want [7 8]", declined.Resolves)
 	}
+	if len(declined.Advances) != 1 || declined.Advances[0] != 3 {
+		t.Fatalf("advances = %v, want [3]", declined.Advances)
+	}
 	if declined.MergeVerdict != delivery.CycleMergeDeclined || declined.MergeReason == "" {
 		t.Fatalf("verdict = (%q, %q), want declined with a reason",
 			declined.MergeVerdict, declined.MergeReason)
 	}
 	// A re-push that now merges must not leave the stale verdict behind: every
 	// decision overwrites, blanks included.
-	merged, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{7, 8}, "", "resolves agent work in the run's milestone")
+	merged, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{7, 8}}, "", "resolves agent work in the run's milestone")
 	if err != nil || merged == nil {
 		t.Fatalf("NoteMergeDecision(merge) = (%+v, %v)", merged, err)
 	}
-	if merged.MergeVerdict != "" {
-		t.Fatalf("verdict after a merging decision = %q, want cleared", merged.MergeVerdict)
+	if merged.MergeVerdict != "" || len(merged.Advances) != 0 {
+		t.Fatalf("after a merging decision: verdict %q, advances %v, want both cleared", merged.MergeVerdict, merged.Advances)
 	}
 
 	done, err := cycles.Finish(ctx, cycle.ID, "deadbeef")
@@ -214,7 +217,7 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 	}); err != nil || got != nil {
 		t.Fatalf("NotePullRequest on a closed cycle = (%+v, %v), want (nil, nil)", got, err)
 	}
-	if got, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{99}, delivery.CycleMergeRefused, "late"); err != nil || got != nil {
+	if got, err := cycles.NoteMergeDecision(ctx, cycle.ID, delivery.CycleWork{Resolves: []int{99}}, delivery.CycleMergeRefused, "late"); err != nil || got != nil {
 		t.Fatalf("NoteMergeDecision on a closed cycle = (%+v, %v), want (nil, nil)", got, err)
 	}
 	if got, err := cycles.Finish(ctx, cycle.ID, "cafebabe"); err != nil || got != nil {
@@ -810,7 +813,60 @@ func TestRunCycleRepository_ModelHostPricesTheCapture(t *testing.T) {
 	if _, err := cycles.Finish(ctx, anthropic.ID, "deadbeef"); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	if row, err := cycles.NoteLaunch(ctx, anthropic.ID, modelconn.OllamaHost, "development"); err != nil || row != nil {
+	if row, err := cycles.NoteLaunch(ctx, anthropic.ID, modelconn.OllamaHost, "development", ""); err != nil || row != nil {
 		t.Fatalf("NoteLaunch(closed) = (%+v, %v), want (nil, nil)", row, err)
+	}
+}
+
+// The settle stamps describe one ATTEMPT's Job, not the cycle: a re-dispatch
+// launches a new Job on the same open cycle, so NoteDispatch clears
+// job_suspended_at and pod_gone_at in the same write that moves job_ref.
+// Otherwise the watcher would hide attempt 2's startup failure behind attempt
+// 1's suspend, and never suspend attempt 2's Job.
+func TestRunCycleRepository_NoteDispatchStartsAFreshAttempt(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	runs := delivery.NewMilestoneRunRepository(db)
+	cycles := delivery.NewRunCycleRepository(db, nil)
+	ctx := context.Background()
+
+	run := admitRun(t, runs, "orgs", "proj", 1, "v1")
+	cycle := &delivery.RunCycle{
+		OrgID: run.OrgID, ProjectID: run.ProjectID, RunID: run.ID, Kind: delivery.CycleKindCoding,
+	}
+	if err := cycles.Append(ctx, cycle); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := cycles.NoteDispatch(ctx, cycle.ID, "ca-attempt"); err != nil {
+		t.Fatalf("NoteDispatch(1): %v", err)
+	}
+	if _, err := cycles.MarkJobSuspended(ctx, cycle.ID); err != nil {
+		t.Fatalf("MarkJobSuspended: %v", err)
+	}
+	if err := cycles.NotePodGone(ctx, cycle.ID, time.Now()); err != nil {
+		t.Fatalf("NotePodGone: %v", err)
+	}
+
+	before := time.Now().Add(-time.Second)
+	row, err := cycles.NoteDispatch(ctx, cycle.ID, "ca-attempt")
+	if err != nil || row == nil {
+		t.Fatalf("NoteDispatch(2) = (%+v, %v), want the updated row", row, err)
+	}
+	// dispatched_at is the attempt's own clock: the watcher tells a pod left
+	// over from attempt 1 on the reused binding by it.
+	if row.DispatchedAt == nil || row.DispatchedAt.Before(before) {
+		t.Fatalf("dispatched_at = %v, want this dispatch's time", row.DispatchedAt)
+	}
+	if row.JobSuspendedAt != nil || row.PodGoneAt != nil {
+		t.Fatalf("re-dispatched row = (job_suspended_at %v, pod_gone_at %v), want both cleared",
+			row.JobSuspendedAt, row.PodGoneAt)
+	}
+	var cleared int64
+	if err := db.Raw(`SELECT count(*) FROM run_cycles WHERE id = ? AND job_suspended_at IS NULL AND pod_gone_at IS NULL`,
+		cycle.ID).Scan(&cleared).Error; err != nil {
+		t.Fatalf("read stamps: %v", err)
+	}
+	if cleared != 1 {
+		t.Fatal("stored stamps not both NULL after the re-dispatch")
 	}
 }

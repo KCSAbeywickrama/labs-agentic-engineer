@@ -16,15 +16,13 @@
  * under the License.
  */
 
-import { useMemo } from "react";
 import { Typography } from "@wso2/oxygen-ui";
 import type * as Y from "yjs";
 import { EmptyState } from "../../../components/EmptyState";
 import { Link } from "@tanstack/react-router";
 import { SinceBuild } from "../../builds/components/SinceBuild";
 import { useFailingIn } from "../../builds/hooks/useFailingIn";
-import type { ProductWideItem, SpecModel } from "../api/specModel";
-import { designChangedLines } from "../model/designChanges";
+import type { ProductWideItem } from "../api/specModel";
 import { fileFragment } from "../collab/specEdits";
 import { SpecEditor } from "../collab/SpecEditor";
 import type { OpenFile } from "../model/files";
@@ -91,7 +89,6 @@ function FeatureKicker({ projectName, feature }: { projectName: string; feature:
 /** The open file of the spec card: the product page, a feature, product-wide, or a source document. */
 export function SpecFilePane({
   projectName,
-  model,
   workspace,
   doc,
   lines,
@@ -99,7 +96,6 @@ export function SpecFilePane({
   onOpen,
 }: {
   projectName: string;
-  model: SpecModel;
   workspace: Workspace;
   doc: Y.Doc;
   /** The live lines of every file, as the editor holds them. */
@@ -107,12 +103,6 @@ export function SpecFilePane({
   file: OpenFile;
   onOpen: (target: SpecTarget) => void;
 }) {
-  const featureId = file.kind === "feature" ? file.key : null;
-  const designChanged = useMemo(
-    () => (featureId ? designChangedLines(model.design.specChanges, featureId) : null),
-    [model.design.specChanges, featureId],
-  );
-
   if (file.kind === "document") {
     return <SourceDocumentView document={file.document} index={workspace.index} onOpen={onOpen} />;
   }
@@ -163,7 +153,7 @@ export function SpecFilePane({
   return (
     <>
       <FeatureKicker projectName={projectName} feature={feature} />
-      <SpecEditor key={file.path} {...editorProps} designChanged={designChanged} />
+      <SpecEditor key={file.path} {...editorProps} />
       {feature.blocking.length > 0 ? (
         feature.blocking.map((q) => <BlockingQuestionBox key={q.question} doc={doc} feature={feature} blocking={q} />)
       ) : (

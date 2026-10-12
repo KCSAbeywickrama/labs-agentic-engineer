@@ -45,5 +45,6 @@ and a generated app must not reproduce them:
   `options` objects without `isOptionEqualToValue`, so the selection may not
   render as selected.
 - `pages/ComponentList.tsx` places a `FormLabel` next to a `Select` without
-  associating them. Use `TextField select label="…"` (the wireframe table).
+  associating them. Use `TextField select label="…"` (the `Field` row of the
+  prototype table in `SKILL.md`).
 

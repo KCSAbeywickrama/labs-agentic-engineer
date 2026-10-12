@@ -66,7 +66,6 @@ describe("opensQuestionsCard (where asked questions open the card)", () => {
     expect(opensQuestionsCard(at("overview"), "acme")).toBe(true);
     expect(opensQuestionsCard(at("overview", "spec"), "acme")).toBe(true);
     expect(opensQuestionsCard(at("overview", "design"), "acme")).toBe(true);
-    expect(opensQuestionsCard(at("overview", "prototype"), "acme")).toBe(true);
   });
 
   it("leaves the user where they are on the project's other pages", () => {

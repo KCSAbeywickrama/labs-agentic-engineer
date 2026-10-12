@@ -68,3 +68,15 @@ func TestValidate_AnUncompilablePatternIsReported(t *testing.T) {
 		t.Fatal("want a message for a pattern that does not compile")
 	}
 }
+
+// Lengths count characters, not bytes, so non-ASCII text the Zod gate accepted
+// is not refused here.
+func TestValidate_CountsLengthInCharacters(t *testing.T) {
+	s := MustParse([]byte(`{"type":"string","minLength":3,"maxLength":3}`))
+	if msgs := Validate("été", s); len(msgs) != 0 { // three characters, five bytes
+		t.Fatalf("want a three-character string accepted, got %v", msgs)
+	}
+	if msgs := Validate("étés", s); len(msgs) == 0 {
+		t.Fatal("want a four-character string refused by maxLength 3")
+	}
+}

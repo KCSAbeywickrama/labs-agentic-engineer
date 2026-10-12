@@ -18,33 +18,31 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { parseDesignCommand } from "@aep/contracts/commands";
-import { client } from "../../api/client";
+import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand } from "@aep/contracts/commands";
 import { env } from "../../config/env";
+import { buildPreflightQuery } from "../builds/api/preflight";
 import { useProjectChat } from "../agent-chat/useProjectChat";
 import { useSpecDoc } from "../spec/collab/specDoc";
 import { useRoomFiles } from "../spec/collab/useRoomFiles";
 import { useMockDesignModel, type DesignDependency, type DesignModel, type DesignRun } from "./api/designModel";
 import { designCatalog } from "./model/catalog";
 
-// The design review (N7, E4). On the platform it is worked out from the room:
+// The design model (N7, E4). On the platform it is worked out from the room:
 // the catalog from the design's files (model/catalog.ts), the dependencies
 // that wait on a person from the build preflight, and the design turn running
-// now from the chat. Commenting (pins, Address comments) is the mock's alone
-// until it ships (E5, parked): on the platform there are no comments, and the
-// card does not offer to pin one.
+// now from the chat (a design, or Address comments). The review (comments,
+// Checked) is review.json's, read by useDesignReview.
 //
-// In mock mode the whole review is the mock's, as approved.
+// In mock mode the model is the mock's.
 
 const DESIGN_FILES = ["specs/design/", "specs/validation/acceptance/"] as const;
-const TAUGHT_KEY = "aep:design-taught";
 
-function taughtHere(): boolean {
-  try {
-    return localStorage.getItem(TAUGHT_KEY) === "1";
-  } catch {
-    return false;
-  }
+/** The design-review turn an instruction starts, if it is one. */
+function runOf(instruction: string | undefined): DesignRun | null {
+  if (!instruction) return null;
+  if (instruction.trim() === ADDRESS_COMMENTS_COMMAND) return { kind: "address", features: [] };
+  const design = parseDesignCommand(instruction);
+  return design ? { kind: "design", features: design.featureIds } : null;
 }
 
 /** The dependencies a person must decide before their features build (E2): one per feature its component serves. */
@@ -71,17 +69,7 @@ export function useDesignModel(projectName: string) {
   const mocked = useMockDesignModel(projectName, mock);
   const files = useRoomFiles(useSpecDoc(projectName), DESIGN_FILES);
   const chat = useProjectChat(projectName);
-  const preflight = useQuery({
-    queryKey: ["projects", projectName, "build-preflight"],
-    queryFn: async () => {
-      const { data, error } = await client.GET("/projects/{projectName}/build/preflight", {
-        params: { path: { projectName } },
-      });
-      if (error || data === undefined) throw new Error("Couldn't read the design's dependencies");
-      return data;
-    },
-    enabled: !mock,
-  });
+  const preflight = useQuery({ ...buildPreflightQuery(projectName), enabled: !mock });
 
   const platform = useMemo((): DesignModel | undefined => {
     if (mock) return undefined;
@@ -89,17 +77,11 @@ export function useDesignModel(projectName: string) {
     const componentFeatures = new Map(
       artifacts.flatMap((a) => (a.source.kind === "contract" ? [[a.id, a.features] as const] : [])),
     );
-    const instruction = chat.turn.phase === "idle" ? undefined : chat.turn.instruction;
-    const design = instruction ? parseDesignCommand(instruction) : null;
-    const running: DesignRun | null = design ? { kind: "design", features: design.featureIds } : null;
     return {
-      revision: 0,
-      running,
+      revision: null,
+      running: runOf(chat.turn.phase === "idle" ? undefined : chat.turn.instruction),
       artifacts,
       dependencies: dependenciesOf(preflight.data?.items ?? [], componentFeatures),
-      comments: [],
-      taught: taughtHere(),
-      commenting: false,
     };
   }, [mock, files, chat.turn, preflight.data]);
 

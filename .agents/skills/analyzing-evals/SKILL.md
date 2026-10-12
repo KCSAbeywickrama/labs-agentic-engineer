@@ -40,7 +40,7 @@ correct one.
 
 | Class | Signal | Owner of the fix |
 | --- | --- | --- |
-| Eval defect | The item asks for a control that `wireframes.dsl` does not draw, or a state that wired mode cannot show. Or the walker misread the page. | The case's `checklist.yaml`, or the planner (`evals/codegen/src/planner.ts`, `wired-auth.ts`) |
+| Eval defect | The item asks for a control that the prototype (`prototype.json`, `prototype.tsx`) does not show, or a state that wired mode cannot show. Or the walker misread the page. | The case's `checklist.yaml`, or the planner (`evals/codegen/src/planner.ts`, `wired-auth.ts`) |
 | Harness defect | A `harness-error`, or wire, Docker or the walker failed for a reason outside the generated code. | `evals/codegen` or `playground` code |
 | Spec defect | The case's `specs/` contradict each other, or cannot make the precondition. The checklist's gaps header names these. | The design skill that wrote that artifact |
 | Fixture defect | The case's input is not what production sends. For example, production derives a field (such as `wiring` in `design.json`) that the playground does not. | The playground, or `eval-save` |

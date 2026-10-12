@@ -17,9 +17,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_FEEDBACK_QUEUE, enqueue, keepDraft, requestFor, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
+import { MAX_FEEDBACK_REQUESTS, requestFor } from "@wso2/prototype-kit/feedback";
 import { initialPrototypeView, reducePrototypeView, type PrototypeManifest } from "@wso2/prototype-kit/host";
-import { feedbackBatch, sent } from "./feedback";
+import { commentCount, queueFull } from "./feedback";
 
 const manifest: PrototypeManifest = {
   schemaVersion: 3,
@@ -33,14 +33,6 @@ const manifest: PrototypeManifest = {
   ],
   flows: [{ id: "flow.approve", name: "Approve", roleId: "manager", screenIds: ["screen.claims", "screen.claim"] }],
 };
-
-const request = (screenId: string, elementIds: string[], text = "Change it"): FeedbackRequest => ({
-  screenId,
-  roleId: "manager",
-  stateId: "state.default",
-  elementIds,
-  text,
-});
 
 describe("a request on the review", () => {
   it("is the kit's: made on what the reviewer looks at, for the selection in the order it was made", () => {
@@ -59,23 +51,13 @@ describe("a request on the review", () => {
   });
 });
 
-describe("the batch Send makes", () => {
-  const hash = "c".repeat(64);
-
-  it("is the queued comments, on their revision, as the component's feedback", () => {
-    const queue = enqueue(EMPTY_FEEDBACK_QUEUE, hash, request("screen.claim", ["btn.approve"]));
-    expect(feedbackBatch("expense-web", queue)).toEqual({ prototypeHash: hash, component: "expense-web", requests: [request("screen.claim", ["btn.approve"])] });
+describe("the queue's count", () => {
+  it("is full at the kit's limit for one batch", () => {
+    expect(queueFull(MAX_FEEDBACK_REQUESTS - 1)).toBe(false);
+    expect(queueFull(MAX_FEEDBACK_REQUESTS)).toBe(true);
   });
 
-  it("leaves the drafts out, and is nothing while only drafts are kept", () => {
-    const drafted = keepDraft(EMPTY_FEEDBACK_QUEUE, request("screen.claims", ["btn.reject"], "Half a thought"));
-    expect(feedbackBatch("expense-web", drafted)).toBeNull();
-    expect(feedbackBatch("expense-web", enqueue(drafted, hash, request("screen.claim", [])))?.requests).toEqual([request("screen.claim", [])]);
-  });
-
-  it("empties the queue once sent, keeping the drafts", () => {
-    const draft = request("screen.claims", ["btn.reject"], "Half a thought");
-    const queue = enqueue(keepDraft(EMPTY_FEEDBACK_QUEUE, draft), hash, request("screen.claim", []));
-    expect(sent(queue)).toEqual({ ...EMPTY_FEEDBACK_QUEUE, drafts: [draft] });
+  it("counts comments in words", () => {
+    expect([commentCount(1), commentCount(3)]).toEqual(["1 comment", "3 comments"]);
   });
 });

@@ -36,7 +36,7 @@ interface Row {
   message?: RegExp;
 }
 
-const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor", "app-shell", "team-leave", "row-actions"];
+const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor", "app-shell", "app-shell-no-settings", "team-leave", "row-actions"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
@@ -67,6 +67,8 @@ const invalid: Row[] = [
   // Source: literal navigation targets against the manifest.
   { fixture: "source-unknown-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 27"]], message: /screen\.reports/ },
   { fixture: "source-unknown-go", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 28"]], message: /screen\.audit/ },
+  // Types: what transpiling erases, against the kit's declarations and the source's own.
+  { fixture: "type-stat-unknown-icon", findings: [["TYPE_ERROR", "prototype.tsx", "line 28"]], message: /"Calender".*Did you mean '"Calendar"'/ },
   // Render: every screen × role × state, isolated.
   { fixture: "render-throws-in-one-state", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.empty"]], message: /reading 'join'/ },
   { fixture: "render-throws-for-one-role", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as admin in state.default"]], message: /reading 'name'/ },

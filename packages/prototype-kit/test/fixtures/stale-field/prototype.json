@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 3,
+  "name": "Acme Expenses",
+  "entryScreen": "screen.my-claims",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Manager", "name": "Manager" },
+    { "id": "Finance", "name": "Finance" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Receipt scan failed" }
+  ],
+  "screens": [
+    { "id": "screen.my-claims", "name": "My claims", "roleIds": ["Employee", "Manager", "Finance"] },
+    { "id": "screen.new-claim", "name": "New expense", "roleIds": ["Employee", "Manager", "Finance"] },
+    { "id": "screen.claim-detail", "name": "Claim detail", "roleIds": ["Employee", "Manager", "Finance"] },
+    { "id": "screen.team-queue", "name": "Team approvals", "roleIds": ["Manager"] },
+    { "id": "screen.team-claim-detail", "name": "Review team claim", "roleIds": ["Manager"] },
+    { "id": "screen.finance-queue", "name": "Finance approvals", "roleIds": ["Finance"] },
+    { "id": "screen.finance-claim-detail", "name": "Review claim (finance)", "roleIds": ["Finance"] },
+    { "id": "screen.people", "name": "People", "roleIds": ["Finance"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Manager", "Finance"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Manager", "Finance"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Manager", "Finance"] }
+  ],
+  "flows": [
+    { "id": "flow.submit-claim", "name": "Submit an expense claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.new-claim", "screen.claim-detail"] },
+    { "id": "flow.approve-team-claim", "name": "Approve a team member's claim", "roleId": "Manager",
+      "screenIds": ["screen.team-queue", "screen.team-claim-detail"] },
+    { "id": "flow.finance-second-approval", "name": "Give the second approval", "roleId": "Finance",
+      "screenIds": ["screen.finance-queue", "screen.finance-claim-detail"] },
+    { "id": "flow.assign-manager", "name": "Assign a manager and deputy", "roleId": "Finance",
+      "screenIds": ["screen.people"] }
+  ]
+}

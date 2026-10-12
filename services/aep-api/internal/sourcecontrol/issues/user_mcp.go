@@ -30,17 +30,19 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// The issues MCP surface, one endpoint serving two agents by token scope:
+// The issues MCP surface, one handler serving two agents by route scope:
 //
 //   - the console's Issues view chats with an agent that can search and file
 //     issues on the ONE project the view was opened on (this file);
 //   - an issue's own chat talks to an agent that reads and works that ONE issue
 //     (issue_mcp.go).
 //
-// auth.IssuesMCPVerifier binds the org + project (+ issue number) from the
-// signed token before this handler runs; nothing the model sends can name
-// another project, another org, another issue, or a label. Each scope lists
-// and calls only its own tools. Unknown arguments are ignored.
+// auth.IssuesMCPGate binds the org (from the AE Studio pod's credential) and
+// the project (+ issue number, from the route) before this handler runs; the
+// pod picks the route from the chat a turn runs in, and nothing the model
+// sends can name another project, another org, another issue, or a label.
+// Each scope lists and calls only its own tools. Unknown arguments are
+// ignored.
 
 // userIssueKinds are the kinds the agent may file; each is also the label.
 var userIssueKinds = []string{"bug", "feature", "improvement"}
@@ -61,9 +63,9 @@ const userSearchBodyRunes = 500
 const userSearchMaxHits = 25
 
 // NewUserMCPHandler serves the Issues agent's search_issues and create_issue
-// tools on a project-scoped token, and an issue agent's tools (issueTools) on
-// an issue-scoped one. A request without the verifier's scope answers 401; a
-// nil issues service answers 503.
+// tools on a project's route, and an issue agent's tools (issueTools) on an
+// issue's. A request without the gate's scope answers 401; a nil issues
+// service answers 503.
 func NewUserMCPHandler(issues sourcecontrol.IssueService, agent IssueAgentPorts) http.Handler {
 	projectServer := mcprpc.Server{
 		Name: "aep-issues", Version: "1.0.0", Tools: userTools(),

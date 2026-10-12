@@ -34,6 +34,9 @@ browser config — they are pod env for nginx.
 3. **Implement pages** — follow Constraints, and check `src/api.ts` against the
    **first** page with `npx tsc --noEmit` before writing the rest: that pair proves
    how the generated client types, and every later page repeats the pattern.
+   The prototype (`specs/design/components/<name>/prototype.json` and
+   `prototype.tsx`) is the screen contract. Before the first page, read
+   `${AEP_SKILLS_DIR:-.claude/skills}/prototype/references/implementing.md`.
 4. **Mock mode** — author `mock/` per `references/mock-mode.md`, including the four
    wiring files in its §2. It stands the same app up with no cluster, no sibling
    service and no IDP behind it — with the API gateway's own refusals modelled

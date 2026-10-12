@@ -62,18 +62,18 @@ describe("chatStoreFor", () => {
     expect(activeTurn).toHaveBeenCalledWith("shop", "issues", undefined);
   });
 
-  it("starts an issues turn with the words and the view alone, whatever scope the composer holds", async () => {
+  it("starts an issues turn with the words alone, whatever scope the composer holds: its thread names its chat", async () => {
     await chatStoreFor("issues").open("shop-send");
     await chatStoreFor("issues").send("shop-send", "The login button is broken", { kind: "design" });
-    expect(startTurn).toHaveBeenCalledWith("shop-send", "conv-1", { instruction: "The login button is broken", view: "issues" });
+    expect(startTurn).toHaveBeenCalledWith("shop-send", "conv-1", { instruction: "The login button is broken" });
   });
 
-  it("reads the main thread without a view and starts its turns as room turns", async () => {
+  it("reads the main thread without a view and starts its turns as the composer built them", async () => {
     await chatStore.open("shop-main");
     await chatStore.send("shop-main", "Add approvals", { kind: "product" });
     expect(conversationId).toHaveBeenCalledWith("shop-main", undefined, undefined);
     expect(activeTurn).toHaveBeenCalledWith("shop-main", undefined, undefined);
-    expect(startTurn).toHaveBeenCalledWith("shop-main", "conv-1", { instruction: "Add approvals", collab: true });
+    expect(startTurn).toHaveBeenCalledWith("shop-main", "conv-1", { instruction: "Add approvals" });
   });
 
   it("keeps one store per issue, made when first asked for, apart from the main and Issues stores", () => {
@@ -90,14 +90,10 @@ describe("chatStoreFor", () => {
     expect(activeTurn).toHaveBeenCalledWith("shop-issue", "issue", 7);
   });
 
-  it("starts an issue's turn with the words, the view and the issue's number", async () => {
+  it("starts an issue's turn with the words alone: its thread names the issue", async () => {
     await chatStoreFor("issue", 7).open("shop-issue-send");
     await chatStoreFor("issue", 7).send("shop-issue-send", "Comment that it is fixed", { kind: "product" });
-    expect(startTurn).toHaveBeenCalledWith("shop-issue-send", "conv-1", {
-      instruction: "Comment that it is fixed",
-      view: "issue",
-      issueNumber: 7,
-    });
+    expect(startTurn).toHaveBeenCalledWith("shop-issue-send", "conv-1", { instruction: "Comment that it is fixed" });
   });
 
   it("marks the issue closed when its thread turns out removed (409 issue_closed), and that issue only", async () => {

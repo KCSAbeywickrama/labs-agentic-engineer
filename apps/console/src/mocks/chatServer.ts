@@ -17,9 +17,8 @@
  */
 
 import type { ChatView } from "../features/agent-chat/chatView";
-import type { PrototypeFeedback } from "../features/agent-chat/turnScope";
 import type { StreamPart } from "@aep/agent-stream";
-import type { components } from "../generated/aep-api";
+import type { components } from "../generated/ae-design-agent";
 import type { FeatureStage } from "../features/spec/api/specModel";
 import type { DesignEffect } from "./designState";
 
@@ -81,8 +80,6 @@ export interface MockTurn {
   design?: DesignEffect;
   /** The prototype files a `/prototype` turn left, by room path (fixtures/prototype.ts). */
   prototype?: Record<string, string>;
-  /** The review batch a `/prototype` turn carried, journaled with its message as the platform does. */
-  prototypeFeedback?: PrototypeFeedback;
   /** Why the turn failed (its stream ends `turn-failed`); absent when it completed. */
   failure?: string;
 }
@@ -112,16 +109,22 @@ function write(state: State): void {
   }
 }
 
+/**
+ * The chat a project's conversation id belongs to, as the design agent knows
+ * the chat of each thread it keeps; `null` for an id that is no thread of the
+ * project.
+ */
+export function chatOfConversation(projectName: string, conversationId: string): { view: ChatView; issueNumber?: number } | null {
+  if (conversationId === conversationIdFor(projectName)) return { view: "main" };
+  if (conversationId === conversationIdFor(projectName, "issues")) return { view: "issues" };
+  const issue = new RegExp(`^conv-${projectName}-issue-([1-9][0-9]*)$`).exec(conversationId);
+  return issue ? { view: "issue", issueNumber: Number(issue[1]) } : null;
+}
+
 /** A project's conversation in a view: the main chat's, the Issues Page's own, or an issue's own. */
 export function conversationIdFor(projectName: string, view: ChatView = "main", issueNumber?: number): string {
   if (view === "issue") return `conv-${projectName}-issue-${issueNumber}`;
   return view === "main" ? `conv-${projectName}` : `conv-${projectName}-${view}`;
-}
-
-/** The use case a turn runs as, as aep-api names it: an issue's is `issue-<n>`. */
-export function turnUseCase(turn: MockTurn): string {
-  if (turn.view === "issue") return `issue-${turn.issueNumber}`;
-  return turn.view === "issues" ? "issues" : "general";
 }
 
 function duration(turn: MockTurn): number {

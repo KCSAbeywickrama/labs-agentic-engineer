@@ -22,6 +22,7 @@ import type { LineBlock } from "../../spec/model/ids";
 import type { ProjectBuild } from "../api/builds";
 import { builtLines } from "./changes";
 import {
+  buildHold,
   buildOffer,
   canStart,
   defaultSelection,
@@ -83,15 +84,7 @@ function input(over: Partial<PickerInput> = {}): PickerInput {
     productWide,
     lines,
     dependencies: [{ featureId: "F3", needs: "Xero", answer: null }],
-    comments: [
-      { artifactId: "flow-approve", status: "open" },
-      { artifactId: "prototype", status: "addressed" },
-      { artifactId: "prototype", status: "resolved" },
-    ],
-    artifacts: [
-      { id: "flow-approve", features: ["F2"] },
-      { id: "prototype", features: ["F1", "F2"] },
-    ],
+    waitingComments: 2,
     builds: [],
     ...over,
   };
@@ -102,14 +95,10 @@ const row = (offer: ReturnType<typeof buildOffer>, id: string) => offer.rows.fin
 describe("a first build: which features can go in, and why not", () => {
   const offer = buildOffer(input());
 
-  it("offers the designed features as new, with lines to confirm and comments open as warnings", () => {
+  it("offers the designed features as new, with lines to confirm as a warning", () => {
     expect(offer.version).toBe("v1");
-    expect(row(offer, "F1")).toMatchObject({ state: "offered", detail: ["new", "1 comment not resolved"], warn: true });
-    expect(row(offer, "F2")).toMatchObject({
-      state: "offered",
-      detail: ["new", "2 to confirm, builds as assumed", "2 comments not resolved"],
-      warn: true,
-    });
+    expect(row(offer, "F1")).toMatchObject({ state: "offered", detail: ["new"], warn: false });
+    expect(row(offer, "F2")).toMatchObject({ state: "offered", detail: ["new", "2 to confirm, builds as assumed"], warn: true });
   });
 
   it("holds a feature waiting on something outside the product, saying what, before its question", () => {
@@ -154,10 +143,10 @@ describe("a first build: which features can go in, and why not", () => {
     expect(togglePick(offer, selection, "F3", true)).toBe(selection);
   });
 
-  it("says what else the build runs, and that open comments do not block it", () => {
+  it("says what else the build runs, and that comments waiting to be sent do not block it", () => {
     expect(pickerSummary(offer)).toEqual([
       { label: "Foundation", text: "P1 · P2 · P4, built first, in v1" },
-      { label: "Comments", text: "2 not resolved (this doesn't block the build)" },
+      { label: "Comments", text: "2 comments not sent with Address comments (this doesn't block the build)" },
       { label: "Validation", text: "every scenario of the picked features, tagged by story" },
     ]);
   });
@@ -182,7 +171,7 @@ describe("a later build: what changed since, and a new product-wide item", () =>
   edited.set(path("F2"), [h1("Approvals"), li("F2.1 I see pending claims, oldest first."), li("F2.2 I approve with a reason.")]);
   const withP5: ProductWideItem[] = [...productWide, { id: "P5", appliesTo: ["F2", "F3"] }];
   const later = (over: Partial<PickerInput> = {}) =>
-    buildOffer(input({ builds: [v1], lines: edited, productWide: withP5, comments: [], ...over }));
+    buildOffer(input({ builds: [v1], lines: edited, productWide: withP5, waitingComments: 0, ...over }));
 
   it("says what changed in a built feature, and shows an unchanged one without a box", () => {
     const offer = later({ productWide });
@@ -223,7 +212,7 @@ describe("a later build: what changed since, and a new product-wide item", () =>
   it("re-checks everything built so far, over a foundation built in v1", () => {
     expect(pickerSummary(later()).map((l) => l.text)).toEqual([
       "P1 · P2 · P4, built in v1",
-      "all resolved",
+      "none waiting",
       "re-checks everything built so far",
     ]);
   });
@@ -237,6 +226,22 @@ describe("a later build: what changed since, and a new product-wide item", () =>
 
   it("offers nothing while a build runs", () => {
     expect(nextUpBuild(later({ builds: [{ ...v1, status: "building" }] }))).toBeNull();
+  });
+
+  it("says why no build can start: one running, features held, or nothing new", () => {
+    expect(buildHold(later(), false)).toBeNull();
+    expect(buildHold(null, false)).toEqual({ kind: "loading" });
+    expect(buildHold(later({ builds: [{ ...v1, status: "building" }] }), false)).toEqual({ kind: "running", version: "v1" });
+    expect(buildHold(later({ lines, productWide }), false)).toEqual({ kind: "held", features: [{ name: "Payroll export", reasons: ["waiting on Xero", "blocked by a question"] }] });
+    expect(buildHold(later({ lines, productWide, dependencies: [] }), false)).toEqual({ kind: "nothing-new" });
+  });
+
+  it("holds a build the agent could freeze half written, until its turn ends", () => {
+    expect(buildHold(later(), true)).toEqual({ kind: "agent-working" });
+    // Whatever else holds it, the agent's turn may change: it is the reason to wait.
+    expect(buildHold(later({ lines, productWide, dependencies: [] }), true)).toEqual({ kind: "agent-working" });
+    // A running build still says so: Build opens it.
+    expect(buildHold(later({ builds: [{ ...v1, status: "building" }] }), true)).toEqual({ kind: "running", version: "v1" });
   });
 });
 

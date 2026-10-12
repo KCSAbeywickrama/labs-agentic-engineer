@@ -1,44 +1,38 @@
-# Domain Model
+# Domain model
 
-The tracker centers on one onboarding record per new hire, holding tasks
-scoped to a department and, optionally, drawn from a reusable per-department
-template.
+An onboarding tracks one new hire's checklist of tasks, each owned by a department (IT, HR or Facilities). Overdue and due-soon flags are computed from the due date, not stored.
 
 ```mermaid
 erDiagram
-    ONBOARDING_RECORD ||--o{ TASK : contains
-    TASK_TEMPLATE ||--o{ TASK : "seeds (optional)"
+    ONBOARDING ||--o{ TASK : contains
+    TASK ||--o{ TASK_NOTE : has
 
-    ONBOARDING_RECORD {
-        string id
+    ONBOARDING {
+        string id PK
         string newHireName
+        string role
         date startDate
-        string status
-        datetime createdAt
+        string status "active | closed | cancelled"
     }
     TASK {
-        string id
-        string onboardingRecordId
-        string department
-        string name
-        string status
+        string id PK
+        string onboardingId FK
+        string title
+        string description
+        string department "IT | HR | Facilities"
         date dueDate
-        string notes
+        string status "open | done"
+        date completedOn
     }
-    TASK_TEMPLATE {
-        string id
-        string department
-        string name
-        int defaultDueOffsetDays
+    TASK_NOTE {
+        string id PK
+        string taskId FK
+        string text
+        string authorUsername
+        datetime createdAt
     }
 ```
 
-- **OnboardingRecord** — one per new hire; `status` is `in-progress` or
-  `complete`, the latter only reachable once every task is done.
-- **Task** — belongs to exactly one department (`it`, `hr`, `facilities`);
-  `status` is `pending`, `in-progress`, or `complete`; a task is **overdue**
-  when `dueDate` has passed and `status` is not `complete` — computed, not
-  stored.
-- **TaskTemplate** — a department's standard checklist item, applied when an
-  HR Coordinator creates a new onboarding record so it starts pre-populated;
-  an HR Coordinator may still add, edit, or remove individual tasks afterward.
+- Progress, per-department done/open counts, overdue and due-soon are derived from tasks and today's date.
+- A new onboarding is seeded with the default task set, with due dates as offsets from the start date.
+- A caller's department is not stored: the API derives it from which department scopes (`tasks:*-it`, `-hr`, `-facilities`) the gateway assertion carries; the assertion holds sub, username and scope only, never groups.

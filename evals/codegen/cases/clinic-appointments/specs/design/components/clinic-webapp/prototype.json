@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 3,
+  "name": "Clinic Appointments",
+  "entryScreen": "screen.home",
+  "roles": [
+    { "id": "Patient", "name": "Patient" },
+    { "id": "Doctor", "name": "Doctor" },
+    { "id": "Receptionist", "name": "Receptionist" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.conflict", "name": "Slot taken or rule refused" },
+    { "id": "state.failed", "name": "Clinic service failed" }
+  ],
+  "screens": [
+    { "id": "screen.home", "name": "Home", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.slots", "name": "Open slots", "roleIds": ["Patient", "Receptionist"] },
+    { "id": "screen.my-appointments", "name": "My appointments", "roleIds": ["Patient"] },
+    { "id": "screen.my-slots", "name": "My availability", "roleIds": ["Doctor"] },
+    { "id": "screen.my-day", "name": "My day", "roleIds": ["Doctor"] },
+    { "id": "screen.consultation", "name": "Appointment and visit notes", "roleIds": ["Doctor"] },
+    { "id": "screen.front-desk", "name": "Front desk", "roleIds": ["Receptionist"] },
+    { "id": "screen.patients", "name": "Patients", "roleIds": ["Receptionist"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Patient", "Doctor", "Receptionist"] }
+  ],
+  "flows": [
+    { "id": "flow.patient-books", "name": "Book, reschedule and cancel an appointment", "roleId": "Patient",
+      "screenIds": ["screen.slots", "screen.my-appointments"] },
+    { "id": "flow.doctor-availability", "name": "Publish availability", "roleId": "Doctor",
+      "screenIds": ["screen.my-slots"] },
+    { "id": "flow.doctor-notes", "name": "Doctor's day and visit notes", "roleId": "Doctor",
+      "screenIds": ["screen.my-day", "screen.consultation"] },
+    { "id": "flow.reception", "name": "Reception books and checks in", "roleId": "Receptionist",
+      "screenIds": ["screen.patients", "screen.slots", "screen.front-desk"] }
+  ]
+}

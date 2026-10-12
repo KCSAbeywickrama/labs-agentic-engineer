@@ -135,8 +135,8 @@ the base component that does accept one is not re-exported from the package
 root. Both existing `SearchBar` sites in the console have no clear button, which
 is why nobody had hit it.
 
-The segmented control's `sx` is lifted from `WireframePanel.tsx`, comment
-included: its `height: 28` is exact rather than a floor, because the natural
+The segmented control's `sx` was lifted from the console's wireframes panel
+(`WireframePanel.tsx`, retired with the wireframes), comment included: its `height: 28` is exact rather than a floor, because the natural
 height jumps the row.
 
 ## The row

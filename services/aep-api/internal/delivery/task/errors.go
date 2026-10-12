@@ -18,11 +18,11 @@
 // (docs/design/tasks-github-native.md §1, §10.1). A Task IS a GitHub issue —
 // its labels, body (machine block + rationale + scope), open/closed state, and
 // linked PRs. This package reads Tasks live from GitHub joined with their
-// executions to compute derived status (reads.go), plans Tasks on the agents
-// service and executes the tool-call stream against GitHub mid-flight (plan.go /
-// plan_tap.go), stamps command labels (commands.go), composes issue bodies over
-// the machine block (issue_compose.go), and handles issues.* webhooks — task
-// birth, block validation/repair, close/reopen, attention (events.go). It never
+// executions to compute derived status (reads.go), plans the version's build in
+// the org's AE Studio pod and mints its one build issue (plan.go /
+// plan_tap.go), stamps command labels (commands.go), and handles issues.*
+// webhooks — task birth, block validation/repair, close/reopen, attention
+// (events.go). It never
 // stores a Task status (that is derived) and never imports the platform-owned
 // execution half — the §1 split is a package boundary (arch-locked).
 package task
@@ -41,24 +41,8 @@ var (
 	// project has no versioned (tagged) spec. Mapped to 400 (the build-first
 	// gate — the version tag certifies a validated requirements+design pair).
 	ErrNoSpecVersion = errors.New("planning requires a versioned spec — build the project first")
-	// ErrPlanInProgress is returned when a plan turn is already running for the
-	// project (the one-active-plan-turn invariant, §6). Mapped to 409
-	// {code:"plan_in_progress"}.
-	ErrPlanInProgress = errors.New("a plan turn is already running for this project")
 	// ErrComponentNameRequired is returned by PromoteAndExecute when the caller
 	// omits the component name — a client input error, not a server fault, so
 	// the HTTP edge maps it to 400 rather than a generic 500.
 	ErrComponentNameRequired = errors.New("componentName is required")
-	// ErrNoModelConnection is returned pre-stream when the org has no model
-	// connection to plan on. Mapped to 400.
-	ErrNoModelConnection = errors.New("organization has no model connection")
-	// ErrSkillsRepoUnavailable means the org's _skills repo (the plan turn's
-	// SkillsRef source) could not be resolved — its row is missing or
-	// unprovisionable, or the backing repo is gone/unreachable (live incident:
-	// the GitHub repo was deleted externally while its git_repositories row
-	// lingered). Mapped to a LOGGED 503 with a clear message instead of an
-	// opaque 500. Recovery is a manual operator action today: delete the stale
-	// `_skills` git_repositories row — the next resolve re-provisions and
-	// re-seeds the repo.
-	ErrSkillsRepoUnavailable = errors.New("org skills repository unavailable")
 )

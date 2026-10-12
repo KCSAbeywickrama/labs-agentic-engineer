@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import { markdownToNode } from "@aep/collab-doc";
 import { docLines } from "../collab/docLines";
-import { blockingEntries, blockingQuestions } from "./questions";
+import { blockingEntries, blockingQuestions, openQuestions } from "./questions";
 
 // Read through the same pipeline the room uses (markdown → document → lines),
 // so the nesting an option's depth comes from is the real one.
@@ -87,5 +87,22 @@ describe("blockingQuestions", () => {
     const [entry] = blockingEntries(linesOf(`## Open Questions\n\n1. ${XERO} *blocking*\n   - One organisation.\n`));
     expect(entry!.line.text).toBe(`${XERO} blocking`);
     expect(entry!.line.lineTo - entry!.line.lineFrom).toBeGreaterThan(entry!.line.to - entry!.line.from);
+  });
+});
+
+describe("openQuestions", () => {
+  it("reads every entry of Open Questions, blocking or not, with its options, leaving out a deferred one", () => {
+    const md = `## Open Questions
+
+1. ${XERO} *blocking*
+   - One organisation.
+2. Can a manager approve their own claim?
+   - No, Finance approves it.
+3. Which currency do refunds use? deferred — the user will decide later
+`;
+    expect(openQuestions(linesOf(md))).toEqual([
+      { question: XERO, options: ["One organisation."], blocking: true },
+      { question: "Can a manager approve their own claim?", options: ["No, Finance approves it."], blocking: false },
+    ]);
   });
 });

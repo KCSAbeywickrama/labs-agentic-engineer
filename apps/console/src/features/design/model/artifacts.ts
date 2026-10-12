@@ -16,70 +16,37 @@
  * under the License.
  */
 
-import type { ArtifactDepth, DesignArtifact, DesignDependency } from "../api/designModel";
+import type { DesignDependency } from "../api/designModel";
+import type { DesignItem } from "./designFiles";
 
-// The design card's artifact list, worked out from the design model and the
-// live spec: one list, filtered by depth, each artifact with the features it
-// covers and a marker for what happened to it lately. Pure, so a keystroke
-// that puts a feature out of date marks its artifacts on the next render.
+// What the Design card opens (`?art=`): the Overview (no key), every comment
+// (`comments`), one of the design's files by its item key, or a dependency
+// the design leaves waiting on a person (`dep-F3`), which blocks its own
+// feature's build and nothing else.
 
-export type DepthFilter = "all" | ArtifactDepth;
-
-export const DEPTH_FILTERS: { value: DepthFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "business", label: "Business" },
-  { value: "technical", label: "Technical" },
-];
-
-/** The artifacts a filter shows, in the list's order, and how many it hides. */
-export function filterArtifacts(
-  artifacts: DesignArtifact[],
-  filter: DepthFilter,
-): { shown: DesignArtifact[]; hidden: number } {
-  const shown = filter === "all" ? artifacts : artifacts.filter((a) => a.depth === filter);
-  return { shown, hidden: artifacts.length - shown.length };
-}
-
-/**
- * What happened to an artifact lately. "out of date": a feature it covers
- * changed in the spec since it was designed, and wins over the rest.
- * Otherwise "new" when the latest design turn added it and "changed" when the
- * latest turn changed it; nothing once a later turn has passed it by.
- */
-export type ArtifactMarker = "out of date" | "new" | "changed";
-
-export function artifactMarker(
-  artifact: Pick<DesignArtifact, "features" | "addedIn" | "changedIn">,
-  revision: number,
-  outOfDate: readonly string[],
-): ArtifactMarker | null {
-  if (artifact.features.some((f) => outOfDate.includes(f))) return "out of date";
-  if (artifact.addedIn === revision) return "new";
-  if (artifact.changedIn === revision) return "changed";
-  return null;
-}
-
-/** Dependencies still waiting on an answer: each blocks its own feature's build, nothing else. */
+/** Dependencies still waiting on an answer. */
 export function blockingDependencies(dependencies: DesignDependency[]): DesignDependency[] {
   return dependencies.filter((d) => d.answer === null);
 }
 
-/** The key the design card's URL names a dependency by (`?art=dep-F3`), beside the artifacts' own IDs. */
+/** The key the design card's URL names a dependency by (`?art=dep-F3`), beside the files' own keys. */
 export function dependencyKey(featureId: string): string {
   return `dep-${featureId}`;
 }
 
-/** What the card shows for `?art=`: that artifact or dependency, else the first there is. */
-export function openArtifact(
-  artifacts: DesignArtifact[],
-  dependencies: DesignDependency[],
-  art: string | undefined,
-):
-  | { kind: "artifact"; artifact: DesignArtifact }
-  | { kind: "dependency"; dependency: DesignDependency }
-  | null {
-  const dependency = dependencies.find((d) => dependencyKey(d.featureId) === art);
-  if (dependency) return { kind: "dependency", dependency };
-  const artifact = artifacts.find((a) => a.id === art) ?? artifacts[0];
-  return artifact ? { kind: "artifact", artifact } : null;
+/** The pane `?art=` names; the Overview for none, or for a key nothing has any more. */
+export type DesignPane =
+  | { kind: "overview" }
+  | { kind: "comments" }
+  | { kind: "item"; item: DesignItem }
+  | { kind: "blocking"; dependency: DesignDependency };
+
+export const COMMENTS_KEY = "comments";
+
+export function openPane(items: readonly DesignItem[], blocking: readonly DesignDependency[], art: string | undefined): DesignPane {
+  if (art === COMMENTS_KEY) return { kind: "comments" };
+  const item = items.find((i) => i.key === art);
+  if (item) return { kind: "item", item };
+  const dependency = blocking.find((d) => dependencyKey(d.featureId) === art);
+  return dependency ? { kind: "blocking", dependency } : { kind: "overview" };
 }

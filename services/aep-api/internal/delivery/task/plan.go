@@ -20,377 +20,148 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"sort"
-	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/clients/aestudiotools"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// PlanService assembles the plan-turn context, starts the upstream turn, and
-// hands back a PlanSession the HTTP edge streams. One active plan turn per
-// project is enforced by an in-process in-flight set (§6) plus the upstream 409
-// passthrough. (This guard is a separate concern from genai's durable
-// one-active-turn row — plan turns commit nothing, so the in-process set is
-// enough.)
+// errNoBuildPlan is a Plan turn that completed without an ok planBuild. A
+// milestone with no development issue settles at once as delivered, so this is
+// a failed plan, never an empty one.
+var errNoBuildPlan = errors.New("plan: the turn completed without a build plan")
+
+// PlanService runs the version's Plan turn in the org's AE Studio pod and mints
+// the build issue its last ok planBuild describes. One turn per project is the
+// pod's lock: a different turn running is aestudiotools.ErrTurnInProgress,
+// which the planning activity retries.
 type PlanService struct {
-	repos      RepoResolver
-	versions   VersionReader
-	git        GitReader
-	llm        AgentLLMResolver
-	client     TurnClient
-	issues     IssueClient
-	writer     *delivery.IssueWriter
-	snapshots  sourcecontrol.SnapshotProvider
-	skillsRepo SkillsRepoResolver
-	// paths resolves each component's appPath for the planned Task's body.
-	// Optional; nil omits the App Path line.
-	paths ComponentPathReader
-
-	inflight sync.Map // projectKey → struct{}
+	repos    sourcecontrol.ProjectRepoRows
+	versions VersionReader
+	turns    aestudiotools.Turns
+	writer   *delivery.IssueWriter
 }
 
-// SetComponentPaths wires the design's component → appPath reader so a planned
-// Task's body carries the App Path the agent works in. A nil reader is a
-// documented no-op (the line is omitted).
-func (s *PlanService) SetComponentPaths(r ComponentPathReader) { s.paths = r }
-
-// NewPlanService wires the plan service. git/snapshots/skillsRepo back the
-// workspace dispatch (snapshot refs + lineage diffs); issues is the READ half
-// the turn's context is assembled from and writer is the domain's issue-write
-// surface, which is what the tap mints each planned Task through.
-func NewPlanService(repos RepoResolver, versions VersionReader, git GitReader, llm AgentLLMResolver, client TurnClient, issues IssueClient, writer *delivery.IssueWriter, snapshots sourcecontrol.SnapshotProvider, skillsRepo SkillsRepoResolver) *PlanService {
-	return &PlanService{repos: repos, versions: versions, git: git, llm: llm, client: client, issues: issues, writer: writer, snapshots: snapshots, skillsRepo: skillsRepo}
+// NewPlanService wires the plan service. turns runs the Plan turn in the org's
+// pod; writer is the domain's issue-write surface the build issue is minted
+// through.
+func NewPlanService(repos sourcecontrol.ProjectRepoRows, versions VersionReader, turns aestudiotools.Turns, writer *delivery.IssueWriter) *PlanService {
+	return &PlanService{repos: repos, versions: versions, turns: turns, writer: writer}
 }
 
-// planSession is a started plan turn: the raw upstream SSE body, the tap that
-// executes tool frames against GitHub, and a release for the in-flight lock.
-type planSession struct {
-	body    io.ReadCloser
-	tap     *planTap
-	release func()
-}
-
-// drain runs the turn to completion and reports how many GitHub writes the tap
-// could not land. The build click has no SSE consumer — planning is the
-// detached half of the plan path — so the turn is driven to the end here and
-// the failure count decides whether the run it just planned is honest.
+// PlanIntoMilestone plans the version's build and mints its one build issue
+// into the milestone, with the `aep` working-set label, once the turn
+// completes. A failed, silent or broken-off turn mints nothing, and so does a
+// completed one with no ok planBuild (errNoBuildPlan).
 //
-// It survives a caller that walks away: the tap keeps reading upstream so every
-// write lands, and the in-flight lock releases when this returns.
-func (s *planSession) drain() int {
-	defer s.release()
-	s.tap.Stream(s.body, io.Discard, func() {})
-	return s.tap.failures
-}
-
-// PlanIntoMilestone plans the version's Tasks straight into its milestone and
-// waits for the turn to finish. Every issue the turn mints joins the milestone
-// AT CREATION (1+N calls) with the `aep` working-set label and a prose body.
-//
-// It is the plan path's half of the build click. A write the tap could not land
-// is an error rather than a warning: the run this plan feeds is about to be
-// supervised against the milestone's contents, so a silently short plan would
-// become a run that settles early.
-// Pre-stream failures are typed errors (ErrNoSpecVersion, ErrNoModelConnection,
-// ErrProjectRepoNotFound, ErrPlanInProgress, ErrSkillsRepoUnavailable) or an
-// *agentsvc.UpstreamError.
+// Pre-stream failures are typed: ErrProjectRepoNotFound, ErrNoSpecVersion,
+// or the pod's (aestudiotools.ErrTurnInProgress, ErrAEStudioUnavailable,
+// ErrAEStudioMisconfigured, ErrAEStudioAbsent, *StatusError).
 func (s *PlanService) PlanIntoMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) error {
-	session, err := s.startPlan(ctx, orgID, projectID, milestoneNumber)
+	// A row that is missing, or not provisioned yet, has nothing to plan in.
+	ref, row, err := sourcecontrol.RepoRefFor(ctx, s.repos, orgID, projectID)
+	if errors.Is(err, sourcecontrol.ErrRepoNotFound) || (err == nil && row.Status != "" && row.Status != "ready") {
+		return ErrProjectRepoNotFound
+	}
 	if err != nil {
 		return err
 	}
-	if failures := session.drain(); failures > 0 {
-		return fmt.Errorf("plan: %d issue write(s) failed for milestone %d", failures, milestoneNumber)
+
+	// Gate: a versioned (tagged) spec must exist (build-first). The tag is cut
+	// by the build endpoint AFTER the whole-spec hard gate, so its presence
+	// certifies a buildable requirements+design pair. A version is whatever
+	// the user named it (ADR-0030), so membership is the tag's own annotation,
+	// never the shape of its name. A read FAILURE is not an answer.
+	versions, err := s.versions.ListSpecVersionTags(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("list spec versions: %w", err)
+	}
+	if versions == nil || versions.Latest == "" {
+		return ErrNoSpecVersion
+	}
+
+	// What the version carries, from the tag. Best-effort: a scope-less read
+	// plans the whole spec as one item.
+	scope := spec.BuildScope{Tag: versions.Latest}
+	if sc, serr := s.versions.BuildScopeAtTag(ctx, orgID, projectID, versions.Latest); serr == nil {
+		scope = sc
+	} else {
+		slog.WarnContext(ctx, "plan: scope read failed — planning the whole spec",
+			"project", projectID, "tag", versions.Latest, "error", serr)
+	}
+
+	// The stream lives under ctx, so a cancelled activity stops reading (the
+	// pod runs the turn on; a caller going away only detaches). The cancel is
+	// also the tap's idle abort, and the deferred call releases the stream's
+	// open response body whatever path returns.
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// A fresh turn id per plan: a Plan is one-shot, never resumed. No credit:
+	// no run row records who asked for the build (C7). The planner reads the
+	// version's TAG, not main's tip (B2).
+	events, err := s.turns.StartTurn(streamCtx, ref, aestudiotools.TurnRequest{
+		TurnID:  uuid.NewString(),
+		Project: projectID,
+		Kind:    aestudiotools.TurnKindPlan,
+		At:      "tags/" + versions.Latest,
+		Scope:   planScopeFor(scope),
+	})
+	if err != nil {
+		return err
+	}
+
+	tap := newPlanTap(ctx)
+	if err := tap.Stream(events, cancel); err != nil {
+		return err
+	}
+	if tap.plan == nil {
+		return errNoBuildPlan
+	}
+	return s.mintBuildIssue(context.WithoutCancel(ctx), orgID, projectID, milestoneNumber, scope, tap.plan)
+}
+
+// mintBuildIssue files the version's build issue. The dedupe key makes a crash
+// re-run of the plan find the open issue instead of filing a second one; a
+// same-tag rebuild never plans (the milestone already holds a development
+// issue). The write is detached from the caller's cancellation, so a mint in
+// flight when the activity is cancelled still lands.
+func (s *PlanService) mintBuildIssue(ctx context.Context, orgID, projectID string, milestoneNumber int, scope spec.BuildScope, plan *taskplan.BuildPlanOk) error {
+	issue := scope.Issue(plan.Items)
+	number, _, err := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
+		Title: issue.Title(),
+		Body:  issue.Body(),
+		// Armed, and PLANNED work: the kind keeps a bug-fix run off it. Gates
+		// and the validation task are minted elsewhere.
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindDevelopment},
+		Milestone: milestoneNumber,
+		DedupeKey: delivery.DedupeKeyBuildIssue(projectID, milestoneNumber),
+	})
+	if err != nil {
+		return fmt.Errorf("plan: mint the build issue for milestone %d: %w", milestoneNumber, err)
+	}
+	if number == 0 {
+		return fmt.Errorf("plan: minting the build issue for milestone %d filed nothing", milestoneNumber)
 	}
 	return nil
 }
 
-// startPlan takes the per-project plan lock and starts one turn. Every minted
-// issue joins milestoneNumber at creation, so the plan costs 1+N calls.
-func (s *PlanService) startPlan(ctx context.Context, orgID, projectID string, milestoneNumber int) (*planSession, error) {
-	key := orgID + "/" + projectID
-	if _, loaded := s.inflight.LoadOrStore(key, struct{}{}); loaded {
-		return nil, ErrPlanInProgress
-	}
-	release := func() { s.inflight.Delete(key) }
-	session, err := s.startPlanLocked(ctx, orgID, projectID, milestoneNumber, release)
-	if err != nil {
-		release()
-		return nil, err
-	}
-	return session, nil
-}
-
-func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID string, milestoneNumber int, release func()) (*planSession, error) {
-	// Resolved directly (not via resolveProjectRepo): the plan turn keys on
-	// the workspace ref, so it needs no owner/name split — only a ready row.
-	repo, err := s.repos.GetRepo(ctx, orgID, projectID)
-	if err != nil {
-		if errors.Is(err, sourcecontrol.ErrRepoNotFound) {
-			return nil, ErrProjectRepoNotFound
-		}
-		return nil, err
-	}
-	if repo == nil {
-		return nil, ErrProjectRepoNotFound
-	}
-	// The plan turn reads its context from a workspace snapshot — a repo that
-	// is not ready yet cannot back one.
-	if repo.Status != "" && repo.Status != "ready" {
-		return nil, ErrProjectRepoNotFound
-	}
-
-	// Gate: a versioned (tagged) spec must exist (§6, build-first). The tag is
-	// cut by the build endpoint AFTER the whole-spec hard gate, so its presence
-	// certifies a buildable requirements+design pair.
-	//
-	// A version is whatever the user named it (ADR-0030), so membership is the
-	// tag's own annotation, never the shape of its name — this gate used to
-	// count `v<N>` matches and refused every named version outright.
-	//
-	// A read FAILURE is not an answer: reporting "build the project first" for
-	// a fetch that did not complete sends the reader to re-do the one thing
-	// they already did.
-	versions, err := s.versions.ListSpecVersionTags(ctx, orgID, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("list spec versions: %w", err)
-	}
-	if versions == nil || versions.Latest == "" {
-		return nil, ErrNoSpecVersion
-	}
-
-	llm, err := s.llm(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve agent llm: %w", err)
-	}
-	if llm.Key == "" {
-		return nil, ErrNoModelConnection
-	}
-
-	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace ref: %w", err)
-	}
-
-	// Existing Tasks → instruction context + tap preload + dedupe slugs. These
-	// are platform state (GitHub issues), not repository files, so they ride in
-	// the instruction — the snapshot carries only committed content.
-	//
-	// A version plans FRESH from the new spec (§6: supersede, no carry-over), so
-	// the only context is the milestone's OWN issues — empty on a first pass and
-	// non-empty only on a re-plan or a crash re-run, exactly the cases dedupe
-	// exists for.
-	contextFiles := map[string]string{}
-	preload, slugs := s.assembleMilestoneTasks(ctx, orgID, projectID, milestoneNumber, contextFiles)
-	// The tag's story scope (#369): the requirements' story set drives DELTA
-	// planning — stories already covered by existing Tasks (their platform
-	// stamps) need no new work. Best-effort: a scope-less snapshot
-	// degrades to the legacy plan-everything behavior.
-	scope := spec.BuildScope{}
-	if sc, serr := s.versions.BuildScopeAtTag(ctx, orgID, projectID, versions.Latest); serr == nil {
-		scope = sc
-	} else {
-		slog.WarnContext(ctx, "plan: story scope read failed — planning without milestone scope",
-			"project", projectID, "tag", versions.Latest, "error", serr)
-	}
-	covered := map[string]bool{}
-	for _, p := range preload {
-		for _, id := range delivery.ParseServesStories(p.Body) {
-			covered[id] = true
-		}
-	}
-	// Freeze the set of issue numbers the agent actually received as context: an
-	// updateTask{issueNumber} ref is fenced to it (a hallucinated / out-of-context
-	// number must never be written — plan_tap.resolveRef).
-	contextNumbers := make(map[int]bool, len(preload))
-	for n := range preload {
-		contextNumbers[n] = true
-	}
-
-	// Workspace snapshot refs (D9): the design/requirements context is read
-	// from snapshots/<baseRef>/; the task-planning skill is a flow skill
-	// seeded into the org's _skills repo (Phase 1), read from its snapshot.
-	//
-	// The base is the version's TAG, not main's tip (B2): the plan is for the
-	// spec that was versioned, and an edit made to the requirements or the
-	// design since must not leak into it. The scope above reads the same tag.
-	ws := s.git.Workspace()
-	baseRef, err := ws.Head(ctx, ref, "tags/"+versions.Latest)
-	if err != nil {
-		return nil, fmt.Errorf("resolve the version %s: %w", versions.Latest, err)
-	}
-	// Skills resolve failures are typed: both arms mean the org's _skills repo
-	// is unusable right now (row missing/unprovisionable, or the backing repo
-	// gone/unreachable — e.g. deleted externally under a lingering row). The
-	// edge maps this to a logged 503 rather than an opaque 500.
-	skillsRow, err := s.skillsRepo(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
-	}
-	skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
-	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
-	if err != nil {
-		return nil, fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
-	}
-	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
-		return nil, fmt.Errorf("ensure repo snapshot: %w", err)
-	}
-	if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
-		return nil, fmt.Errorf("ensure skills snapshot: %w", err)
-	}
-
-	// A fresh, namespaced conversation id per plan turn — plan turns are one-shot
-	// (never rehydrated), so the id only needs to be unique within the tenant.
-	conversationID := agentsvc.ConversationID(orgID, projectID, "task-plan",
-		strconv.FormatInt(time.Now().UnixNano(), 10))
-
-	// Detached context so the turn drains even if the client disconnects (§6).
-	detached := context.WithoutCancel(ctx)
-	body, err := s.client.Turn(detached, conversationID, orgID, llm.Key, agentsvc.TurnRequest{
-		Model:      llm.Connection.Model,
-		Connection: agentsvc.ConnectionFor(llm.Connection),
-		Turn: agentsvc.TurnSpec{
-			Kind:        agentsvc.TurnKindPlan,
-			Scope:       planScopeFor(scope, covered),
-			TaskContext: planContextFor(contextFiles),
-		},
-		Workspace: agentsvc.WorkspaceRef{
-			ConversationID: conversationID,
-			TurnID:         uuid.NewString(),
-			RepoSlug:       ref.RepoSlug,
-			Ref:            baseRef,
-			SkillsRef:      skillsRef,
-		},
-		Surface: agentsvc.SurfaceConsole,
-	})
-	if err != nil {
-		return nil, err // typed *agentsvc.UpstreamError (409 → plan_in_progress passthrough)
-	}
-
-	tap := newPlanTap(detached, orgID, projectID, s.issues, s.writer)
-	tap.milestone = milestoneNumber
-	tap.withScope(scope)
-	tap.appPaths = s.componentPaths(ctx, orgID, projectID)
-	tap.state = preload
-	tap.existingSlugs = slugs
-	tap.contextNumbers = contextNumbers
-
-	return &planSession{body: body, tap: tap, release: release}, nil
-}
-
-// componentPaths reads each component's appPath, lowercased for lookup.
-// Best-effort: a design-read hiccup costs the App Path line, never the plan.
-func (s *PlanService) componentPaths(ctx context.Context, orgID, projectID string) map[string]string {
-	if s.paths == nil {
-		return nil
-	}
-	raw, err := s.paths.ComponentPaths(ctx, orgID, projectID)
-	if err != nil {
-		slog.WarnContext(ctx, "plan: read component app paths failed", "project", projectID, "error", err)
-		return nil
-	}
-	out := make(map[string]string, len(raw))
-	for name, path := range raw {
-		out[strings.ToLower(strings.TrimSpace(name))] = path
-	}
-	return out
-}
-
-// assembleMilestoneTasks preloads the milestone's OWN issues: their title slugs
-// are the additive-only dedupe set, and each renders as a context file so a
-// re-plan can see (and updateTask) what the version already holds. Best-effort:
-// a read failure plans as if the milestone were empty, which at worst re-mints
-// an issue the human can close.
-func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, projectID string, milestoneNumber int, files map[string]string) (map[int]plannedTask, map[string]bool) {
-	preload := map[int]plannedTask{}
-	slugs := map[string]bool{}
-
-	issues, err := s.issues.ListMilestoneIssues(ctx, orgID, projectID, sourcecontrol.MilestoneIssuesFilter{
-		Number: milestoneNumber,
-		State:  "all",
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "plan: list milestone issues failed", "project", projectID, "milestone", milestoneNumber, "error", err)
-		return preload, slugs
-	}
-	for _, issue := range issues {
-		if slug := titleSlug(issue.Title); slug != "" {
-			slugs[slug] = true
-		}
-		// The planner's context set is the DEV working set and nothing else: a
-		// gate is the platform's, the validation task is the validation loop's,
-		// and a ledger-only human issue is not a Task at all — none of them
-		// belong in the set an updateTask ref is fenced to.
-		if !delivery.InDevWorkingSet(issue.Labels) {
-			continue
-		}
-		if !strings.EqualFold(issue.State, "open") {
-			continue
-		}
-		path, content := taskplan.RenderTaskContextFile(taskplan.TaskContextFile{
-			IssueNumber: issue.Number,
-			Title:       issue.Title,
-			Body:        issue.Body,
-		})
-		files[path] = content
-		preload[issue.Number] = plannedTask{Body: issue.Body}
-	}
-	return preload, slugs
-}
-
-// planScopeFor states the milestone's story scope (#369) as facts: which
-// stories the existing Tasks already cover, and which this plan must.
-// Platform-computed — the model never decides coverage, and never sees this as
-// anything but the section the agents service renders from it. nil when the
-// snapshot carries no readable stories.
-func planScopeFor(scope spec.BuildScope, covered map[string]bool) *agentsvc.PlanScope {
-	if len(scope.InScope) == 0 {
-		return nil
-	}
-	stories := make([]agentsvc.PlanStory, 0, len(scope.InScope))
-	for _, id := range scope.InScope {
-		stories = append(stories, agentsvc.PlanStory{
-			ID:      id,
-			Title:   scope.StoryTitles[id],
-			Covered: covered[id],
-		})
-	}
-	out := &agentsvc.PlanScope{Tag: scope.Tag, Stories: stories}
+// planScopeFor states what the version carries as facts the design agent
+// renders: its features with what each is built after, its product-wide
+// items, its held-back stories. Platform-computed — the model orders and
+// annotates them, and never decides what is carried.
+func planScopeFor(scope spec.BuildScope) *aestudiotools.PlanScope {
+	out := &aestudiotools.PlanScope{Tag: scope.Tag, HeldBack: scope.HeldBack}
 	for _, f := range scope.Features {
-		out.Features = append(out.Features, agentsvc.PlanFeature{ID: f.ID, Name: f.Name, Needs: f.Needs})
+		out.Features = append(out.Features, aestudiotools.PlanFeature{ID: f.ID, Name: f.Name, Needs: f.Needs})
 	}
 	for _, it := range scope.ProductWide {
-		out.ProductWide = append(out.ProductWide, agentsvc.PlanItem{ID: it.ID, Text: it.Text, AppliesTo: it.AppliesTo})
-	}
-	return out
-}
-
-// planContextFor carries the milestone's existing-Task renders as facts, sorted
-// by path so the same inputs always produce the same turn. They keep their
-// historical tasks/<n>.md names so the model's mental layout is unchanged.
-func planContextFor(files map[string]string) []agentsvc.PlanContextFile {
-	if len(files) == 0 {
-		return nil
-	}
-	paths := make([]string, 0, len(files))
-	for p := range files {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	out := make([]agentsvc.PlanContextFile, 0, len(paths))
-	for _, p := range paths {
-		out = append(out, agentsvc.PlanContextFile{Path: p, Body: files[p]})
+		out.ProductWide = append(out.ProductWide, aestudiotools.PlanItem{ID: it.ID, Text: strings.TrimSpace(it.Text), AppliesTo: it.AppliesTo})
 	}
 	return out
 }

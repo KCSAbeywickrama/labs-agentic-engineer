@@ -21,7 +21,8 @@ routes/projects/$projectName/
   _overview/route.tsx        the overview Page (pathless)
     index.tsx                  /projects/$p            no card
     spec.tsx                   /projects/$p/spec       Spec card
-    design.tsx                 /projects/$p/design     Design card
+    design.tsx                 /projects/$p/design     Design card (?art=, ?review=)
+    prototype.tsx              /projects/$p/prototype  redirects to the Design card's prototype
     questions.tsx              /projects/$p/questions  Questions card
   builds/route.tsx           build history           /projects/$p/builds
     $version.tsx               /projects/$p/builds/v2  Build card

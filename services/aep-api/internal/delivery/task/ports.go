@@ -18,11 +18,8 @@ package task
 
 import (
 	"context"
-	"io"
 
-	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -31,14 +28,12 @@ import (
 // actually uses (the house pattern), so the composition root wires concrete
 // providers and tests supply fakes.
 
-// IssueClient is the GitHub issue surface the read path and the plan tap use:
-// list, fetch and edit. sourcecontrol.IssueService satisfies it.
+// IssueClient is the GitHub issue surface the read path uses: list and fetch.
+// sourcecontrol.IssueService satisfies it.
 //
-// It does NOT mint. A planned Task is a platform mint like any other and goes
+// It does NOT mint. The build issue is a platform mint like any other and goes
 // through delivery.IssueWriter, so the `aep` label and the milestone assignment
-// are decided in one place for the whole domain. What stays here is the
-// planner's own updateTask surface — retitle, rewrite the body, comment — which
-// acts on issues that already exist and carries no such policy.
+// are decided in one place for the whole domain.
 type IssueClient interface {
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]sourcecontrol.IssueInfo, error)
 	// GetIssue fetches one issue by number (O(1)); returns sourcecontrol.ErrIssueNotFound
@@ -50,28 +45,14 @@ type IssueClient interface {
 	// and no bucketing to undo — which is what lets it answer for the validation
 	// issue, the one issue the list read never projects.
 	ListIssueComments(ctx context.Context, orgID, projectID string, number, limit int) ([]sourcecontrol.IssueComment, error)
-	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
-	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
-	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
-	// ListMilestoneIssues reads one milestone's issues (pull requests excluded).
-	// The plan turn reads the milestone it is planning INTO so a re-plan and a
-	// crash re-run dedupe against what is already there — the milestone, not a
-	// label query, is the version's membership.
+	// ListMilestoneIssues reads one milestone's issues (pull requests excluded):
+	// the milestone, not a label query, is the version's membership.
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
 	// ListMilestoneIssueComments reads the newest perIssue comments of every
 	// issue in one milestone, bucketed by issue number and oldest first, in ONE
 	// round trip. Milestone-scoped because that is the only bounded set of
 	// issues this surface can name — see ListByTag.
 	ListMilestoneIssueComments(ctx context.Context, orgID, projectID string, number, perIssue int) (map[int][]sourcecontrol.IssueComment, error)
-}
-
-// ComponentPathReader maps a design component to its source directory (appPath)
-// relative to the repo root — the "App Path" line a planned Task's prose body
-// carries so the agent knows where to work. The same app-root designComponents
-// adapter satisfies the identical port in the event plane. Optional: an unwired
-// reader simply omits the line.
-type ComponentPathReader interface {
-	ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error)
 }
 
 // RepoResolver looks up the project's git repo row (its RepoURL yields the
@@ -89,32 +70,18 @@ type ComponentEnsurer interface {
 	EnsureComponent(ctx context.Context, orgID, projectID, componentName string) error
 }
 
-// VersionReader lists the project's spec versions and reads a bundle at one —
-// the plan gate's build-first check and the incremental-plan baseline diff (§6).
+// VersionReader lists the project's spec versions and reads what one carries —
+// the plan gate's build-first check and the plan's scope.
 type VersionReader interface {
 	// ListSpecVersionTags is the project's versions, newest first, with the
 	// newest one named. A version is identified by its ANNOTATION, not by the
 	// shape of its name (ADR-0030), so this is the only listing that sees a
 	// version the user named — the retired `v<N>` scans did not.
 	ListSpecVersionTags(ctx context.Context, orgID, projectID string) (*spec.TagList, error)
-	// BuildScopeAtTag reads a tag's story scope (#369) — the plan turn's
-	// story set and per-component claims.
+	// BuildScopeAtTag reads what a tag carries: the plan turn's scope and the
+	// build issue's facts.
 	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error)
 }
-
-// GitReader is the workspace-backed git surface the plan turn drives: the
-// snapshot refs (Head), the lineage diff (Workspace.Diff between a Task's
-// lineage tag and the current tag, §6), and per-op secrets.
-// sourcecontrol.GitOpsService satisfies it.
-type GitReader interface {
-	Workspace() sourcecontrol.Workspace
-	Resolver() secrets.Resolver
-}
-
-// SkillsRepoResolver returns the org _skills git row used as the plan
-// turn's SkillsRef snapshot source. Production wires the same reconcile
-// resolver as genai turns so the library is not first-touch-only.
-type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
 // ExecutionReader is the read side of the executions rows (the platform-owned
 // half), consumed org-scoped by the read path to fuse derived status. It is the
@@ -124,18 +91,6 @@ type ExecutionReader interface {
 	LatestPerKindScoped(ctx context.Context, orgID, repo string, issueNumber int) (map[string]*delivery.Execution, error)
 	LatestPerKindForRepoScoped(ctx context.Context, orgID, repo string) (map[int]map[string]*delivery.Execution, error)
 	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]delivery.Execution, error)
-}
-
-// AgentLLMResolver resolves the org's model connection and its key for the
-// plan turn. An empty key with a nil error means "org has none" → the plan
-// turn raises ErrNoModelConnection. An alias, so the composition root wires
-// the one resolver the spec turns use.
-type AgentLLMResolver = spec.AgentLLMResolver
-
-// TurnClient is the agents-service turn client — the plan turn POSTs a
-// toolset:"task-plan" turn and streams raw StreamPart frames back for the tap.
-type TurnClient interface {
-	Turn(ctx context.Context, conversationID, orgID, modelKey string, req agentsvc.TurnRequest) (io.ReadCloser, error)
 }
 
 // Adopter hands an issue to the coding agent: file it under the deployed

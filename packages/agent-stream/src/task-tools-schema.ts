@@ -17,72 +17,42 @@
  */
 
 /**
- * The Zod `inputSchema`s for the plan-turn tools. They live HERE (not in the
- * service's tool defs, unlike the file tools) because they are the single
- * definition the agents service uses as tool `inputSchema` AND the source the
- * published JSON Schema is rendered from (`json-schema.ts`) for the Go BFF to
- * vendor — one definition, no hand-kept copies (mirrors `componentDesignSchema`).
+ * The Zod `inputSchema` for the plan-turn tool. It lives HERE (not in the
+ * service's tool defs, unlike the file tools) because it is the single
+ * definition the design agent uses as tool `inputSchema` AND the source the
+ * published JSON Schema is rendered from (`json-schema.ts`) — one definition,
+ * no hand-kept copies (mirrors `componentDesignSchema`).
  *
- * PROPERTY ORDER IS LOAD-BEARING: the provider streams properties in declaration
- * order, so the short routable fields come first (a consumer can render a task
- * card the instant they resolve) and the long free-text fields (`rationale`,
- * `set.body`) come last, streaming delta-by-delta.
+ * PROPERTY ORDER IS LOAD-BEARING: the provider streams properties in
+ * declaration order, so the short routable fields come first and the free-text
+ * `note` last.
  *
- * The `.describe()` text is the model-facing tool doc; detailed planning behavior
- * stays in the `task-planning` skill, not here.
+ * The `.describe()` text is the model-facing tool doc; planning behavior stays
+ * in the `task-planning` skill.
  */
 
 import { z } from "zod";
-import type { PlanTaskInput, UpdateTaskInput } from "./contracts/task-tools.js";
+import type { BuildPlanInput } from "./contracts/task-tools.js";
 import type { Equal } from "./type-equal.js";
 
-export const planTaskInputSchema = z.object({
-  component: z
+const buildPlanItemSchema = z.object({
+  item: z
     .string()
-    .describe("The design component this Task implements. Must be one of the known components (a directory under specs/design/components/)."),
-  feature: z
-    .string()
-    .regex(/^(F[0-9]+|foundation)$/)
-    .optional()
-    .describe(
-      "The feature this Task builds in its component (F2), or 'foundation' for the component's shared setup and the product-wide requirements the version carries. Omit only for a design with no features.",
-    ),
-  title: z
-    .string()
-    .describe("Short human-facing title; must be unique across planned and existing Tasks."),
-  dependsOn: z
+    .regex(/^(F[0-9]+|foundation|spec)$/)
+    .describe("'foundation' for the shared setup and the product-wide requirements, a carried feature's ID (F2), or 'spec' when the version carries no features."),
+  components: z
     .array(z.string())
-    .describe("Component names this Task depends on (never issue numbers). Empty when it has no dependencies."),
-  origin: z
-    .enum(["spec-plan", "incident", "manual"])
-    .optional()
-    .describe("Where the Task came from; omit for the default 'spec-plan'."),
-  rationale: z
+    .min(1)
+    .describe("The design components this item changes (directories under specs/design/components/)."),
+  note: z
     .string()
-    .describe("One sentence: why this Task exists."),
+    .describe("One or two sentences: what the coding agent should know before it starts this item."),
 });
 
-const taskRefSchema = z
-  .union([z.object({ issueNumber: z.number().int() }), z.object({ title: z.string() })])
-  .describe("Target: { issueNumber } for an existing Task from context, or { title } for a Task planned earlier this turn.");
-
-const updateTaskSetSchema = z
-  .object({
-    title: z.string().optional().describe("New title (must stay unique)."),
-    dependsOn: z.array(z.string()).optional().describe("Replacement dependency component names."),
-    rationale: z.string().optional().describe("New one-sentence rationale."),
-    body: z.string().optional().describe("The full Task body markdown: scope, acceptance criteria, references into the spec/design."),
-  })
-  .describe("The fields to patch; omit a field to leave it unchanged.");
-
-export const updateTaskInputSchema = z.object({
-  ref: taskRefSchema,
-  set: updateTaskSetSchema,
+export const buildPlanInputSchema = z.object({
+  items: z.array(buildPlanItemSchema).min(1).describe("The build's checklist, in the order the coding agent works it."),
 });
 
 // --- Drift guard: Zod schema ⇄ task-tools wire type (cf. component-design-schema.ts) ---
-const _drift: [
-  Equal<z.infer<typeof planTaskInputSchema>, PlanTaskInput>,
-  Equal<z.infer<typeof updateTaskInputSchema>, UpdateTaskInput>,
-] = [true, true];
+const _drift: [Equal<z.infer<typeof buildPlanInputSchema>, BuildPlanInput>] = [true];
 void _drift;

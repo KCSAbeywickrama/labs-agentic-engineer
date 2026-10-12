@@ -18,8 +18,14 @@ Terms in this skill:
 - Run: this session. One run is one cycle of the milestone that your prompt
   names.
 - Working set: the open issues that this run works.
-- Build subagent: a subagent that builds one issue.
-- Wave: the build subagents that you dispatch together.
+- Build issue: the one `development` issue of the milestone. Its body is the
+  checklist of the build.
+- Item: one line of that checklist, `- [ ] **<item>** …`. `<item>` is
+  `foundation`, a feature (`F2`) or `spec`. A ticked line (`- [x]`) is a done
+  item.
+- Build subagent: a subagent that builds the part of one item in one
+  component.
+- Wave: the build subagents of one item, which you dispatch together.
 - Green: a component that passes its verify step. The component contract
   defines it.
 
@@ -59,9 +65,10 @@ PR; do not work around it in code. Commit the change alone. Build again each
 component that it touches, and list the change in the PR.
 
 A consumer codes against the `openapi.yaml` of its provider, not against the
-code of the provider. As a result, no issue waits for the code of another
-issue. A dependency between two issues is a runtime relation, not a build
-order. Only two issues that write the same files must go one after the other.
+code of the provider. As a result, the components of one item do not wait for
+each other: build them at the same time. The items go one after the other, in
+the order of the checklist, because a later item builds on the code of the
+earlier ones.
 
 # The run
 
@@ -99,11 +106,12 @@ If `gh` says "no milestone found", the milestone is closed and the version is
 finished. The working set is empty: go to Finish the cycle.
 
 Read the body and the comments of each issue in the working set. Work the
-issues in ascending number. A `Depends on #41` line is a runtime relation, not
-a gate.
+`bug` and `conflict` issues first, in ascending number: they repair what is
+already merged. Then work the items of the build issue, from the top. Skip a
+ticked item.
 
-Get the working set again before you pick the next issue. New issues can
-arrive during the run, and an issue is done only when its work is committed.
+Get the working set again before you start the next issue or item. New issues
+can arrive during the run.
 
 ### Establish branch identity
 
@@ -114,29 +122,45 @@ The platform does not make your branch. Find it in this order:
    changes. Verify, then `git push --force-with-lease`.
 2. If an unmerged remote branch `aep/m<milestone#>-*` exists, an earlier run
    stopped. Check out that branch. Each of its commit messages ends with
-   `(#N)`: skip these issues.
+   `(#N)`, or `(#N <item>)` for an item: skip these issues and items. Tick a
+   skipped item that is not ticked yet.
 3. If not, make the branch `aep/m<milestone#>-c<k>`. `<k>` is one more than the
    highest `-c<k>` of this milestone, or 1. The platform finds your run from
    this prefix.
 
 ## 2 · Work the issues
 
-For each wave:
+Work one bug or conflict issue, or one item of the build issue, at a time.
+First, put each of them in the task list, one entry each, in the order that you
+will work them. The person who watches the run reads its progress there. Then,
+for each:
 
-1. Resolve the dependencies that only you can resolve (see Dependencies that
+1. Read what it asks. For an item, read its feature file
+   (`specs/requirements/features/F<n>-*.md`) and its line in the checklist; for
+   Foundation, `specs/requirements/product-wide.md` and the design. Find the
+   screens, flows and operations that serve its stories. For a web
+   application, these include its prototype
+   (`specs/design/components/<c>/prototype.json` and `prototype.tsx`) and
+   `prototype`'s `references/implementing.md`.
+2. Resolve the dependencies that only you can resolve (see Dependencies that
    only you can resolve).
-2. Give each issue to a build subagent, or work it inline (see Fan-out to
-   subagents).
-3. When a report arrives, do the steps in When a report arrives.
-4. Get the working set again, and start the next wave.
+3. Mark its task-list entry in progress. Then dispatch its wave: one build
+   subagent for each component that it names (see Fan-out to subagents).
+4. When a report arrives, do the steps in When a report arrives.
+5. When it is committed and ticked, mark its task-list entry completed. Get
+   the working set again, and start the next one.
+
+A wave builds its own item and nothing more. Do not give it work of a later
+item, not even to make a component build or look complete sooner: the later
+item's wave adds that work. A component that Foundation sets up has its setup,
+its wiring and its sign-in, and no feature yet. It must build and start like
+that.
 
 ### Fan-out to subagents
 
 The tool glossary at the end of your instructions names your fan-out tool. Use
-a build subagent for each issue, except:
+a build subagent for each component of the item, except:
 
-- Work an issue inline if its files are also the files of another issue in the
-  wave.
 - Work a small fix inline.
 
 Do not name a model in the fan-out call.
@@ -144,27 +168,31 @@ Do not name a model in the fan-out call.
 Dispatch every build subagent of a wave in the background, in ONE turn, in
 this one workspace (no worktrees). Then end your turn. Each subagent wakes you with its report when it finishes.
 
-**Only the commit waits for the whole issue.** A subagent that did not report
+**Only the commit waits for the whole item.** A subagent that did not report
 can still be writing files.
-
-Keep your plan in the task list: one entry for each issue. Mark the entry
-completed when you commit the work of the issue.
 
 #### The build prompt
 
 A build subagent knows only its prompt. Give it these items, as paths and not
 as file contents. Do not change the component contract in the prompt:
 
-1. The issue number, and the App Paths. The subagent writes only in these
-   paths.
-2. The absolute path of `references/component-contract.md`, exactly as your
+1. The issue number, the item, and the App Path of its component. The
+   subagent writes only in this path.
+2. What to build: for an item, its feature file and its story IDs, or for
+   Foundation the P items and the setup; the screens, flows and operations of
+   this component that serve them. For a web application, also its prototype
+   (`specs/design/components/<c>/prototype.json` and `prototype.tsx`) and
+   `prototype`'s `references/implementing.md`. Tell the subagent to build only what the
+   item needs in this component, on top of the code that is there. For a bug
+   or conflict issue, the issue.
+3. The absolute path of `references/component-contract.md`, exactly as your
    prompt gives it. Tell the subagent: "read this first; it is your contract".
-3. The skills to load: each name in the `skillsPinned` of its component, with
+4. The skills to load: each name in the `skillsPinned` of its component, with
    its prefix.
-4. The data that you resolved: the `## Component <its name>` block of a
+5. The data that you resolved: the `## Component <its name>` block of a
    "Platform-resolved dependencies" comment, and each `org-service` contract
    (pasted, as a path, or "undocumented").
-5. Its issue's status line: the `gh issue comment` command with its issue
+6. Its issue's status line: the `gh issue comment` command with its issue
    number, and the rule in The status line.
    That command is the only `gh` it may run.
 
@@ -203,27 +231,37 @@ that the report calls incomplete.
    for that component, with exactly this prompt:
 
    ```text
-   Walk <component> at <App Path>. Load `mock-verification` and
-   `agent-browser`; the first is the whole procedure. Edit/Write only inside
+   Walk <component> at <App Path> for <item>: walk only the prototype flows
+   that serve its stories (<story IDs>), and the flows of earlier items. Load
+   `mock-verification` and `agent-browser`; the first is the whole procedure.
+   Edit/Write only inside
    <App Path>; never run `git`. Progress: `gh issue comment <N> --body "<line>"`.
    Report back the closing line and the numbered list.
    ```
 
    Run only one walk at a time, because the browser uses the most memory in the
-   pod. Do not walk if the issue changed no file that the app loads. Always
-   walk if you close an issue as "already satisfied".
+   pod. Do not walk if the item changed no file that the app loads. Always
+   walk if you tick an item as "already satisfied".
 
    If the walk report has open `[ ]` lines, the walk did not fail (see Walks in
    the component contract). Commit the component, and copy the lines into the
    PR.
-2. Commit the work of the issue, alone. You are the only agent that runs `git`.
+2. Commit the work of the item, alone, in one commit. You are the only agent
+   that runs `git`.
    ```bash
-   git add <the App Paths that issue touched>
+   git add <the App Paths that the item touched>
    git diff --cached --name-only    # what is ACTUALLY staged — read it
-   git commit -m "<type>: <short summary> (#<number>)"
+   git commit -m "<type>: <short summary> (#<number> <item>)"   # a bug: (#<number>)
    git push -u origin HEAD          # -u only on the first push
    ```
-   A restart finds the done issues from `(#N)`, so push after each issue.
+   A restart finds the done items from `(#N <item>)`, so push after each item.
+3. Tick the item in the build issue, after the push:
+   ```bash
+   gh issue view <number> --json body -q .body > /tmp/build-issue.md
+   # change only `- [ ] **<item>**` to `- [x] **<item>**`
+   gh issue edit <number> --body-file /tmp/build-issue.md
+   ```
+   The platform counts the ticks as the progress of the run.
 
    `git add` does not add ignored files, and it gives no error. Compare the
    staged list with the files that you changed.
@@ -250,7 +288,8 @@ first line. The agent that works the issue posts one line:
 gh issue comment <number> --body "<one line: what is happening on this issue now>"
 ```
 
-Example: `todo-api builds clean; todo-web builds clean, walk dispatched.`
+Start the line with the item. Example:
+`F2: todo-api builds clean; todo-web builds clean, walk dispatched.`
 Comment only on the issue that you work. A walk posts its progress on the same
 issue, in the shapes that `mock-verification` gives. These comments can have
 more than one line.
@@ -261,30 +300,34 @@ Work that you cannot finish stays open for a later run. This is correct.
 
 ### The record
 
-Open one PR for the run. Put a `Resolves #N` line for each issue that you
-completed:
+Open one PR for the run. Put a `Resolves #N` line for each bug or conflict
+issue that you completed, and for the build issue when every item is ticked.
+When items of the build issue are still open, put `Advances #N` for it:
+GitHub does not close it, and the next run works the open items.
 
 ```bash
 gh pr create \
   --title "<short summary of the cycle>" \
-  --body $'Resolves #12\nResolves #14\n\n<what changed, per issue>'
+  --body $'Resolves #12\nAdvances #10\n\n<what changed, per item>'
 ```
 
-The platform merges the PR if it resolves one or more agent-work issues of
-this milestone. GitHub then closes the listed issues. If you do not list an
-issue that you finished, the next run works it again.
+The platform merges the PR if it resolves or advances one or more agent-work
+issues of this milestone. GitHub then closes the issues listed with
+`Resolves`. If you do not list an issue that you finished, the next run works
+it again.
 
 Add these parts to the PR when they apply:
 
-- For a web application: the `Screens:` and `Flows:` lists of its issue. Tick
-  each item from the walk report. Put each open `[ ]` line next to its item.
-  The `references/implementing.md` file of the `wireframes` skill shows the
-  format.
+- For each item: what changed, by component, and for a web application the
+  walk's result. Put each open `[ ]` line of the walk report next to its
+  item.
 - For each spec change: the file, the change, and the gap that it closes.
-- For a component that is not green: use `--draft` and the title prefix
-  `[build-failed]`. List `Resolves #N` only for the completed issues. Add an
-  `## Error` section (the last 40 lines of output, fenced) and a
-  `## What was tried` section.
+- For a component that is not green: list `Resolves #N` only for the
+  completed issues. Add an `## Error` section (the last 40 lines of output,
+  fenced) and a `## What was tried` section. When one or more items are
+  committed and ticked, open a usual PR with `Advances #N`: the platform does
+  not merge a draft. Use `--draft` and the title prefix `[build-failed]` only
+  when the cycle completed no item and no issue.
 
 Keep each unfinished issue open. Make its last status line the same
 diagnostic.
@@ -294,9 +337,15 @@ diagnostic.
 The run can be a restart of a run that stopped:
 
 - If work is pushed and no PR is open, open the PR. Put a `Resolves` line for
-  each `(#N)` in `git log origin/main..HEAD`.
-- If a PR is open and the working set is empty, add the missing `Resolves`
-  lines with `gh pr edit --body ...`, and stop. Do not open a second PR.
+  each `(#N)` in `git log origin/main..HEAD`, and the build issue's line from
+  its ticks (see The record).
+- If a PR is open and the working set is empty, rewrite its body with
+  `gh pr edit <number> --body ...`. Put a `Resolves #N` line for each `(#N)` on
+  the branch and the build issue's line from its ticks, keep the rest of the body, and make the last line
+  `Adopted: <date -u +%Y-%m-%dT%H:%M:%SZ>`. Replace an earlier `Adopted:` line.
+  Rewrite the body also when the list is complete: this edit is how the
+  platform learns that the cycle waits for the PR, and the new `Adopted:` line
+  makes sure that the body changes. Then stop. Do not open a second PR.
 - If the working set is empty and nothing is pushed, stop and say so.
 
 # Never

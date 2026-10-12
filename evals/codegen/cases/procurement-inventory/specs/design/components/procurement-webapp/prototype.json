@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "name": "Procurement and Stock",
+  "entryScreen": "screen.home",
+  "roles": [
+    { "id": "Requester", "name": "Requester" },
+    { "id": "Approver", "name": "Approver" },
+    { "id": "WarehouseClerk", "name": "Warehouse clerk" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Service unavailable" }
+  ],
+  "screens": [
+    { "id": "screen.home", "name": "Home", "roleIds": ["Requester", "Approver", "WarehouseClerk"] },
+    { "id": "screen.catalogue", "name": "Catalogue and stock", "roleIds": ["Requester", "WarehouseClerk"] },
+    { "id": "screen.item-detail", "name": "Item and its ledger", "roleIds": ["WarehouseClerk"] },
+    { "id": "screen.low-stock", "name": "Low stock", "roleIds": ["Requester", "WarehouseClerk"] },
+    { "id": "screen.requests", "name": "My requests", "roleIds": ["Requester"] },
+    { "id": "screen.request-new", "name": "New purchase request", "roleIds": ["Requester"] },
+    { "id": "screen.request-detail", "name": "Request detail", "roleIds": ["Requester"] },
+    { "id": "screen.approvals", "name": "Pending approvals", "roleIds": ["Approver"] },
+    { "id": "screen.approval-detail", "name": "Approval detail", "roleIds": ["Approver"] },
+    { "id": "screen.decisions", "name": "My decisions", "roleIds": ["Approver"] },
+    { "id": "screen.receiving", "name": "Goods to receive", "roleIds": ["WarehouseClerk"] },
+    { "id": "screen.order-detail", "name": "Receive goods", "roleIds": ["WarehouseClerk"] },
+    { "id": "screen.ledger", "name": "Stock ledger", "roleIds": ["WarehouseClerk"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Requester", "Approver", "WarehouseClerk"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Requester", "Approver", "WarehouseClerk"] }
+  ],
+  "flows": [
+    { "id": "flow.raise-request", "name": "Raise and submit a purchase request", "roleId": "Requester",
+      "screenIds": ["screen.catalogue", "screen.request-new", "screen.request-detail", "screen.requests"] },
+    { "id": "flow.reorder-low-stock", "name": "Reorder a low-stock item", "roleId": "Requester",
+      "screenIds": ["screen.low-stock", "screen.request-new", "screen.request-detail"] },
+    { "id": "flow.decide-request", "name": "Approve or reject a request", "roleId": "Approver",
+      "screenIds": ["screen.approvals", "screen.approval-detail", "screen.decisions"] },
+    { "id": "flow.receive-goods", "name": "Receive goods and check the ledger", "roleId": "WarehouseClerk",
+      "screenIds": ["screen.receiving", "screen.order-detail", "screen.ledger"] },
+    { "id": "flow.manage-catalogue", "name": "Maintain the catalogue", "roleId": "WarehouseClerk",
+      "screenIds": ["screen.catalogue", "screen.item-detail"] }
+  ]
+}

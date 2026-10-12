@@ -23,13 +23,15 @@ export default tseslint.config(
       // server is started from inside an app directory.
       "**/.vite/**",
       // chat_playground — generated app source from playground runs
-      // (services/agents), not repo code.
+      // (components/dataplane/ae-system-project/ae-studio/ae-design-agent), not repo code.
       "**/chat_playground/**",
       // Playground project homes: generated app source, not repo code.
       "playground/.projects/**",
       "playground/.devtools/**",
       // Prototype fixtures: some are deliberately broken (a syntax error, a forbidden API) for `prototype check` to report.
       "packages/prototype-cli/test/fixtures/**",
+      // The kit's prototype fixtures are agent output kept verbatim (unused imports included).
+      "packages/prototype-kit/test/fixtures/**/*.tsx",
       // Codegen eval archives: each attempt keeps the generated app's source.
       "evals/codegen/.runs/**",
     ],

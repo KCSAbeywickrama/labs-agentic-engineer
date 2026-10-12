@@ -17,20 +17,29 @@
  */
 
 import type { ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { EmptyState } from "../../../components/EmptyState";
 import { BuildButton } from "../../builds/components/BuildButton";
-import { MakePrototypeButton } from "../../prototype/components/MakePrototypeButton";
+import { PrototypeReviewHost } from "../../prototype/components/PrototypeReviewHost";
+import { useChatPanel } from "../../shell/chatPanel";
 import { PHONE } from "../../shell/layout";
 import { useSpecWorkspace } from "../../spec/useSpecWorkspace";
+import { openPane } from "../model/artifacts";
+import { outOfDateByAnswers, useAnsweredHere } from "../useAnsweredHere";
+import { useDesignCard } from "../useDesignCard";
 import { useDesignModel } from "../useDesignModel";
-import { blockingDependencies, openArtifact } from "../model/artifacts";
-import { openComments } from "../model/comments";
-import { useDepthFilter } from "../useDepthFilter";
 import { useDesignTurns } from "../useDesignTurns";
-import { ArtifactPicker, ArtifactRail, type RailProps } from "./ArtifactRail";
-import { ArtifactView } from "./ArtifactView";
+import { CommentsPane } from "./CommentsPane";
 import { DependencyView } from "./DependencyView";
+import { DesignOverview } from "./DesignOverview";
+import { DesignPicker, DesignRail } from "./DesignRail";
+import { ItemPane } from "./ItemPane";
+
+// The Design card (L21–L25): the rail of the design's files, and the open
+// pane: the Overview, every comment, one file under its title line (Checked
+// and 💬), or a dependency that blocks a build. A prototype's full-screen
+// review opens over it (`?review=<component>`).
 
 function names(ids: string[], name: (id: string) => string): string {
   const list = ids.map(name);
@@ -61,53 +70,29 @@ function Note({ children }: { children: ReactNode }) {
 }
 
 /**
- * The design card's header actions: Address comments, the design turn when
- * there is something to design, Make prototype once the design has a web
- * application, and Build once something is designed.
+ * The design card's header: Build alone, once something is designed. It is
+ * the primary when Build is, except on the Overview, whose own Build carries
+ * it there (one primary per screen).
  */
-export function DesignActions({ projectName }: { projectName: string }) {
-  const design = useDesignModel(projectName).data;
-  const { workspace } = useSpecWorkspace(projectName);
-  const turns = useDesignTurns(projectName);
-  if (!design || !workspace) return null;
-  const open = openComments(design.comments).length;
-  const label = workspace.design.label;
-  const running = design.running !== null;
-  return (
-    <>
-      {open > 0 && (
-        <Button
-          size="small"
-          variant="contained"
-          color="info"
-          disabled={!turns.ready || running}
-          onClick={() => turns.addressComments(open)}
-        >
-          {design.running?.kind === "address" ? "Addressing comments…" : `Address comments · ${open}`}
-        </Button>
-      )}
-      {label && design.revision > 0 && (
-        <Button size="small" variant="outlined" disabled={!turns.ready || running} onClick={() => turns.design()}>
-          {design.running?.kind === "design" ? "Designing…" : label}
-        </Button>
-      )}
-      <MakePrototypeButton projectName={projectName} />
-      <BuildButton projectName={projectName} size="small" />
-    </>
-  );
+export function DesignActions({ projectName, art }: { projectName: string; art?: string | undefined }) {
+  const card = useDesignCard(projectName);
+  if (card.items.length === 0) return null;
+  const onOverview = openPane(card.items, card.blocking, art).kind === "overview";
+  return <BuildButton projectName={projectName} size="small" variant={!onOverview && card.primary?.kind === "build" ? "contained" : "outlined"} />;
 }
 
 /**
- * The design card's body: the design review. Before anything is designed it
- * says what design takes and offers it; while the design turn runs it points
- * to the chat; then it is the artifact list and the open artifact (`?art=`),
- * or the dependency that blocks a feature.
+ * The design card's body. Before anything is designed it says what design
+ * takes and offers it; then it is the rail and the open pane.
  */
-export function DesignWorkspace({ projectName, art }: { projectName: string; art?: string | undefined }) {
+export function DesignWorkspace({ projectName, art, review }: { projectName: string; art?: string | undefined; review?: string | undefined }) {
   const design = useDesignModel(projectName);
   const { model: spec, workspace } = useSpecWorkspace(projectName);
-  const [filter, setFilter] = useDepthFilter();
+  const card = useDesignCard(projectName);
   const turns = useDesignTurns(projectName);
+  const answeredHere = useAnsweredHere(projectName);
+  const navigate = useNavigate();
+  const chatPanel = useChatPanel();
 
   if (design.isError || spec.isError) {
     const retry = () => void (design.isError ? design.refetch() : spec.refetch());
@@ -142,18 +127,20 @@ export function DesignWorkspace({ projectName, art }: { projectName: string; art
   const featureName = (id: string) => features.find((f) => f.id === id)?.name ?? id;
   const label = workspace.design.label;
 
-  if (model.artifacts.length === 0) {
+  if (card.items.length === 0) {
     return (
       <Box sx={scrollSx}>
         <Note>
           {model.running?.kind === "design" ? (
             <Typography variant="body2">
-              Designing {names(model.running.features, featureName)}. Follow along in the chat.
+              Designing {names(model.running.features, featureName)}. Each file shows here as it lands; follow along in the chat.
             </Typography>
           ) : (
             <>
               <Typography variant="body2">
-                Nothing is designed yet. Design takes every interviewed feature, including lines still marked assumed.
+                Nothing is designed yet. Design takes every interviewed feature, including lines still marked assumed, and makes everything Build needs, in
+                order: the architecture, the data model, roles and permissions, each component&apos;s prototype or contract, the dependencies, the technical
+                decisions and the acceptance tests.
               </Typography>
               {label ? (
                 <Button size="small" variant="contained" disabled={!turns.ready} onClick={() => turns.design()}>
@@ -171,47 +158,88 @@ export function DesignWorkspace({ projectName, art }: { projectName: string; art
     );
   }
 
-  const blocking = blockingDependencies(model.dependencies);
-  const open = openArtifact(model.artifacts, model.dependencies, art);
-  const current = open ? (open.kind === "artifact" ? open.artifact.id : art ?? null) : null;
-  const railProps: RailProps = {
-    projectName,
-    artifacts: model.artifacts,
-    blocking,
-    comments: model.comments,
-    revision: model.revision,
-    outOfDate: workspace.design.outOfDate,
-    current,
-    filter,
-    onFilter: setFilter,
-    featureName,
-  };
+  const pane = openPane(card.items, card.blocking, art);
+  const current = pane.kind === "overview" ? undefined : pane.kind === "comments" ? "comments" : art;
+  const open = review ? card.prototypes.get(review) : undefined;
+  const closeReview = () => void navigate({ to: "/projects/$projectName/design", params: { projectName }, search: art ? { art } : {} });
+  const outOfDate = workspace.design.outOfDate;
 
   return (
     <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
-      <ArtifactRail {...railProps} />
+      <DesignRail projectName={projectName} card={card} current={current} />
       <Box sx={scrollSx}>
-        <ArtifactPicker {...railProps} />
-        {model.running && (
-          <Typography variant="body2" color="primary.main" sx={{ mb: 2 }}>
-            {model.running.kind === "design"
-              ? `Updating the design for ${names(model.running.features, featureName)}. Follow along in the chat.`
-              : "Working through the open comments. Follow along in the chat."}
-          </Typography>
-        )}
-        {open?.kind === "dependency" ? (
-          <DependencyView projectName={projectName} dependency={open.dependency} featureName={featureName(open.dependency.featureId)} />
-        ) : open ? (
-          <ArtifactView
-            key={open.artifact.id}
-            projectName={projectName}
-            artifact={open.artifact}
-            design={model}
-            features={features}
-            outOfDate={workspace.design.outOfDate}
-          />
-        ) : null}
+        <Box sx={{ maxWidth: 960, display: "flex", flexDirection: "column", gap: 2.5 }}>
+          <DesignPicker projectName={projectName} card={card} current={current} />
+          {model.running && (
+            <Typography variant="body2" color="primary.main">
+              {model.running.kind === "design"
+                ? `Updating the design for ${names(model.running.features, featureName)}. Each file changes here as it lands; follow along in the chat.`
+                : "Working through your comments. Each file changes here as it lands; follow along in the chat."}
+            </Typography>
+          )}
+          {pane.kind === "overview" && (
+            <>
+              <Box>
+                <Typography component="h2" sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
+                  Design
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {features.length} features · {card.items.length} files
+                </Typography>
+              </Box>
+              {label && !model.running && (
+                <Note>
+                  <Typography variant="body2">
+                    {outOfDate.length === 0
+                      ? `${names(workspace.design.toDesign, featureName)} ${workspace.design.toDesign.length === 1 ? "isn't" : "aren't"} designed yet.`
+                      : outOfDateByAnswers(outOfDate, answeredHere, spec.data.design.designedFrom)
+                        ? `Your ${outOfDate.length === 1 ? "answer" : "answers"} changed ${names(outOfDate, featureName)}: update the design.`
+                        : `You changed ${names(outOfDate, featureName)} in Spec since it was designed.`}
+                  </Typography>
+                  <Button size="small" variant={card.primary?.kind === "design" ? "contained" : "outlined"} disabled={!turns.ready} onClick={() => turns.design()}>
+                    {label}
+                  </Button>
+                </Note>
+              )}
+              <DesignOverview
+                projectName={projectName}
+                card={card}
+                featureName={featureName}
+                ready={turns.ready}
+                running={model.running !== null}
+                onAddress={() => void turns.addressComments(card.review)}
+              />
+            </>
+          )}
+          {pane.kind === "comments" && <CommentsPane projectName={projectName} card={card} />}
+          {pane.kind === "item" && (
+            <ItemPane
+              key={pane.item.key}
+              projectName={projectName}
+              card={card}
+              item={pane.item}
+              primary={card.primary?.kind === "open" && card.primary.key === pane.item.key}
+              featureName={featureName}
+              onReview={(component) => void navigate({ to: "/projects/$projectName/design", params: { projectName }, search: { art: pane.item.key, review: component } })}
+            />
+          )}
+          {pane.kind === "blocking" && (
+            <DependencyView projectName={projectName} dependency={pane.dependency} featureName={featureName(pane.dependency.featureId)} />
+          )}
+        </Box>
       </Box>
+      {open && (
+        <PrototypeReviewHost
+          prototype={open}
+          review={card.review}
+          reviews={card.reviews}
+          onWhatChanged={() => {
+            closeReview();
+            chatPanel.open();
+          }}
+          onClose={closeReview}
+        />
+      )}
     </Box>
   );
 }

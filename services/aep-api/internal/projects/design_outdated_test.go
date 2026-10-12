@@ -19,26 +19,45 @@ package projects
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
 
-// stubDesignTurns answers "the newest successful design run" and nothing else.
+// stubDesignTurns answers "the newest successful design runs" and nothing
+// else: runs, latest-finished first, or lastDesign alone.
 type stubDesignTurns struct {
 	lastDesign *spec.AgentTurn
+	runs       []spec.AgentTurn
 	err        error
-	askedFlow  string
+	askedFlows []string
 }
 
-func (s *stubDesignTurns) Newest(context.Context, string, string, string) (*spec.AgentTurn, error) {
+func (s *stubDesignTurns) Newest(context.Context, string, string) (*spec.AgentTurn, error) {
 	return nil, nil
 }
 
-func (s *stubDesignTurns) NewestCompletedFlow(_ context.Context, _, _, flow string) (*spec.AgentTurn, error) {
-	s.askedFlow = flow
-	return s.lastDesign, s.err
+func (s *stubDesignTurns) CompletedFlows(_ context.Context, _, _ string, flows []string, _ int) ([]spec.AgentTurn, error) {
+	s.askedFlows = flows
+	if s.runs != nil || s.lastDesign == nil {
+		return s.runs, s.err
+	}
+	return []spec.AgentTurn{*s.lastDesign}, s.err
+}
+
+// svcAt answers each commit's requirements fingerprint from fps.
+func svcAt(turns specTurnRows, fps map[string]string) *Service {
+	svc := &Service{}
+	svc.specTurns = turns
+	svc.artifactSvc = &artifactstest.FakeArtifactService{
+		RequirementsFingerprintAtFunc: func(_ context.Context, _, _, at string) (string, error) {
+			return fps[at], nil
+		},
+	}
+	return svc
 }
 
 func svcFor(turns specTurnRows, fingerprintAt string, fpErr error) *Service {
@@ -95,10 +114,10 @@ func TestDesignOutdated(t *testing.T) {
 		}
 	})
 
-	// Only a full re-derivation reconciles the design with the requirements —
-	// a targeted edit to one document leaves the set inconsistent, so the
-	// baseline may only ever come from a design run.
-	t.Run("asks for the design flow specifically", func(t *testing.T) {
+	// Only a design run reconciles the design with the requirements as a
+	// whole, and an Address comments run with its own edits: the baseline may
+	// only ever come from those.
+	t.Run("asks for the design runs specifically", func(t *testing.T) {
 		t.Parallel()
 		turns := &stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "abc"}}
 		svc := svcFor(turns, "same", nil)
@@ -106,8 +125,42 @@ func TestDesignOutdated(t *testing.T) {
 		if _, err := svc.designOutdated(context.Background(), "acme", "proj", "same"); err != nil {
 			t.Fatalf("designOutdated: %v", err)
 		}
-		if turns.askedFlow != "design" {
-			t.Fatalf("looked up flow %q, want the design flow", turns.askedFlow)
+		if fmt.Sprint(turns.askedFlows) != "[design address-comments]" {
+			t.Fatalf("looked up flows %v, want the design runs", turns.askedFlows)
+		}
+	})
+
+	// L30: the baseline is where the run LEFT the requirements, so the gap
+	// check's own edits are not a move.
+	t.Run("the design run's own edits are not a move", func(t *testing.T) {
+		t.Parallel()
+		svc := svcAt(&stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "start", EndRef: "end"}},
+			map[string]string{"start": "before", "end": "after"})
+
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "after"); err != nil || got {
+			t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+		}
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "later"); err != nil || !got {
+			t.Fatalf("an edit after the run: designOutdated = (%v, %v), want (true, nil)", got, err)
+		}
+	})
+
+	// An Address comments run's own edits are not a move either; an edit made
+	// before it still is.
+	t.Run("an Address comments run moves the baseline it started from", func(t *testing.T) {
+		t.Parallel()
+		runs := []spec.AgentTurn{
+			{Flow: spec.FlowAddressComments, BaseRef: "from", EndRef: "addressed"},
+			{Flow: spec.FlowDesign, BaseRef: "start", EndRef: "designed"},
+		}
+		svc := svcAt(&stubDesignTurns{runs: runs}, map[string]string{"designed": "A", "from": "A", "addressed": "B"})
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "B"); err != nil || got {
+			t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+		}
+
+		svc = svcAt(&stubDesignTurns{runs: runs}, map[string]string{"designed": "A", "from": "edited", "addressed": "B"})
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "B"); err != nil || !got {
+			t.Fatalf("an edit before Address comments: designOutdated = (%v, %v), want (true, nil)", got, err)
 		}
 	})
 
@@ -124,6 +177,52 @@ func TestDesignOutdated(t *testing.T) {
 		}
 	})
 
+	// A baseline the pod refuses (a BaseRef it does not accept) or no longer
+	// has is skipped with a warning, as the save path does: the poll must not
+	// 500 every few seconds on a ledger row nobody can fix.
+	for name, refusal := range map[string]error{
+		"an unknown base commit":        fmt.Errorf("list tree at gone: %w", sourcecontrol.ErrRefNotFound),
+		"a base commit the pod refuses": fmt.Errorf("list tree at main: %w", sourcecontrol.ErrRefInvalid),
+	} {
+		t.Run(name+" skips the fact", func(t *testing.T) {
+			t.Parallel()
+			svc := svcFor(&stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "gone"}}, "", refusal)
+
+			got, err := svc.designOutdated(context.Background(), "acme", "proj", "now")
+			if err != nil || got {
+				t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+			}
+		})
+	}
+
+	// Any other permanent failure is not a verdict on the commit: a revoked
+	// GitHub token (the pod's github_error 401) or a pod refusal of something
+	// else must reach the caller, never read as "staleness unchecked".
+	for name, failure := range map[string]error{
+		"a GitHub 401":                    fmt.Errorf("list tree at abc: %w", &sourcecontrol.HTTPStatusError{StatusCode: 401}),
+		"a pod refusal of something else": fmt.Errorf("list tree at abc: %w", podRefusal{}),
+	} {
+		t.Run(name+" reaches the caller", func(t *testing.T) {
+			t.Parallel()
+			svc := svcFor(&stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "abc"}}, "", failure)
+
+			if _, err := svc.designOutdated(context.Background(), "acme", "proj", "now"); err == nil {
+				t.Fatal("a permanent failure that is not a refused commit was swallowed")
+			}
+		})
+	}
+
+	// AE Studio not serving is not a refusal: it reaches the caller, whose
+	// degrade marks the spec facts unavailable.
+	t.Run("AE Studio unavailable still reaches the caller", func(t *testing.T) {
+		t.Parallel()
+		svc := svcFor(&stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "abc"}}, "", sourcecontrol.ErrAEStudioUnavailable)
+
+		if _, err := svc.designOutdated(context.Background(), "acme", "proj", "now"); !errors.Is(err, sourcecontrol.ErrAEStudioUnavailable) {
+			t.Fatalf("err = %v, want ErrAEStudioUnavailable", err)
+		}
+	})
+
 	// An unwired source cannot answer, and guessing "stale" would block Build
 	// on every project.
 	t.Run("an unwired turn source reports nothing", func(t *testing.T) {
@@ -136,3 +235,10 @@ func TestDesignOutdated(t *testing.T) {
 		}
 	})
 }
+
+// podRefusal stands in for the adapter's StatusError on a pod 400 that is not
+// a refusal of the ref: an error that classifies itself permanent.
+type podRefusal struct{}
+
+func (podRefusal) Error() string   { return "ae studio: list-tree answered 400 bad_request" }
+func (podRefusal) Permanent() bool { return true }

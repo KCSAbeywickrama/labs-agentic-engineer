@@ -33,8 +33,8 @@
 // or drops the operation fails `npm run gen && tsc` on the next build.
 //
 // THE ORDER OF THIS TABLE IS THE RAIL'S ORDER, and its first reachable row is
-// the screen the app lands on. Write the screens in the order the wireframes
-// draw them.
+// the screen the app lands on. Write the screens in the order of the
+// prototype's navigation, then the screens it does not list.
 
 import { canCall } from "./core";
 import { OPERATIONS, isOperationKey, type OperationKey } from "./operations.gen";
@@ -42,7 +42,7 @@ import { OPERATIONS, isOperationKey, type OperationKey } from "./operations.gen"
 export interface ScreenRoute {
   /** A stable id the App maps to a page component. */
   readonly key: string;
-  /** The wireframe's screen name, for the rail and the Forbidden copy. */
+  /** The prototype screen's `name` as written, for the rail and the Forbidden copy. */
   readonly label: string;
   readonly path: string;
   /**
@@ -53,7 +53,7 @@ export interface ScreenRoute {
    */
   readonly loads: OperationKey | null;
   /**
-   * In a flow with no `role` line: reachable before sign-in, routed ABOVE the
+   * Drawn on a bare `<Screen>` root: reachable before sign-in, routed ABOVE the
    * sign-in guard. Its load operation, if it has one, is `security: []` in the
    * contract.
    */
@@ -61,7 +61,7 @@ export interface ScreenRoute {
 }
 
 /**
- * YOUR screens, in RAIL ORDER. One row per wireframe screen.
+ * YOUR screens, in RAIL ORDER. One row per prototype screen.
  *
  * `loads` is the operation the screen exists to perform, AT THE REACH THE
  * SCREEN SHOWS: an every-row queue loads `GET /claims`, a "mine" page loads
@@ -76,11 +76,11 @@ export interface ScreenRoute {
  * now called that a defect and patched it, in two different places.
  *
  * `null` is only for a screen that needs no operation at all, which is rare. A
- * screen in a flow with no `role` line is `public: true`.
+ * screen drawn on a bare `<Screen>` root is `public: true`.
  */
 export const SCREEN_ROUTES: readonly ScreenRoute[] = [
-  { key: "myclaims", label: "My Claims", path: "/claims", loads: "GET /me/claims" },
-  { key: "submitclaim", label: "Submit Claim", path: "/submit", loads: "POST /me/claims" },
+  { key: "myclaims", label: "My claims", path: "/claims", loads: "GET /me/claims" },
+  { key: "submitclaim", label: "Submit claim", path: "/submit", loads: "POST /me/claims" },
   { key: "approvals", label: "Approvals", path: "/approvals", loads: "GET /claims" },
   { key: "reports", label: "Reports", path: "/reports", loads: "GET /reports" },
   // The public row. Here because `public` is the one field of this table whose
@@ -89,7 +89,7 @@ export const SCREEN_ROUTES: readonly ScreenRoute[] = [
   // it is reachable by everyone, so it keeps `reachableScreens` non-empty for a
   // caller who has earned nothing, which is precisely the case NoAccess exists
   // to name.
-  { key: "policy", label: "Expense Policy", path: "/policy", loads: null, public: true },
+  { key: "policy", label: "Expense policy", path: "/policy", loads: null, public: true },
 ];
 
 // FAIL LOUDLY, at module load — the first render, every time, in dev, in the

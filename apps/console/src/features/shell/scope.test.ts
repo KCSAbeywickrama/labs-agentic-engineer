@@ -77,7 +77,6 @@ describe("shellScope", () => {
     const routes = [
       ["/projects/$projectName/_overview/spec", "spec", "overview"],
       ["/projects/$projectName/_overview/design", "design", "overview"],
-      ["/projects/$projectName/_overview/prototype", "prototype", "overview"],
       ["/projects/$projectName/_overview/questions", "questions", "overview"],
       ["/projects/$projectName/builds/$version", "build", "builds"],
       ["/projects/$projectName/validations/$version", "validation", "validations"],
@@ -168,9 +167,8 @@ describe("cards and the Pages they are over", () => {
 describe("chatTopic", () => {
   const product = { topic: "the whole product", note: null };
 
-  it("talks about the design review on the design card and the prototypes beside it", () => {
+  it("talks about the design review on the design card", () => {
     expect(chatTopic("design", null)).toEqual({ topic: "the design review", note: null });
-    expect(chatTopic("prototype", null)).toEqual({ topic: "the design review", note: null });
   });
 
   it("narrows to the feature open in the spec card, and says where other changes go", () => {

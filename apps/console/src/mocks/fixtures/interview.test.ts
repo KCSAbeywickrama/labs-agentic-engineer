@@ -65,7 +65,7 @@ describe("the mock main agent's hand-off", () => {
       status: "awaiting_handoff",
       view: "issues",
     });
-    expect(turn.frames.at(-1)?.part.type).toBe("turn-committed");
+    expect(turn.frames.at(-1)?.part.type).toBe("turn-completed");
     expect(turn.frames.filter((f) => f.part.type === "text-delta").length).toBeGreaterThan(0);
     expect(turn.reply[0]?.content).toContainEqual({
       type: "tool-call",

@@ -21,7 +21,7 @@
  * into the derived machine view (`ProjectDesign` in types.ts) that the
  * cell diagram, coding-agent dispatch, and task generation consume. Pure:
  * files in, JSON out; nobody authors this artifact and the agent never sees
- * it (like the compiled .excalidraw, it is excluded from snapshots). In
+ * it (like every *.gen.json, it is excluded from snapshots). In
  * production the BFF runs the equivalent projection; the playground writes
  * `design.gen.json` post-turn so the shape is inspectable while testing.
  */
@@ -92,7 +92,9 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
-  if (files[`${dir}/wireframes.dsl`] !== undefined) artifacts.wireframes = `${dir}/wireframes.dsl`;
+  // The prototype (manifest + screens) is a web-application's UI contract.
+  if (files[`${dir}/prototype.json`] !== undefined) artifacts.prototype = `${dir}/prototype.json`;
+  if (files[`${dir}/prototype.tsx`] !== undefined) artifacts.prototypeSource = `${dir}/prototype.tsx`;
 
   // exactOptionalPropertyTypes: omit absent keys instead of `key: undefined`.
   const build: ProjectDesignComponent["build"] = {};

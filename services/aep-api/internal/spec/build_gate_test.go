@@ -23,8 +23,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
-	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
 
 // gateRequirements is the lunch product's requirements folder: two features
@@ -74,7 +75,8 @@ func completeDesignFiles() map[string]string {
 		"components/lunch-api/design.json":       enriched("lunch-api", "service", "F1.1", "F1.2", "F1.4"),
 		"components/lunch-api/openapi.yaml":      "openapi: 3.0.3\n",
 		"components/lunch-web/design.json":       enriched("lunch-web", "web-application", "F1.1", "F1.2"),
-		"components/lunch-web/wireframes.dsl":    "screen home\n",
+		"components/lunch-web/prototype.json":    validPrototypeManifest,
+		"components/lunch-web/prototype.tsx":     validPrototypeSource,
 		"components/slack-notifier/design.json":  enriched("slack-notifier", "service", "F2.1"),
 		"components/slack-notifier/openapi.yaml": "openapi: 3.0.3\n",
 	}
@@ -129,7 +131,10 @@ func TestBuildGate_UncoveredStory(t *testing.T) {
 func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T) {
 	files := completeDesignFiles()
 	delete(files, "components/lunch-api/openapi.yaml")
-	files["components/lunch-web/design.json"] = renderScaffold("lunch-web", "web-application")
+	// The pod's scaffold for lunch-web, never enriched.
+	files["components/lunch-web/design.json"] = `{"name":"lunch-web","type":"web-application","version":"0.1.0",` +
+		`"language":"TBD","buildpack":"docker","appPath":"lunch-web","entrypoint":"deployment/web-application",` +
+		`"exposure":"internet","dependencies":[],"description":"Scaffolded from design.cell — enrich it."}`
 	errs := gateErrors(t, files)
 	codes := strings.Join(codesOf(errs), ",")
 	if !strings.Contains(codes, "MISSING_COMPONENT_ARTIFACT") {
@@ -137,6 +142,124 @@ func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T
 	}
 	if !strings.Contains(codes, "UNENRICHED_COMPONENT") {
 		t.Errorf("want UNENRICHED_COMPONENT for scaffold-placeholder lunch-web, got %+v", errs)
+	}
+}
+
+// A web-application's type-mandated artifact is its prototype, both halves: a
+// half missing or blank is refused with the step that writes it, and the whole
+// prototype passes.
+func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
+	const (
+		manifest = "components/lunch-web/prototype.json"
+		source   = "components/lunch-web/prototype.tsx"
+	)
+	for _, tc := range []struct {
+		name     string
+		drop     []string
+		add      map[string]string
+		wantPath string
+		wantMsg  string
+	}{
+		{name: "no design for the app at all", drop: []string{manifest, source},
+			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
+		{name: "no prototype.tsx", drop: []string{source},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "no prototype.json", drop: []string{manifest},
+			wantPath: manifest, wantMsg: "lunch-web's prototype has no manifest (prototype.json): run Design again"},
+		{name: "blank prototype.tsx", add: map[string]string{source: "  \n"},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "the whole prototype"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := completeDesignFiles()
+			for _, k := range tc.drop {
+				delete(files, k)
+			}
+			for k, v := range tc.add {
+				files[k] = v
+			}
+			got := gateErrors(t, files)
+			var want []FileValidationError
+			if tc.wantMsg != "" {
+				want = []FileValidationError{{Path: tc.wantPath, Code: codeMissingComponentArtifact, Message: tc.wantMsg}}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("gate =\n%+v\nwant\n%+v", got, want)
+			}
+		})
+	}
+}
+
+// review.json (the Design step's comments and checks) never refuses a build:
+// unsent drafts and open comments are the console's to show, and a malformed
+// file is the save gate's to refuse when it is written.
+func TestBuildGate_ReviewNeverRefuses(t *testing.T) {
+	for name, review := range map[string]string{
+		"an unsent draft and a sent comment": `{"version":1,"artifacts":[{"path":"specs/design/components/lunch-web/prototype.json","comments":[` +
+			`{"id":"c1","author":{"id":"u-1","name":"Mark"},"text":"Move the total up.","createdAt":"2026-10-10T09:00:00Z","status":"draft"},` +
+			`{"id":"c2","author":{"id":"u-1","name":"Mark"},"text":"Name it Expense.","createdAt":"2026-10-10T09:00:00Z","status":"sent","sentAt":"2026-10-10T09:05:00Z"}]}]}`,
+		"malformed": "{nope",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name != "malformed" {
+				if err := designspec.ValidateDesignReview([]byte(review)); err != nil {
+					t.Fatalf("fixture must be a sound review.json: %v", err)
+				}
+			}
+			files := completeDesignFiles()
+			files["review.json"] = review
+			if errs := gateErrors(t, files); len(errs) != 0 {
+				t.Errorf("review.json must never refuse the build gate, got %+v", errs)
+			}
+		})
+	}
+}
+
+// lunchWebPrototype is a sound prototype for lunch-web whose one role is the
+// rolesDoc's "Member".
+func lunchWebPrototype(files map[string]string, roleID string) map[string]string {
+	files[prototypespec.ManifestPath("lunch-web")] = strings.ReplaceAll(validPrototypeManifest, `"user"`, `"`+roleID+`"`)
+	files[prototypespec.SourcePath("lunch-web")] = validPrototypeSource
+	return files
+}
+
+func TestBuildGate_SoundPrototypePasses(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	if errs := gateErrors(t, lunchWebPrototype(files, "Member")); len(errs) != 0 {
+		t.Fatalf("a sound, current prototype must pass, got %+v", errs)
+	}
+}
+
+func TestBuildGate_InvalidPrototypeFails(t *testing.T) {
+	files := lunchWebPrototype(completeDesignFiles(), "user")
+	key := prototypespec.ManifestPath("lunch-web")
+	files[key] = strings.Replace(files[key], `"entryScreen": "home"`, `"entryScreen": "nowhere"`, 1)
+	errs := gateErrors(t, files)
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference || errs[0].Path != key {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+}
+
+// A prototype is current with the design: a role security.json does not
+// declare is one the platform never provisions and the app never gates on.
+func TestBuildGate_PrototypeRoleUnknownToSecurityFails(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	errs := gateErrors(t, lunchWebPrototype(files, "member"))
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference ||
+		errs[0].Path != prototypespec.ManifestPath("lunch-web") {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+	assertContains(t, errs[0].Message, `role "member" is not a role in security.json`)
+	assertContains(t, errs[0].Message, "Member")
+}
+
+// Without security.json the roles come from the PRD's actors: nothing to
+// cross-check.
+func TestBuildGate_PrototypeRolesUncheckedWithoutSecurity(t *testing.T) {
+	if errs := gateErrors(t, lunchWebPrototype(completeDesignFiles(), "anyone")); len(errs) != 0 {
+		t.Fatalf("want a clean gate, got %+v", errs)
 	}
 }
 
@@ -297,7 +420,9 @@ func signInDesignFiles() map[string]string {
 	files := completeDesignFiles()
 	files["components/lunch-api/design.json"] = authService("lunch-api", "F1.1", "F1.2", "F1.4")
 	files["components/lunch-api/openapi.yaml"] = protectedStubSpec
-	return files
+	// The prototype offers the role the rolesDoc declares, as a sign-in
+	// design's prototype must once security.json exists.
+	return lunchWebPrototype(files, "Member")
 }
 
 // A design with no sign-in needs no roles document — most designs are this.
@@ -375,8 +500,8 @@ func TestBuildGate_RulesThatNeedTheWholeBundle(t *testing.T) {
 	}
 }
 
-// The two coverage warnings are NON-BLOCKING: they never appear among the gate's
-// errors, and they do name the handle nobody uses and the one nobody can reach.
+// The two coverage warnings are NON-BLOCKING: they never appear among the
+// gate's errors.
 func TestBuildGate_CoverageWarningsDoNotBlock(t *testing.T) {
 	files := signInDesignFiles()
 	files["components/lunch-api/openapi.yaml"] = lunchAPISpec
@@ -389,40 +514,6 @@ func TestBuildGate_CoverageWarningsDoNotBlock(t *testing.T) {
 
 	if errs := gateErrors(t, files); len(errs) != 0 {
 		t.Fatalf("a coverage warning must not fail the gate, got %+v", errs)
-	}
-	var codes []string
-	for _, w := range buildGateWarnings(files) {
-		codes = append(codes, w.Code)
-		// Bundle-relative, like every row this file produces; the apply path
-		// prefixes DesignDir for the channel that speaks repo paths.
-		if w.Path != securityspec.BundleKey {
-			t.Errorf("warning path %q is not bundle-relative", w.Path)
-		}
-	}
-	for _, want := range []string{codeSecurityHandleUsedNowhere, codeSecurityHandleUnreachable} {
-		if !slices.Contains(codes, want) {
-			t.Fatalf("want a %s warning, got %v", want, codes)
-		}
-	}
-}
-
-// INFO is not dropped: a role whose assignTo names a group the document does
-// not declare is a deliberate delegation to the org directory, and the record
-// of that decision rides the same channel as the warnings.
-func TestBuildGate_DirectoryCheckedNoteRidesTheWarningsChannel(t *testing.T) {
-	files := signInDesignFiles()
-	files["components/lunch-api/openapi.yaml"] = lunchAPISpec
-	// `Finance` is not one of the document's own groups, so it can only be one
-	// the org directory already holds.
-	files["security.json"] = strings.Replace(rolesDoc("F1.1"),
-		`"assignTo":["Lunch Members"]`, `"assignTo":["Finance"]`, 1)
-
-	var codes []string
-	for _, w := range buildGateWarnings(files) {
-		codes = append(codes, w.Code)
-	}
-	if !slices.Contains(codes, codeSecurityAssignToDirectoryChecked) {
-		t.Fatalf("want a %s note, got %v", codeSecurityAssignToDirectoryChecked, codes)
 	}
 }
 

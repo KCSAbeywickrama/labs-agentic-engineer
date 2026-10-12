@@ -89,3 +89,18 @@ frontend and a backend component together.
 - A dual-audience skill's body is read by both agents, so it must stay useful to
   both. Splitting audience-specific detail into per-audience `references/*.md`
   remains available and is unaffected by this decision.
+
+## Amendment 2026-10-06 — AE Studio
+
+The design side is now `ae-design-agent`, a container of the organization's AE
+Studio pod ([ADR-0045](ADR-0045-design-work-runs-in-the-organizations-ae-studio.md)).
+Read "the agents service" above as `ae-design-agent`. The audience rule is
+unchanged: it still knows it is the design side at compile time.
+
+## Amendment 2026-10-11 — the dual-audience example is `prototype`
+
+The `wireframes` skill is retired
+([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+Where this ADR names it as the `[design, coding]` skill, read `prototype`: the
+design agent writes the prototype from its body, and the coding run builds
+against its `references/implementing.md`.

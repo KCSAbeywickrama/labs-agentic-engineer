@@ -43,7 +43,7 @@ interview, design or build was the whole product. Users think in features
 
 ## Consequences
 
-- Designs (`stories` in design.json), acceptance tags (`@story-F2.3`), task
-  issues ("Serves stories") and validation results cite stories by ID, so a
-  rename or a move does not split history.
+- Designs (`stories` in design.json), acceptance tags (`@story-F2.3`), build
+  issue items (by feature ID) and validation results cite stories or features
+  by ID, so a rename or a move does not split history.
 - Projects with a flat PRD are not migrated: they can no longer build.

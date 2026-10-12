@@ -13,6 +13,22 @@ failure: the CLI exits nonzero only when it could not do what was asked.
 
 ## Saving a case
 
+A case starts as a playground project, generated headless on the feature flow:
+
+```bash
+pnpm play <dir> requirements --idea "<brief>" --silent   # product pass: stub features
+pnpm play <dir> interview F<n> --silent                  # each feature, in order
+pnpm play <dir> design --silent
+pnpm play <dir> prototype --silent
+pnpm play <dir> tasks --silent                           # the Build v1 issue
+```
+
+Read the spec before `tasks`: a planned version is recorded, so a later `tasks`
+plans v2. A role whose reach rests on data nothing in the product writes (a
+claim no assertion carries, a limit "set outside the product") walks as
+broken, which scores the design, not the code: fix it with
+`pnpm play <dir> chat "…"`, then rerun `design` and `prototype`.
+
 ```bash
 pnpm play <project dir> eval-save <name>      # from a playground project
 pnpm --filter @aep/codegen-evals eval save --from <abs dir> --name <name> [--force]
@@ -24,7 +40,7 @@ section (`## Progress`, `## Mock verification`), otherwise the oldest undo
 snapshot that is — copies it to `cases/<name>/` without the compiled renderings
 (`*.excalidraw`, `*.gen.json`, which code generation never reads), and asks a planner (read-only
 tools) to derive `checklist.yaml` from the specs: one item per user-visible
-behaviour in the wireframe flows and PRD stories, each walkable from an empty
+behaviour in the prototype's flows and display states and the user stories, each walkable from an empty
 database, under a role `wire --role` accepts. A project with no
 `web-application` component is refused: `wire` is the only target.
 
@@ -85,6 +101,7 @@ the bands. Flag → env var → default:
 | `CODEGEN_EVAL_CODING_TIMEOUT_MINUTES` (90), `CODEGEN_EVAL_WIRE_TIMEOUT_MINUTES` (20), `CODEGEN_EVAL_WALK_TIMEOUT_MINUTES` (30) | phase ceilings; a case's `timeoutMinutes` overrides the coding one |
 | `CODEGEN_EVAL_PLANNER_MODEL`, `CODEGEN_EVAL_WALKER_MODEL`, `CODEGEN_EVAL_JUDGE_MODEL` | the harness's agents (default `claude-sonnet-5-5`) |
 | `CODEGEN_EVAL_WALK_MAX_TURNS` | the walker's turn budget |
+| `CODEGEN_EVAL_ENV_FILE` | the credential file (default `deployments/.env`); a git worktree points it at the main checkout's |
 | `CODEGEN_EVAL_STAGE_ROOT` | where attempts are staged (must stay under `$HOME`: Colima shares nothing else) |
 
 ## Reading results

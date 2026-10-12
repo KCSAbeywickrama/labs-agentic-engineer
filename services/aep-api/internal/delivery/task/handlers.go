@@ -141,7 +141,7 @@ func mapTaskReadError(err error) error {
 	case errors.Is(err, ErrProjectRepoNotFound):
 		return apierr.NotFound(ErrProjectRepoNotFound.Error())
 	default:
-		return apierr.Internal("internal error")
+		return apierr.WithCause(apierr.Internal("internal error"), err)
 	}
 }
 
@@ -161,7 +161,7 @@ func mapTaskCommandError(err error) error {
 		// coding agent's): the 409 says why, in the words the person reads.
 		return apierr.Conflict(delivery.AdoptionRefusal(err).Error())
 	default:
-		return apierr.Internal("internal error")
+		return apierr.WithCause(apierr.Internal("internal error"), err)
 	}
 }
 

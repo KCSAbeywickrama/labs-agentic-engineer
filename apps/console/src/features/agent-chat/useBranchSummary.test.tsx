@@ -50,13 +50,13 @@ function fakeStore(history: unknown[]) {
     activeTurn: async () => null,
     startTurn: async () => `t${++next}`,
     turn: async () => null,
-    openStream: async (_p: string, turnId: string) => streams.get(turnId) ?? sse([{ type: "turn-committed" }]),
+    openStream: async (_p: string, turnId: string) => streams.get(turnId) ?? sse([{ type: "turn-completed" }]),
   } as unknown as ChatApi;
   const store = createChatStore({ api, pollDelay: () => 60_000 });
   /** The user says something and the agent answers it. */
   const talk = async (said: string, reply: string, project = PROJECT) => {
     await store.open(project);
-    streams.set(`t${next + 1}`, sse([{ type: "text-delta", delta: reply }, { type: "turn-committed" }]));
+    streams.set(`t${next + 1}`, sse([{ type: "text-delta", delta: reply }, { type: "turn-completed" }]));
     await store.send(project, said, { kind: "product" });
     await vi.waitFor(() => expect(store.get(project).turn).toEqual({ phase: "idle" }));
   };

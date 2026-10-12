@@ -18,9 +18,10 @@ package issues
 
 import "github.com/wso2/aep/aep-api/internal/platform/mcprpc"
 
-// userTools is the Issues agent's tools/list. The agents service's filing gate
-// keys on the literal name create_issue, so the names are a contract with
-// services/agents: change them together. No schema declares a project, org or
+// userTools is the Issues agent's tools/list. The design agent's filing gate
+// keys on the literal name create_issue, and ae-studio-tools pins the names
+// (mcp.IssuesTools), so the names are a contract with both: change them
+// together. No schema declares a project, org or
 // labels — the session fixes the first two and AE sets the last.
 func userTools() []mcprpc.Tool {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }

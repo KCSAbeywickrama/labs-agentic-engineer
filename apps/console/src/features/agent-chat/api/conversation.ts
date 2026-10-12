@@ -16,40 +16,41 @@
  * under the License.
  */
 
-// The project conversation's two reads, copied from the old console's agent-chat
-// (api/conversations.ts, api/turns.ts): resolve the project's current thread,
-// then read its messages.
+// The project conversation's two reads on the org's design agent: resolve the
+// project's current thread, then read its messages.
 
-import type { components } from "../../../generated/aep-api";
-import { client } from "../../../api/client";
-import { apiErrorMessage } from "../../../api/errors";
+import type { components } from "../../../generated/ae-design-agent";
+import { designAgentCall } from "../../../api/aeStudio";
 import { wireQuery, type ChatView } from "../chatView";
 import { IssueClosedError } from "./errors";
+import { podFailure } from "./turns";
 
 export type ConversationMessage = components["schemas"]["ConversationMessage"];
 
 /**
- * The project's CURRENT thread id (#430): server-minted and stored against the
- * project, so every member resolves the same one. Each view has its own: the
- * Issues Page's agent talks on a thread of its own, and so does each open
- * issue's (`issueNumber`); a closed issue has none (409 `issue_closed`).
+ * The project's CURRENT thread id (#430): minted by the pod on first read and
+ * kept for the project, so every member resolves the same one. Each view has
+ * its own: the Issues Page's agent talks on a thread of its own, and so does
+ * each open issue's (`issueNumber`); a closed issue has none (409
+ * `issue_closed`).
  */
 export async function fetchCurrentConversationId(projectName: string, view?: ChatView, issueNumber?: number): Promise<string> {
+  const fallback = "Couldn't open the project conversation";
   const query = wireQuery(view, issueNumber);
-  const { data, error, response } = await client.GET("/projects/{projectName}/agents/conversations", {
-    params: { path: { projectName }, ...(query ? { query } : {}) },
-  });
-  if (error || data === undefined) {
-    if (response?.status === 409 && (error as { code?: string } | undefined)?.code === "issue_closed") throw new IssueClosedError();
-    throw new Error(apiErrorMessage(error, "Couldn't open the project conversation"));
+  const { data, error, response } = await designAgentCall(fallback, (agent) =>
+    agent.GET("/projects/{projectName}/conversations/current", {
+      params: { path: { projectName }, ...(query ? { query } : {}) },
+    }),
+  );
+  if (data === undefined) {
+    if (response.status === 409 && (error as { code?: string } | undefined)?.code === "issue_closed") throw new IssueClosedError();
+    throw podFailure(error, response, fallback);
   }
-  const current = data.conversations.find((c) => c.current) ?? data.conversations[0];
-  if (!current) throw new Error("The project has no conversation thread.");
-  return current.conversationId;
+  return data.conversationId;
 }
 
 /**
- * The thread's history, as the server persisted it. A turn's messages are
+ * The thread's history, as the pod persisted it. A turn's messages are
  * persisted when it ends, so a running turn is not in it: the chat attaches
  * to that one's stream instead.
  */
@@ -57,11 +58,12 @@ export async function fetchConversationMessages(
   projectName: string,
   conversationId: string,
 ): Promise<ConversationMessage[]> {
-  const { data, error } = await client.GET("/projects/{projectName}/agents/{conversationId}/messages", {
-    params: { path: { projectName, conversationId } },
-  });
-  if (error || data === undefined) {
-    throw new Error(apiErrorMessage(error, "Couldn't load the conversation"));
-  }
+  const fallback = "Couldn't load the conversation";
+  const { data, error, response } = await designAgentCall(fallback, (agent) =>
+    agent.GET("/projects/{projectName}/conversations/{conversationId}/messages", {
+      params: { path: { projectName, conversationId } },
+    }),
+  );
+  if (data === undefined) throw podFailure(error, response, fallback);
   return data.messages;
 }

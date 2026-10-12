@@ -1,0 +1,17 @@
+# Client + models for the Turn socket (ae-studio-tools calls ae-design-agent),
+# generated from packages/contracts/sockets/ae-studio/turn. The embedded spec
+# is not needed on the client side. Run via `make gen-api`.
+package: turnsock
+generate:
+  client: true
+  models: true
+compatibility:
+  preserve-original-operation-id-casing-in-embedded-spec: true
+  # Enum constants carry their type name whether or not two enums share a
+  # value, so removing one value never renames another enum's constants.
+  always-prefix-enum-values: true
+output: internal/gen/turnsock/turnsock_gen.go
+output-options:
+  skip-prune: true
+  prefer-skip-optional-pointer: true
+  name-normalizer: ToCamelCaseWithInitialisms

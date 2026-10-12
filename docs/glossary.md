@@ -93,8 +93,9 @@ addition.
 AEP selects one secrets provider per process (no fallback chain):
 - **Cloud / overlay:** SM-API HTTP client (`ManagesSecretReferences()=true`) —
   the server owns `SecretReference` CR creation.
-- **Local / OSS:** in-process OpenBao-direct provider when `OPENBAO_ADDR` (and
-  `OPENBAO_TOKEN`) are set. The provider writes KV only
+- **Local / OSS:** in-process OpenBao-direct provider when `OPENBAO_ADDR` is
+  set; it logs in by Kubernetes auth (role `aep-api`, write-only policy
+  `aep-api-writer`, no static token). The provider writes KV only
   (`ManagesSecretReferences()=false`); the high-level client authors
   `SecretReference` CRs via OpenChoreo into the Workload control-plane
   namespace (not the vault `wc-…` segment). See
@@ -107,9 +108,9 @@ Cloud overlay may use a different backend via SM-API.
 
 ### `effective-key` — retired
 The git-service endpoint that returned the org's Anthropic key for the spec
-agents. aep-api now reads the model connection's key itself
-(`ConnectionReader.Effective`) and hands it to the agents service per turn in
-`X-Model-Key`.
+agents. aep-api never reads the key: the org's `default-key` Org secret is
+mounted into the org's `ae-design-agent` env by reference when the key is saved;
+the pod rolls.
 
 ---
 
@@ -259,17 +260,15 @@ sourced from Vault on cloud; a literal env var locally.
 The organization's Thunder confidential OAuth app (`aep-publisher-{org}`).
 The coding-agent Job authenticates to aep-api as this client
 (`client_credentials`) for platform callbacks and MCP — local and cloud.
-Distinct from other M2M clients and from the design
-agent's BFF MCP token.
+Distinct from other M2M clients and from AE Studio's
+`ae-studio` client.
 
-### `Task JWT`
-Retired as the coding-agent Job's callback credential (that is the
-publisher client). The BFF still mints short-lived RS256 identity JWTs
-(`IssueServiceToken` / `IssueMCPToken`) for design-agent MCP and outbound
-S2S; they carry org in `ocOrgId` and do not use the cycle id as subject.
-Verifiers fetch the BFF's public key from `/auth/external/jwks.json`.
-Distinct from Thunder user/M2M tokens and from the retired
-`AEP_BFF_TO_REMOTE_WORKER` client.
+### `Task JWT` — retired
+The BFF no longer mints identity JWTs and serves no JWKS
+(`/auth/external/jwks.json` is 404). The coding-agent Job's bearer is the
+organization's publisher client token (`client_credentials`), a Thunder token
+that aep-api verifies against Thunder's published keys; a JWT signed by any
+other key is rejected with 401.
 
 ---
 
@@ -396,14 +395,15 @@ earlier phases.
 A cycle is also the **unit the coding agent runs as**: each one dispatches
 exactly one ephemeral `coding-agent` job Component into the milestone's project,
 never reused across cycles. While its pod lives, progress is the pod's own log
-read through the OC API; once the pod is gone, the cycle's log is an observer
-query, which is answerable only while the Component is retained. A finished
-cycle's Component is **retained** and later **pruned oldest-first** past the
-retention cap; a **cancelled** cycle's Component is deleted at once, because that
-is what stops the pod and frees the org's entitlement slot — and with it the
-cycle's agent log (cancelled runs keep no progress history). A cycle whose
-Component has been pruned reports its log as unavailable — the platform keeps no
-second copy.
+read through the OC API. Once the pod is gone, the cycle's log is an observer
+query filtered on the Component UID the cycle stored at dispatch: by component
+scope while the Component exists, by project scope once it is deleted. Every
+closed cycle's Component is **deleted at settle**: its Job is suspended, and
+once no pod is left (two no-pod reads a grace apart) the Component goes, which
+frees the org's entitlement slot. The cycle's log stays readable
+(`recording: kept`) until `OBSERVER_LOG_RETENTION` after it ended, then reads
+`expired`; `unavailable` means only that a recent read failed. The platform
+keeps no second copy beyond the observability plane.
 
 The console calls one of these a **build session** — the same object, under a
 name that reads as a unit of work rather than as loop machinery. The rename is
@@ -468,6 +468,32 @@ which works the deployed version and must never pick up the work of the version
 being built — a build that gave up leaves its plan open, and only another build
 may continue it. A **validation** run has none at all. A run settles when its own
 working set is empty; the verdict is a separate run's answer about the version.
+
+### Build issue
+The one `development` issue a version's plan mints into its milestone, titled
+`Build <version>` (ADR-0050). Its body is an ordered checklist of **items**
+plus the version's facts (`Product-wide:`, `Held back:`), and nothing the
+specs already say. The plan turn writes the checklist with `planBuild`; the
+plan tap mints the issue when the turn completes, with dedupe key
+`build:<project>:<milestone>`. It closes when a pull request `Resolves` it
+with every item ticked. It replaces the per-feature-per-component Tasks of
+ADR-0041 decision 4.
+
+### Item
+One line of a build issue's checklist: `foundation` (shared setup and the
+carried product-wide items), a carried feature (`F2`), or `spec` for a version
+that carries no features. The coding agent works items in order, one wave of
+build subagents per item (one per component it names), one commit per item
+ending `(#<issue> <item>)`. A tick (`- [x]`) is the item's done-ness: the run's
+no-progress rule counts the unticked items (`OpenBuildItems`), and a restart
+skips items whose commit is on the branch.
+
+### Advances
+`Advances #N` in a pull request body: a coding cycle finished some items of
+the build issue and not all. The merge policy admits it only for the
+milestone's build issue, and GitHub does not treat it as a closing keyword,
+so the issue stays open for the next cycle. The coding counterpart of
+`Validates #N`.
 
 ### Halted issue
 Work a FAILED run could not finish, stamped `aep:halted` with a comment naming
@@ -576,7 +602,7 @@ plan is closed and its bugs have left.
 The one endpoint every agent of an organization calls: an API **format**
 (`anthropic` Messages or `openai-compatible`), a **base URL**, a **key** and a
 **model**. One row per org in `org_model_connections` (absent = not connected),
-the key in `org_secrets` `model/key`; the `/config` section `llm`. Anthropic's
+the key only in the vault (the org secret `default-key`); the `/config` section `llm`. Anthropic's
 own API is one connection among others, not a special case. What a connection
 supports (Claude Code, the Claude subscription, web search, native PDFs, image
 input, generated agents) is its **capabilities**, computed only by
@@ -613,7 +639,7 @@ replayed to another, so a model change on the same host keeps the history.
 ### Provider limit
 A model provider's 429 that means "the plan is spent", not "wait a moment": a
 `retry-after` past 5 minutes, or 5 minutes of 429s in all. One rule decides in
-the agents service and the runner. A spec turn ends with a `provider_limit`
+the design agent and the runner. A spec turn ends with a `provider_limit`
 frame; a coding run settles **blocked** with reason `model-provider-limit` and
 the reset time when the provider gave one, spending no re-dispatch budget.
 Shorter 429s are **waits**, retried and reported ("waiting on the model
@@ -636,9 +662,24 @@ poison `wc-` namespace derivation and the publisher OU binding.
 
 ### Committed-truth
 aep-api's rule that a spec (requirements + design) is authoritative only once it is
-committed to git `main`. An agent turn's output is hash-parity checked by the fold
-(`platform/agentfold`) before commit; a mismatch rejects the turn and leaves `main`
-untouched. The git commit — not any draft buffer — is the source of truth.
+committed to git `main`. An agent turn's file edits land in the Room; the Room's
+committer commits them to `main`. The git commit — not any draft buffer — is the
+source of truth.
+
+## Design
+
+### Prototype (UI contract)
+A web application's `prototype.json` (roles, display states, screens with the
+roles that reach each, flows per role) and `prototype.tsx` (each screen on
+`@wso2/prototype-kit`), written by the Design run after the data model and
+the roles (ADR-0042, ADR-0051); `/prototype` only regenerates it. It replaced
+`wireframes.dsl` as what Build reads: the coding agent builds one route per
+manifest screen, the shell screens included, each kit element as a real
+element and each display state as a condition on its screen's route
+(`skills/prototype/references/implementing.md`), and the mock walk follows its
+flows. Fidelity is structure, not pixels. The build gate requires a web
+application's prototype and validates it. The console calls it the
+**Prototype** (`apps/console/design/lexicon.md`).
 
 ## Skills
 
@@ -648,7 +689,7 @@ naming which agent the guidance is written for. **Absent means both**, so
 narrowing is opt-in and an unmarked or org-authored skill is never hidden by
 omission. The design agent's catalog still *lists* a coding-audience skill (it
 has to name one in order to pin it) but `load()` refuses to serve the body.
-Audience never crosses a service boundary: the agents service is always the
+Audience never crosses a service boundary: the design agent is always the
 design side, the runner always the coding side. ADR-0014.
 
 ### Skill availability (enabled / disabled)
@@ -680,3 +721,21 @@ from this array is rejected outright when invoked, so the runner lists the whole
 mirror, not just the pins. Membership grants a name and a description in the
 model's catalog — **not** the body, which arrives on invocation. This is why a
 pin additionally appends its body to the system prompt.
+
+## Design review
+
+The loop is Design → Address comments → Build
+([ADR-0051](decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and its review state is one spec file, `specs/design/review.json`
+([ADR-0052](decisions/ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
+The domain terms live in [`CONTEXT.md`](../CONTEXT.md) § Design review: **Design
+review**, **Gap check**, **Technical decision**, **Prototype**, **Checked**,
+**Review comment**, **Address comments**, **Revision**.
+
+### `wireframes.dsl` — retired
+The per-web-application screen sketch that Design drew and Build read. It is
+replaced by the prototype (`prototype.json` + `prototype.tsx`), which is now
+the build's screen brief and the build gate's mandated artifact for a web
+application. Design no longer writes it, the `wireframes` skill is deleted,
+and the gate neither reads nor accepts it. A project designed with wireframes
+has to be designed again before it can build.

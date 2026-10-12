@@ -16,24 +16,19 @@
  * under the License.
  */
 
-import { useEffect, useMemo } from "react";
 import { createLink } from "@tanstack/react-router";
-import { Alert, Box, Link, Typography } from "@wso2/oxygen-ui";
-import { AcceptanceView } from "@aep/ui-acceptance-view";
+import { Box, Link, Typography } from "@wso2/oxygen-ui";
 import { CellDiagramView } from "@aep/ui-cell-diagram-view";
 import { DesignView } from "@aep/ui-design-view";
-import { tryDslToPrototype } from "@aep/excalidraw-dsl";
-import { PrototypeView } from "@aep/ui-excalidraw-view";
 import { OpenApiView } from "@aep/ui-openapi-view";
 import { ErrorBoundary } from "../../../../components/ErrorBoundary";
 import { PHONE } from "../../../shell/layout";
 import type { ArtifactSource } from "../../api/designModel";
 
 // The design's artifacts drawn by the shared viewers (packages/ui), used as
-// they are. What is here is the glue, after the old console's (WireframePanel,
-// CellDiagramPanel, SpecView): a box of the height a canvas needs, the
-// source compiled for the viewer, and an error boundary around the canvases,
-// where render throws have been seen.
+// they are. What is here is the glue, after the old console's
+// (CellDiagramPanel, SpecView): a box of the height a canvas needs, and an
+// error boundary around the canvas, where render throws have been seen.
 
 type Source<K extends ArtifactSource["kind"]> = Extract<ArtifactSource, { kind: K }>;
 
@@ -51,28 +46,6 @@ const canvasSx = {
   overflow: "hidden",
   [PHONE]: { height: 460 },
 } as const;
-
-/**
- * The prototype, clicked through screen by screen (PrototypeView), compiled
- * from the design's wireframes. It starts on the first flow's first screen,
- * as the viewer does, and reports the screen it is on: a comment pinned on
- * the prototype belongs to that screen.
- */
-export function PrototypeArtifact({ source, onScreen }: { source: Source<"prototype">; onScreen: (screen: string) => void }) {
-  const compiled = useMemo(() => tryDslToPrototype(source.dsl), [source.dsl]);
-  const first = compiled.ok ? (compiled.model.flows[0]?.screens[0] ?? compiled.model.screens[0]?.name) : undefined;
-  useEffect(() => {
-    if (first) onScreen(first);
-  }, [first, onScreen]);
-  if (!compiled.ok) return <Alert severity="warning">This prototype could not be drawn: {compiled.error}</Alert>;
-  return (
-    <Box sx={canvasSx}>
-      <ErrorBoundary label="The prototype" resetKey={source.dsl} fill>
-        <PrototypeView key={source.dsl} model={compiled.model} fillHeight onScreenChange={onScreen} />
-      </ErrorBoundary>
-    </Box>
-  );
-}
 
 /** The architecture: the cell diagram of the product's components and what they reach. */
 export function ArchitectureArtifact({ source, layoutKey }: { source: Source<"architecture">; layoutKey: string }) {
@@ -115,9 +88,4 @@ export function ContractArtifact({ source }: { source: Source<"contract"> }) {
       )}
     </Box>
   );
-}
-
-/** A feature's acceptance file: its rules, each tagged with the story it proves, and their scenarios. */
-export function AcceptanceArtifact({ source }: { source: Source<"acceptance"> }) {
-  return <AcceptanceView features={[{ path: source.path, content: source.content }]} noPadding fullWidth />;
 }

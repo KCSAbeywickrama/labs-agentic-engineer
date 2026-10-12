@@ -1,58 +1,74 @@
 # Domain model
 
-Items, stock levels and the stock ledger belong to the inventory service; purchase requests, receipts and approval limits belong to the procurement API.
+Requests, approvals and receipts belong to the procurement API; items, stock levels and the ledger belong to the inventory service. Requests reference items by id only.
 
 ```mermaid
 erDiagram
+    ITEM ||--|| STOCK_LEVEL : has
+    ITEM ||--o{ LEDGER_ENTRY : records
+    ITEM ||--o{ REQUEST_LINE : "requested in"
+    PURCHASE_REQUEST ||--|{ REQUEST_LINE : contains
+    PURCHASE_REQUEST ||--o{ RECEIPT : "received by"
+    RECEIPT ||--|{ RECEIPT_LINE : contains
+    REQUEST_LINE ||--o{ RECEIPT_LINE : fulfils
+    RECEIPT_LINE ||--|| LEDGER_ENTRY : raises
+
     ITEM {
-        string id PK
+        string id
         string sku
         string name
-        string unit
-        number unitPrice
-        int onHand
+        string unitOfMeasure
         int reorderLevel
+        int unitPriceCents
+        boolean active
+    }
+    STOCK_LEVEL {
+        string itemId
+        int quantity
     }
     LEDGER_ENTRY {
-        string id PK
-        string itemId FK
+        string id
+        string itemId
         int quantityChange
-        int balanceAfter
-        string reason
-        string reference
-        string createdBy
+        int resultingQuantity
+        string actorId
+        string sourceType
+        string sourceId
         datetime createdAt
     }
     PURCHASE_REQUEST {
-        string id PK
+        string id
         string requesterId
+        string requesterName
         string status
-        number totalValue
+        string justification
+        int totalCents
         string decidedBy
         string decisionReason
-        datetime createdAt
+        datetime submittedAt
+        datetime decidedAt
     }
     REQUEST_LINE {
-        string id PK
-        string requestId FK
+        string id
+        string requestId
         string itemId
+        string itemName
         int quantity
-        number unitPrice
+        int unitPriceCents
         int receivedQuantity
     }
-    GOODS_RECEIPT {
-        string id PK
-        string requestId FK
-        string receivedBy
+    RECEIPT {
+        string id
+        string requestId
+        string clerkId
         datetime receivedAt
     }
-    ITEM ||--o{ LEDGER_ENTRY : "records changes"
-    PURCHASE_REQUEST ||--|{ REQUEST_LINE : contains
-    PURCHASE_REQUEST ||--o{ GOODS_RECEIPT : "received by"
-    ITEM ||--o{ REQUEST_LINE : "requested as (by id)"
+    RECEIPT_LINE {
+        string id
+        string receiptId
+        string requestLineId
+        int quantity
+    }
 ```
 
-- Request status: pending, approved, rejected, partially-received, received. *assumed*
-- A receipt writes one ledger entry per received line in the inventory service, with the receipt id as the reference.
-- The approval limit is one configured value, 5000, for all approvers; it is service configuration of the procurement API, not stored per approver.
-- A new item starts with 0 on hand and no ledger entry; clerks add and edit items (name, unit, unit price, reorder level); the SKU is assigned by the inventory service.
+Approval limits are configuration, not an entity: every Approver has APPROVAL_LIMIT_DEFAULT (500000 minor units, i.e. 5000.00, when unset), with optional per-username overrides in APPROVAL_LIMITS (username=amount pairs). There is no screen to manage them. Money is in cents in the company currency. Status values: draft, pending, approved, rejected, withdrawn, received.

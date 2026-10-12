@@ -18,7 +18,7 @@
 
 /**
  * Publish the shared Zod schemas as JSON Schema so the Go BFF validates against
- * the SAME definitions the agents service uses — one schema, not two hand-kept
+ * the SAME definitions the design agent uses — one schema, not two hand-kept
  * copies (§8 of the migration decision record; §10.3 of tasks-github-native).
  *
  *  - `componentDesignJsonSchema` — the design.json write/save gate. The one
@@ -29,8 +29,12 @@
  *    referential rules (every `testUsers[].role` names a declared role,
  *    `coldStartRole` likewise, thunder scopes tokens) are equally inexpressible
  *    standalone, and are likewise applied separately on both sides.
- *  - `planTaskJsonSchema` / `updateTaskJsonSchema` — the plan-turn tool inputs
- *    the BFF plan tap acts on; vendored by phase 2.
+ *  - `designReviewJsonSchema` — the review.json write/save gate. Its rules
+ *    across entries (unique paths and comment ids, an addressed comment's
+ *    reply, an anchor only on a prototype) are applied separately on both
+ *    sides too.
+ *  - `buildPlanJsonSchema` — the plan-turn tool input, published beside the
+ *    others so the contract has one rendering outside TypeScript.
  *
  * `scripts/generate-json-schema.ts` writes the checked-in artifacts from these;
  * `test/json-schema.test.ts` fails if any drifts from a fresh render.
@@ -40,7 +44,8 @@ import { z } from "zod";
 import { componentDesignSchema } from "./component-design-schema.js";
 import { securityDesignSchema } from "./security-design-schema.js";
 import { dependencyDesignSchema } from "./dependency-design-schema.js";
-import { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
+import { designReviewSchema } from "./design-review-schema.js";
+import { buildPlanInputSchema } from "./task-tools-schema.js";
 import { agentAfmFrontMatterSchema } from "./agent-afm-schema.js";
 
 /** The `ComponentDesign` structural schema as JSON Schema (draft 2020-12). */
@@ -62,12 +67,12 @@ export function securityDesignJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(securityDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>
 }
 
-/** The `planTask` tool input as JSON Schema (draft 2020-12). */
-export function planTaskJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(planTaskInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
+/** The `DesignReview` structural schema (`specs/design/review.json`) as JSON Schema (draft 2020-12). */
+export function designReviewJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(designReviewSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }
 
-/** The `updateTask` tool input as JSON Schema (draft 2020-12). */
-export function updateTaskJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(updateTaskInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
+/** The `planBuild` tool input as JSON Schema (draft 2020-12). */
+export function buildPlanJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(buildPlanInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }

@@ -25,18 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  isBranchNotes,
-  isPrototypeFeedback,
-  isToolset,
-  isTurnSpec,
-  isView,
-  OUTCOME_MAX_CHARS,
-  TOOLSETS,
-  VIEWS,
-} from "../src/contracts/sse-events.js";
-// The feedback table the kit and the Go BFF assert too (prototype-kit/test/fixtures/feedback-cases.json).
-import { feedbackBatch, feedbackTable } from "../../prototype-kit/test/feedback-cases.js";
+import { isToolset, isTurnSpec, isView, TOOLSETS, VIEWS } from "../src/contracts/sse-events.js";
 
 test("accepts each well-formed kind", () => {
   assert.ok(isTurnSpec({ kind: "chat", text: "add a returns policy" }));
@@ -73,69 +62,26 @@ test("rejects a kind whose required field is missing, blank, or mistyped", () =>
   assert.equal(isTurnSpec({ kind: "start", idea: 7 }), false);
 });
 
-test("plan scope and task context are validated when present", () => {
+test("a plan scope is validated when present", () => {
   assert.ok(
     isTurnSpec({
       kind: "plan",
-      scope: { tag: "spec-v3", stories: [{ id: "F1.1", title: "Sign in", covered: false }] },
-      taskContext: [{ path: "tasks/1.md", body: "# Task" }],
+      scope: {
+        tag: "v3",
+        features: [{ id: "F1", name: "Claims" }, { id: "F2", needs: ["F1"] }],
+        productWide: [{ id: "P1", text: "Sign in", appliesTo: ["all"] }],
+        heldBack: ["F2.4"],
+      },
     }),
   );
-  // A story row without `covered` would silently plan over already-covered work.
-  assert.equal(
-    isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ id: "F1.1" }] } }),
-    false,
-  );
-  // A numeric story row is the pre-feature shape; stories are IDs ("F1.1") now.
-  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ number: 1, covered: true }] } }), false);
-  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: 2, stories: [] } }), false);
-  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t" } }), false);
-  assert.equal(isTurnSpec({ kind: "plan", taskContext: [{ path: "tasks/1.md" }] }), false);
-  assert.equal(isTurnSpec({ kind: "plan", taskContext: {} }), false);
-});
-
-test("a title is optional on a story row", () => {
-  assert.ok(isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ id: "F1.3", covered: true }] } }));
+  assert.ok(isTurnSpec({ kind: "plan", scope: { tag: "t" } }), "a version that carries nothing named is still a scope");
+  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: 2 } }), false);
+  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t", features: [{ name: "no id" }] } }), false);
+  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t", heldBack: [3] } }), false);
 });
 
 test("unknown extra keys are tolerated", () => {
   assert.ok(isTurnSpec({ kind: "start", idea: "x", futureField: true }));
-});
-
-const HASH = "a".repeat(64);
-const request = (over: Record<string, unknown> = {}) => ({
-  screenId: "orders",
-  flowId: "checkout",
-  roleId: "customer",
-  stateId: "default",
-  elementIds: ["orders.submit"],
-  text: "Move this button to the left",
-  ...over,
-});
-const feedback = (over: Record<string, unknown> = {}) => ({
-  prototypeHash: HASH,
-  component: "storefront",
-  requests: [request()],
-  ...over,
-});
-const feedbackFlow = (batch: unknown, skill = "prototype") => ({ kind: "flow", skill, prototypeFeedback: batch });
-
-test("accepts a well-formed feedback batch on the prototype flow", () => {
-  assert.ok(isTurnSpec(feedbackFlow(feedback())));
-  assert.ok(isPrototypeFeedback(feedback({ requests: [request({ flowId: undefined, elementIds: [] })] })));
-});
-
-test("refuses a feedback batch on any other skill", () => {
-  assert.equal(isTurnSpec(feedbackFlow(feedback(), "design")), false);
-});
-
-test("judges every row of the feedback table the kit and the Go BFF share", () => {
-  for (const row of feedbackTable.cases) {
-    const batch = feedbackBatch(row);
-    assert.equal(isPrototypeFeedback(batch), row.valid, row.name);
-    assert.equal(isTurnSpec(feedbackFlow(batch)), row.valid, row.name);
-  }
-  assert.equal(isPrototypeFeedback("x"), false);
 });
 
 test("isView accepts exactly the known views", () => {
@@ -148,36 +94,4 @@ test("isView accepts exactly the known views", () => {
 test("each view's agent has a tool set of its own", () => {
   assert.deepEqual([...TOOLSETS], ["files", "task-plan", "issues", "issue"]);
   for (const view of VIEWS) assert.ok(isToolset(view), view);
-});
-
-test("isBranchNotes accepts at most one note per view with a positive turn count and a bounded outcome", () => {
-  assert.equal(OUTCOME_MAX_CHARS, 400);
-  assert.ok(isBranchNotes([]));
-  assert.ok(isBranchNotes([{ view: "issues", turns: 2, outcome: "Filed #12." }]));
-  assert.ok(isBranchNotes([{ view: "issues", turns: 1, outcome: "x".repeat(400) }]));
-  const bad: unknown[] = [
-    undefined,
-    null,
-    "issues",
-    {},
-    [null],
-    [{ view: "boards", turns: 1, outcome: "x" }],
-    [{ view: "issues", turns: 0, outcome: "x" }],
-    [{ view: "issues", turns: 1.5, outcome: "x" }],
-    [{ view: "issues", turns: "2", outcome: "x" }],
-    [{ view: "issues", turns: 1 }],
-    [{ view: "issues", turns: 1, outcome: "x".repeat(401) }],
-    // More notes than there are views.
-    [
-      { view: "issues", turns: 1, outcome: "a" },
-      { view: "issues", turns: 1, outcome: "b" },
-    ],
-    // Branch notes are the Issues chat's: an issue's own thread leaves none.
-    [{ view: "issue", turns: 1, outcome: "Posted a comment." }],
-    [
-      { view: "issues", turns: 1, outcome: "a" },
-      { view: "issue", turns: 1, outcome: "b" },
-    ],
-  ];
-  for (const v of bad) assert.equal(isBranchNotes(v), false, JSON.stringify(v));
 });

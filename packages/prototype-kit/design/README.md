@@ -28,8 +28,10 @@ component's theme props; `ThemeRegistry` maps over it.
 `<AppShell>` is a screen's root inside the product's chrome: product name,
 signed-in user (role label defaults to the viewing role's name), side
 navigation, and a user menu whose Account, Settings and Sign out entries open
-screens the prototype names (`account`, `settings`, `signOut`; required, a
-missing one throws), plus the prototype's own entries (`menu`). Entries the role cannot reach are not drawn, as for
+screens the prototype names (`account` and `signOut` required, a missing one
+throws; `settings` optional: an application with nothing to set has no
+Settings entry, so a prototype never invents preferences to fill one), plus
+the prototype's own entries (`menu`). Entries the role cannot reach are not drawn, as for
 `<Navigation>`. A theme keeps the closed menu's entries in the markup, so the
 render check sees their `to` and ids. A bare `<Screen>` stays valid.
 
@@ -69,7 +71,7 @@ themes call `onSubmit` for Enter in a single-line field. Validation (`required`,
 
 `checkPrototypeFiles` stops at the first failing stage: files, manifest
 (JSON, version, shape, references), static source rules, literal `to=`/`go()`
-targets, isolated render.
+targets, types, isolated render.
 
 - Static global check: a name bound anywhere in the module (a local `history`)
   is not a global, so it is not flagged.
@@ -79,9 +81,30 @@ targets, isolated render.
   `Function.prototype` before the module runs, so prototype pollution throws.
   `RENDER_TIMEOUT_MS` is 15 s. The child is spawned asynchronously, so
   `checkPrototypeFiles` and `checkPrototype` return promises and a host keeps
-  its event loop while a prototype renders (the agents service serves other
+  its event loop while a prototype renders (the design agent serves other
   conversations; the CLI preview keeps answering).
 - Limits of the render check: see ADR-0042, Consequences.
+- Types (`check/types.ts`, `TYPE_ERROR`): transpiling erases types, so a
+  read of a field the record's interface no longer has (a rename finished in
+  the interface and missed at one use) transpiles and draws, as `undefined`.
+  Seen live: `/address-comments` renamed a field by separate edits and left
+  one use in three of four runs (fixture `test/fixtures/stale-field`). The
+  stage type-checks `prototype.tsx` in-process with the TypeScript compiler
+  API: one in-memory program whose only root is the prototype, placed in the
+  kit's folder so `react` resolves to the React types the kit is installed
+  with, and `@wso2/prototype-kit` to the kit's own entry (its declarations
+  built, its sources in the kit's tests). Every other file is parsed once per
+  process and kept, so a warm check costs about 0.1 s and the first about a
+  second (compiler load included), with about 80 MB of heap resident. The
+  compiler is loaded on the first check, not on import of `/check`, and
+  never from `/source`, which a browser host's static gate imports.
+  Non-strict on purpose: it refuses names, props and values that cannot be
+  right, not strict mode's discipline (a possibly undefined lookup, an
+  unannotated parameter); drawing every screen covers what a missing value
+  breaks. Records are typed by the screen: `useCollection<T>` has no default,
+  so a collection read without its record type has only `id`. At most
+  `MAX_TYPE_FINDINGS` (20) findings, by line; the Go save gate does not
+  mirror this stage.
 
 ## Go mirror
 
@@ -104,9 +127,13 @@ The one TS definition of a reviewer's requests: `FeedbackRequest`,
 `prototypeHash` (SHA-256 of manifest, NUL, source). The hash is plain
 JavaScript and synchronous: Web Crypto's `crypto.subtle` exists only in secure
 contexts, and a console served over plain HTTP must still name a revision. The
-CLI, `@aep/agent-stream` and the console import it; the Go BFF and the OpenAPI
-contract mirror it, held by `test/fixtures/feedback-cases.json`, which the kit,
-agent-stream and Go all assert.
+CLI, the console and `@aep/agent-stream` import it. In AEP a comment never
+rides a turn: the console writes each queued comment as a draft in
+`specs/design/review.json` (ADR-0052), whose schema takes its text and id
+limits from here, and a prototype's Checked hash is `prototypeHash`. The
+design agent no longer validates a feedback batch (`prototypeFeedback` is
+retired). The table `test/fixtures/feedback-cases.json` pins the shape and the
+limits in the kit's own tests.
 
 The review's comment queue is headless here too (`queue.ts`), so the console
 and the CLI host keep it alike and only draw their own UI: `FeedbackQueue`

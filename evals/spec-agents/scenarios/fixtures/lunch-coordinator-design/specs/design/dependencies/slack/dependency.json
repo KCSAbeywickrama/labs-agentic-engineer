@@ -1,10 +1,13 @@
 {
   "name": "slack",
-  "provider": "Slack",
-  "style": "sdk",
-  "description": "Posts the round-opened and round-closed notification messages to the team's Slack channel via chat.postMessage.",
-  "config": [
-    { "key": "SLACK_BOT_TOKEN", "secret": true, "description": "Bot token for the Slack app authorized to post to the team channel." },
-    { "key": "SLACK_CHANNEL_ID", "description": "Channel ID the round-open/cutoff notifications are posted to." }
-  ]
+  "resource": {
+    "name": "slack",
+    "description": "Posts a message to the team's Slack channel when a lunch round opens and when it reaches its cutoff.",
+    "provider": "Slack",
+    "config": [
+      { "key": "SLACK_WEBHOOK_URL", "secret": true, "description": "Incoming webhook URL for the team's Slack channel, from Slack's app configuration." }
+    ],
+    "contract": { "type": "openapi", "path": "openapi.yaml", "origin": "derived" }
+  },
+  "provenance": { "sourceUrl": "https://api.slack.com/messaging/webhooks" }
 }

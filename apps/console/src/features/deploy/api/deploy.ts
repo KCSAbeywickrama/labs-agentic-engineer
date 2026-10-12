@@ -18,7 +18,7 @@
 
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../../../api/client";
-import { apiErrorMessage } from "../../../api/errors";
+import { ApiRequestError, apiErrorMessage, retryAfterMs } from "../../../api/errors";
 import type { components } from "../../../generated/aep-api";
 import { deploymentsAreMoving } from "../model/pipeline";
 
@@ -129,10 +129,12 @@ export function useComponentsDeployments(projectName: string, componentNames: st
 }
 
 async function readReadiness(projectName: string, environment: string): Promise<DependencyReadiness> {
-  const { data, error } = await client.GET("/projects/{projectName}/dependencies/readiness", {
+  const { data, error, response } = await client.GET("/projects/{projectName}/dependencies/readiness", {
     params: { path: { projectName }, query: { environment } },
   });
-  if (error || data === undefined) throw new Error(apiErrorMessage(error, "Couldn't load the dependencies' values"));
+  if (error || data === undefined) {
+    throw new ApiRequestError(error, "Couldn't load the dependencies' values", { retryAfterMs: retryAfterMs(response) });
+  }
   return data;
 }
 
@@ -173,7 +175,7 @@ export async function designDependencies(projectName: string) {
     params: { path: { projectName } },
   });
   if (response.status === 404 && error?.code === "not_found") return [];
-  if (error) throw new Error(apiErrorMessage(error, "Couldn't load the design's dependencies"));
+  if (error) throw new ApiRequestError(error, "Couldn't load the design's dependencies", { retryAfterMs: retryAfterMs(response) });
   return data ?? [];
 }
 
@@ -213,10 +215,10 @@ export function useComponentOpenApi(projectName: string, componentName: string, 
     queryKey: deployKeys.openapi(projectName, componentName),
     enabled,
     queryFn: async () => {
-      const { data, error } = await client.GET("/projects/{projectName}/components/{componentName}/openapi", {
+      const { data, error, response } = await client.GET("/projects/{projectName}/components/{componentName}/openapi", {
         params: { path: { projectName, componentName } },
       });
-      if (error || data === undefined) throw new Error(apiErrorMessage(error, "Couldn't load the API"));
+      if (error || data === undefined) throw new ApiRequestError(error, "Couldn't load the API", { retryAfterMs: retryAfterMs(response) });
       return data.spec;
     },
     staleTime: 30_000,

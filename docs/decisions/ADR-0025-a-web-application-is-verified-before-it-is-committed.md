@@ -1,6 +1,8 @@
 # ADR-0025 — A web application is verified before it is committed
 
-**Status:** Accepted · **Related:**
+**Status:** Accepted · Amended 2026-10-11 by
+[ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
+(the walk's map is the prototype, not `wireframes.dsl`) · **Related:**
 [ADR-0012](ADR-0012-one-debian-runner-image-for-both-task-kinds.md) (one image
 serves both task kinds — this adds a browser driver to it),
 [ADR-0014](ADR-0014-skill-audience-is-metadata-visible-not-loadable.md)
@@ -239,3 +241,25 @@ measurement standing, since it is now the shape the pod is actually asked to
 hold. Raising the limit was rejected: it buys a slower leak, and the walk is the
 longer of a web-application's two dispatches, so the cost is wall clock inside
 one cycle rather than a second cycle.
+
+## Amendment 2026-10-11 — the prototype is the map
+
+Design no longer writes `wireframes.dsl`
+([ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and the prototype is a web-application's UI contract
+([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+Wherever this ADR and its amendments say `wireframes.dsl`, the DSL or a
+wireframe, read the component's prototype. Its manifest's `flows` are the unit,
+each walked as one item by its `id` (one `roleId` and its `screenIds`, entry
+screen first), from the state its first control needs. The `prototype.tsx`
+component for each screen gives that screen's controls and where each one
+leads. A build issue's item gets a mock walk of the prototype flows of that
+item and of earlier items: a cycle's regressions land in shared chrome, so a
+walk also covers flows an earlier item built
+([ADR-0050](ADR-0050-a-version-builds-as-one-issue-with-an-ordered-checklist.md)).
+The walk reaches a screen in no flow (account, settings) the way a user does,
+and the form probe expects the errors that the prototype's validation-error
+state shows. The prototype is the review's copy and not the app's code, so the
+walk never edits it. Decisions 3 and 4 otherwise stand: the boundary is the
+component, the plan is written from the prototype before the browser opens,
+and a line gets three attempts.

@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"unicode/utf8"
 )
 
 // Schema is one node of a parsed schema document.
@@ -254,10 +255,14 @@ func validateString(value any, s *Schema, path string) []string {
 	if !ok {
 		return []string{at(path) + "must be a string"}
 	}
-	if s.MinLength != nil && len(str) < *s.MinLength {
+	// A length is in characters (JSON Schema counts code points), not bytes:
+	// counting bytes would refuse non-ASCII text the Zod gate accepted. Zod
+	// counts UTF-16 units, so this side is never the stricter one.
+	n := utf8.RuneCountInString(str)
+	if s.MinLength != nil && n < *s.MinLength {
 		return []string{at(path) + fmt.Sprintf("must be at least %d characters", *s.MinLength)}
 	}
-	if s.MaxLength != nil && len(str) > *s.MaxLength {
+	if s.MaxLength != nil && n > *s.MaxLength {
 		return []string{at(path) + fmt.Sprintf("must be at most %d characters", *s.MaxLength)}
 	}
 	if len(s.Enum) > 0 && !enumContains(s.Enum, str) {

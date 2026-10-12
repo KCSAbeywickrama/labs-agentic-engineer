@@ -3,8 +3,9 @@
 Run the coding-agent runner on your machine without the platform (no k3d,
 no BFF, no Argo). The runner executes in its real Docker image; the only
 substitution is `token-stub.mjs`, a loopback HTTP server that plays the
-platform's `POST /internal/v1/tasks/{taskId}/credentials/refresh` endpoint
-and hands back your GitHub PAT.
+platform's publisher token endpoint and the validation-context callback. Git
+uses your `GITHUB_TOKEN`, passed to the container the way a cluster Job
+mounts the org's gitpat.
 
 ## What a run does
 
@@ -12,7 +13,10 @@ and hands back your GitHub PAT.
 2. Builds the runner image from `../Dockerfile` (cached after the first time).
 3. Runs the one-shot container: clones `AEP_REPO_URL`'s default branch,
    reads the `aep` skill from the clone's mirror, and lets the agent work `AEP_PROMPT` —
-   branch, commit, push, PR, exactly as a cluster run would.
+   branch, commit, push, PR, exactly as a cluster run would. On a Linux
+   host the container starts as root only to give the image's `aep` user
+   your uid and gid (`adopt-host-user.sh`, shared with the playground), so
+   the run can write `workspace/` and you own what it leaves there.
 
 The run reads every skill from the `.claude/skills/` mirror the BFF wrote
 into the clone — there is no skills fetch and no plugin. The repo-root
@@ -68,10 +72,11 @@ the rest.
 
 - The agent runs with `bypassPermissions` — that is why the harness only
   runs it containerized, never bare on the host.
-- Scope `GITHUB_PAT` to a single throwaway test repo (fine-grained PAT).
-- The stub only releases the PAT to callers presenting the per-run
-  access token (a fresh random value each run, minted by the stub's
-  `/oauth2/token` and required as `Authorization: Bearer` on refresh).
+- Scope `GITHUB_TOKEN` to a single throwaway test repo (fine-grained PAT).
+- The stub only answers callers presenting the per-run access token (a
+  fresh random value each run, minted by the stub's `/oauth2/token` and
+  required as `Authorization: Bearer` on the validation-context call). The
+  stub never sees your GitHub token.
   `PUBLISHER_CLIENT_ID` / `PUBLISHER_CLIENT_SECRET` / `PUBLISHER_TOKEN_URL`
   are set automatically so oneshot can mint that token the same way a
   cluster Job does. Still keep `STUB_BIND=127.0.0.1` (default); on a Linux

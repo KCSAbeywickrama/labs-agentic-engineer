@@ -1,12 +1,14 @@
 # The component contract
 
 This file is the procedure to build one component, in all languages. Two agents
-use it: a build subagent, and the lead when it works an issue inline. Your
+use it: a build subagent, and the lead when it works an item inline. Your
 stack skill owns the layout, the libraries, the `Dockerfile` and the verify
 command. If a stack skill and this file do not agree, obey this file.
 
-A component is one folder: its App Path. Change only what the issue changes.
-The procedure is the same for a new component and for a change.
+A component is one folder: its App Path. Build only what your item needs in
+this component, on top of the code that is there. An item is one feature of
+the build (or its Foundation, or a bug issue), and a later item builds on
+yours. The procedure is the same for a new component and for a change.
 
 ## As a subagent
 
@@ -21,8 +23,9 @@ Your prompt and this file are your full procedure. Do not load `aep`.
 
 ## Procedure
 
-1. Read the issue, the `design.json` and `openapi.yaml` of the component, and
-   the `openapi.yaml` of each component that it consumes.
+1. Read what your prompt names: the item's feature file and stories (or the
+   bug issue), the `design.json` and `openapi.yaml` of the component, and the
+   `openapi.yaml` of each component that it consumes.
 2. Write the code. It implements the full contract with real code:
    no stubs, no mocks. The dev-only `mock/` harness of a `web-application` is
    not a stub.
@@ -69,8 +72,8 @@ endpoint path or a payload shape.
   case (`todo-api` → `TODO_API_URL`). If the dependency has no contract,
   write a minimal client for that address and its `basePath`.
 - A service implements its own `openapi.yaml` exactly, because its consumers
-  use it now. If a service has no `openapi.yaml`, the Scope and the Acceptance
-  criteria of the issue are its contract.
+  use it now. If a service has no `openapi.yaml`, the stories of your item
+  are its contract.
 
 ## The code
 
@@ -119,8 +122,8 @@ lines of the output and what you tried. Leave the work unfinished.
 ## Never
 
 - Do not edit, add to, or delete anything under the repo-root `specs/`. If an
-  issue and the contract do not agree, obey the contract. If the contract stops
-  you from building what the issue needs, do not work around it. Tell the lead
+  item and the contract do not agree, obey the contract. If the contract stops
+  you from building what the item needs, do not work around it. Tell the lead
   the gap and the smallest change that closes it.
 - Do not hold back work because a component it depends on is not built yet.
   Code against the contract.

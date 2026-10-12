@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { deriveDesign, type DeriveProcessResult } from "../src/engine/design-derive.js";
 import { codeCommand } from "../src/commands.js";
-import { renderTaskContextFile } from "../src/ports/issue-store.js";
+import { renderIssueFile } from "../src/ports/issue-store.js";
 import { listUndoSnapshots } from "../src/state/undo.js";
 import { REPO_ROOT } from "../src/paths.js";
 
@@ -90,7 +90,7 @@ function tempProject(): string {
   mkdirSync(join(dir, "issues"), { recursive: true });
   writeFileSync(
     join(dir, "issues", "1.md"),
-    renderTaskContextFile({ issueNumber: 1, component: "orders-api", title: "Orders", dependsOn: [], body: "scope" }),
+    renderIssueFile({ issueNumber: 1, title: "Build v1", version: "v1", body: "- [ ] **F1** Orders: `orders-api`.\n" }),
   );
   return dir;
 }

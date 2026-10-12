@@ -16,25 +16,28 @@
 
 package auth
 
-// This file holds the gate for the Issues agent's project-fenced issue tools
-// (POST /internal/v1/issues/mcp). Unlike AgentsScopedVerifier (org-wide
-// discovery), the scope here is one project: both the org and the project come
-// SOLELY from the signed ocOrgId + projectId claims of a token minted with
-// IssueIssuesMCPToken, and an issue's agent is further fenced to the
-// issueNumber claim of IssueIssueMCPToken. There is no publisher fallback —
-// only aep-api mints these.
+// This file holds the gate for the issue tools the AE Studio pod's Issues and
+// issue agents act with (POST /internal/v1/ae-studio/projects/{projectName}/
+// issues/mcp and .../issues/{issueNumber}/mcp). The credential is the org's
+// ae-studio-<org> client token (StudioClientVerifier), presented by its AE
+// Studio tools pod, and the org comes SOLELY from it. The project and, for an
+// issue's agent, the issue come from the path: the pod forwards each chat's
+// calls to the surface of the project its turn resolved, and of the issue the
+// chat is about. The tools never take a project, an org or an issue number as
+// an argument, so a model cannot name another.
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-// IssuesMCPScope is the org + project an issues MCP token is fenced to, and
-// the one issue when the token is an issue's (IssueIssueMCPToken). IssueNumber
-// is 0 on the Issues view's token.
+// IssuesMCPScope is the org + project an issues MCP call is fenced to, and
+// the one issue when the call is an issue's agent's. IssueNumber is 0 on the
+// Issues view's surface.
 type IssuesMCPScope struct {
 	OrgID       string
 	ProjectID   string
@@ -44,67 +47,60 @@ type IssuesMCPScope struct {
 type issuesMCPScopeCtxKey struct{}
 
 // WithIssuesMCPScope returns a copy of ctx carrying scope. Set by
-// IssuesMCPVerifier.Middleware; read by the handler via IssuesMCPScopeFromContext.
+// IssuesMCPGate; read by the handler via IssuesMCPScopeFromContext.
 func WithIssuesMCPScope(ctx context.Context, scope IssuesMCPScope) context.Context {
 	return context.WithValue(ctx, issuesMCPScopeCtxKey{}, scope)
 }
 
-// IssuesMCPScopeFromContext returns the scope bound by IssuesMCPVerifier. ok is
-// false when the request never passed the verifier; the handler then fails
+// IssuesMCPScopeFromContext returns the scope bound by IssuesMCPGate. ok is
+// false when the request never passed the gate; the handler then fails
 // closed.
 func IssuesMCPScopeFromContext(ctx context.Context) (IssuesMCPScope, bool) {
 	scope, ok := ctx.Value(issuesMCPScopeCtxKey{}).(IssuesMCPScope)
 	return scope, ok
 }
 
-// IssuesMCPVerifier authenticates the Issues agent to the issue tools and binds
-// its project scope onto the request context.
-type IssuesMCPVerifier struct {
-	tokens *TaskTokenManager
-}
-
-// NewIssuesMCPVerifier builds the verifier. A nil manager yields a Middleware
-// that fails closed with 503.
-func NewIssuesMCPVerifier(tokens *TaskTokenManager) *IssuesMCPVerifier {
-	return &IssuesMCPVerifier{tokens: tokens}
-}
-
-// Middleware verifies Authorization: Bearer <token> as a BFF-signed token with
-// aud AudienceIssuesMCP and non-empty ocOrgId + projectId, binds the scope, and
-// calls next. Every failure is a 401 with a generic body.
-func (v *IssuesMCPVerifier) Middleware(next http.Handler) http.Handler {
+// IssuesMCPGate wraps next so it runs only for a verified, recorded
+// ae-studio client token, with the scope bound onto the context: the org the
+// verifier recorded for that client, the path's projectName, and the path's
+// issueNumber when the route has one (a positive integer; anything else is a
+// 404, as no such surface exists). Every credential refusal is the same 401
+// with a generic body, the reason logged only; a recorded client that could
+// not be read is a 503, as on MCP (MCPGate). A nil verifier refuses every
+// call.
+func IssuesMCPGate(studio *StudioClientVerifier, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if v == nil || v.tokens == nil {
-			http.Error(w, "issues mcp auth not configured", http.StatusServiceUnavailable)
+		const prefix = "Bearer "
+		header := r.Header.Get("Authorization")
+		if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+			slog.WarnContext(r.Context(), "issues mcp auth rejected", "reason", "bearer token required")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		scope, err := v.resolveScope(r.Header.Get("Authorization"))
+		org, err := studio.Verify(r.Context(), header[len(prefix):])
+		if errors.Is(err, ErrStudioClientLookup) {
+			slog.ErrorContext(r.Context(), "issues mcp auth: ae-studio client lookup failed", "error", err)
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if err != nil {
 			slog.WarnContext(r.Context(), "issues mcp auth rejected", "error", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		scope := IssuesMCPScope{OrgID: org, ProjectID: r.PathValue("projectName")}
+		if scope.ProjectID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if raw := r.PathValue("issueNumber"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 1 {
+				http.NotFound(w, r)
+				return
+			}
+			scope.IssueNumber = n
+		}
 		next.ServeHTTP(w, r.WithContext(WithIssuesMCPScope(r.Context(), scope)))
 	})
-}
-
-func (v *IssuesMCPVerifier) resolveScope(authHeader string) (IssuesMCPScope, error) {
-	const prefix = "Bearer "
-	if len(authHeader) <= len(prefix) || !strings.EqualFold(authHeader[:len(prefix)], prefix) {
-		return IssuesMCPScope{}, fmt.Errorf("bearer token required")
-	}
-	claims, err := v.tokens.Verify(authHeader[len(prefix):])
-	if err != nil {
-		return IssuesMCPScope{}, err
-	}
-	if !hasAudience(claims.Audience, AudienceIssuesMCP) {
-		return IssuesMCPScope{}, fmt.Errorf("token audience %v is not %q", claims.Audience, AudienceIssuesMCP)
-	}
-	if claims.OcOrgID == "" || claims.ProjectID == "" {
-		return IssuesMCPScope{}, fmt.Errorf("token lacks ocOrgId or projectId claim")
-	}
-	if claims.IssueNumber < 0 {
-		return IssuesMCPScope{}, fmt.Errorf("token issueNumber %d is not an issue", claims.IssueNumber)
-	}
-	return IssuesMCPScope{OrgID: claims.OcOrgID, ProjectID: claims.ProjectID, IssueNumber: claims.IssueNumber}, nil
 }

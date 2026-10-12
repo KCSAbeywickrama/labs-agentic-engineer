@@ -20,7 +20,7 @@ import { useId, useState, type FormEvent } from "react";
 import { Box, Button, TextField, Typography } from "@wso2/oxygen-ui";
 import type * as Y from "yjs";
 import type { SpecFeature } from "../api/specModel";
-import { answerBlockingQuestion } from "../collab/specEdits";
+import { answerOpenQuestion } from "../collab/specEdits";
 import type { BlockingQuestion } from "../model/questions";
 import { soft } from "./Tag";
 
@@ -42,7 +42,7 @@ export function BlockingQuestionBox({
 }) {
   const headingId = useId();
   const [own, setOwn] = useState("");
-  const answer = (text: string) => answerBlockingQuestion(doc, feature.path, blocking.question, text);
+  const answer = (text: string) => answerOpenQuestion(doc, feature.path, blocking.question, text);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();

@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
 // laggingGitHub models GitHub's list endpoint: it answers newest-first with
@@ -32,7 +30,7 @@ type laggingGitHub struct {
 	hidden map[int]bool
 }
 
-func (g *laggingGitHub) ListIssues(_ context.Context, _, _ string, _ secrets.Credential, labels []string) ([]IssueInfo, error) {
+func (g *laggingGitHub) ListIssues(_ context.Context, _ RepoRef, labels []string) ([]IssueInfo, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var out []IssueInfo
@@ -55,28 +53,28 @@ func (g *laggingGitHub) ListIssues(_ context.Context, _, _ string, _ secrets.Cre
 }
 
 // The host accepts the platform's writes; the lag only affects what its list shows.
-func (g *laggingGitHub) CloseIssue(context.Context, string, string, secrets.Credential, int) error {
+func (g *laggingGitHub) CloseIssue(context.Context, RepoRef, int) error {
 	return nil
 }
-func (g *laggingGitHub) ReopenIssue(context.Context, string, string, secrets.Credential, int) error {
+func (g *laggingGitHub) ReopenIssue(context.Context, RepoRef, int) error {
 	return nil
 }
-func (g *laggingGitHub) EditIssueTitle(context.Context, string, string, secrets.Credential, int, string) error {
+func (g *laggingGitHub) EditIssueTitle(context.Context, RepoRef, int, string) error {
 	return nil
 }
-func (g *laggingGitHub) EditIssueBody(context.Context, string, string, secrets.Credential, int, string) error {
+func (g *laggingGitHub) EditIssueBody(context.Context, RepoRef, int, string) error {
 	return nil
 }
-func (g *laggingGitHub) AddIssueLabels(context.Context, string, string, secrets.Credential, int, []string) error {
+func (g *laggingGitHub) AddIssueLabels(context.Context, RepoRef, int, []string) error {
 	return nil
 }
-func (g *laggingGitHub) SetIssueMilestone(context.Context, string, string, secrets.Credential, int, int) error {
+func (g *laggingGitHub) SetIssueMilestone(context.Context, RepoRef, int, int) error {
 	return nil
 }
-func (g *laggingGitHub) RemoveIssueLabel(context.Context, string, string, secrets.Credential, int, string) error {
+func (g *laggingGitHub) RemoveIssueLabel(context.Context, RepoRef, int, string) error {
 	return nil
 }
-func (g *laggingGitHub) SetIssueLabels(context.Context, string, string, secrets.Credential, int, []string) error {
+func (g *laggingGitHub) SetIssueLabels(context.Context, RepoRef, int, []string) error {
 	return nil
 }
 
@@ -94,7 +92,7 @@ func newLagFixture(seeded ...IssueInfo) *lagFixture {
 		gh.nextNum = iss.Number
 	}
 	f := &lagFixture{gh: gh, now: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)}
-	f.svc = NewIssueService(fakeRepoRepo{}, gh, fakeResolver{})
+	f.svc = NewIssueService(fakeRepoRepo{}, gh)
 	f.svc.recent.now = func() time.Time { return f.now }
 	return f
 }

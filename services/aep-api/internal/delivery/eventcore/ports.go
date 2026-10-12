@@ -96,9 +96,9 @@ type CycleStore interface {
 	Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error)
 	// NotePullRequest records the pull request the agent actually opened.
 	NotePullRequest(ctx context.Context, cycleID string, pr delivery.CyclePullRequest) error
-	// NoteMergeDecision records the merge policy's matched issue set and, when
-	// the pull request did not merge, the verdict and its reason.
-	NoteMergeDecision(ctx context.Context, cycleID string, resolves []int, verdict, reason string) error
+	// NoteMergeDecision records the merge policy's matched and advanced issue
+	// sets and, when the pull request did not merge, the verdict and its reason.
+	NoteMergeDecision(ctx context.Context, cycleID string, worked delivery.CycleWork, verdict, reason string) error
 	// FinishCycle closes the cycle and records the merge SHA it landed.
 	FinishCycle(ctx context.Context, cycleID, mergeSHA string) error
 }
@@ -154,6 +154,17 @@ type RepoRef struct {
 	OrgID     string
 	ProjectID string
 	FullName  string // "owner/name"
+	// HasHook is false for a project repository whose row holds no hook id:
+	// the rows the sweep's hook repair ensures a hook for. Platform repos
+	// (skills, resource docs) carry no hook by design and read true.
+	HasHook bool
+}
+
+// HookEnsurer installs a project repository's hook through the org's AE
+// Studio pod and persists its id (idempotent: an existing hook to the pod's
+// URL is answered as is). sourcecontrol.WebhookService satisfies it.
+type HookEnsurer interface {
+	Register(ctx context.Context, orgID, projectID string) (*int64, error)
 }
 
 // ComponentResources is what the wiring-conformance check compares against: a

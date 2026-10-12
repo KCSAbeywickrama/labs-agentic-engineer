@@ -21,7 +21,7 @@ import type { ScriptedTurn } from "./interview";
 import { Script } from "./interview";
 
 // The mock agent of one issue, on that issue's own chat. It does what the real
-// one does (services/agents/src/agents/issue): read the issue, talk about it,
+// one does (ae-design-agent src/agents/issue): read the issue, talk about it,
 // and change it only once the user has confirmed exactly that change. Each
 // change is drafted from the user's words, shown as its confirm option's
 // description on one question card (the agents service's gate binds the

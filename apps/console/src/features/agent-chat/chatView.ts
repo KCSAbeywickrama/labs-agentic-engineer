@@ -16,18 +16,19 @@
  * under the License.
  */
 
-import type { components } from "../../generated/aep-api";
+import type { View } from "@aep/agent-stream";
 import type { ProjectCard, ProjectPage } from "../shell/scope";
 import type { TurnBody } from "./turnScope";
 
 // A project has a chat per view of the main panel. The Issues Page has its
 // own agent on its own thread, and so does each open issue, on its card: each
 // is a branch of the main chat, and takes the chat panel while its page is in
-// view; everywhere else is the project's main chat. The contract names
-// only the branch views (`ChatView`), an issue's by its number: the main chat
-// is the absence of one, so "main" is never sent on the wire.
+// view; everywhere else is the project's main chat. The design agent's
+// contract names only the branch views (its `view` query), an issue's by its
+// number: the main chat is the absence of one, so "main" is never sent on the
+// wire.
 
-export type ChatView = "main" | components["schemas"]["ChatView"];
+export type ChatView = "main" | View;
 
 /**
  * The view whose own chat this page has: the Issues Page with no card open,
@@ -64,7 +65,7 @@ export function homeLink(projectName: string, view: ChatView, issueNumber?: numb
 export function wireQuery(
   view?: ChatView,
   issueNumber?: number,
-): { view: components["schemas"]["ChatView"]; issueNumber?: number } | undefined {
+): { view: View; issueNumber?: number } | undefined {
   if (view === "issues") return { view };
   if (view === "issue") return { view, ...(issueNumber !== undefined ? { issueNumber } : {}) };
   return undefined;
@@ -72,10 +73,10 @@ export function wireQuery(
 
 /**
  * A turn's body in a view. A branch's agent has no spec room and no scope (the
- * server refuses both on a view turn), so its turn is the user's words and the
- * view (an issue's, with its number); the main chat's body goes as built.
+ * design agent refuses a scope on a view turn), so its turn is the user's
+ * words alone: the thread it is sent to names its chat. The main chat's body
+ * goes as built.
  */
-export function viewTurnBody(view: ChatView, body: TurnBody, issueNumber?: number): TurnBody {
-  const wire = wireQuery(view, issueNumber);
-  return wire ? { instruction: body.instruction, ...wire } : body;
+export function viewTurnBody(view: ChatView, body: TurnBody): TurnBody {
+  return view === "main" ? body : { instruction: body.instruction };
 }

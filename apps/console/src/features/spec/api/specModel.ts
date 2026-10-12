@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { client } from "../../../api/client";
-import { apiErrorMessage } from "../../../api/errors";
+import { ApiRequestError, retryAfterMs } from "../../../api/errors";
+import { refetchWhileAeStudioRestarts } from "../../ae-studio/model/unavailable";
 import { env } from "../../../config/env";
 import type { components } from "../../../generated/aep-api";
 
@@ -74,21 +75,6 @@ export interface AgentWriter {
 }
 
 /**
- * A spec line a design comment changed: the comment was really a
- * requirement, so addressing it rewrote the line. It stays marked in the spec
- * until the comment is resolved; `seen` turns true once the user has opened
- * the Spec tab since (the tab's dot).
- */
-export interface DesignSpecChange {
-  /** The line's ID, "F2.2". */
-  lineId: string;
-  featureId: string;
-  /** The comment's pin number. */
-  comment: number;
-  seen: boolean;
-}
-
-/**
  * What the spec workspace knows of the design review (the design card reads
  * the rest, features/design/api/designModel.ts). Which features wait for
  * design, and which designs are out of date, is worked out in the browser
@@ -97,9 +83,6 @@ export interface DesignSpecChange {
 export interface DesignSummary {
   /** Each designed feature, and the spec it was designed from (its basis, model/designWork.ts). */
   designedFrom: Record<string, string>;
-  /** Design comments not yet addressed. */
-  openComments: number;
-  specChanges: DesignSpecChange[];
 }
 
 export interface SpecModel {
@@ -118,12 +101,14 @@ export function useSpecState(projectName: string) {
   return useQuery({
     queryKey: specKey(projectName),
     queryFn: async (): Promise<SpecStateWire> => {
-      const { data, error } = await client.GET("/projects/{projectName}/spec/state", {
+      const { data, error, response } = await client.GET("/projects/{projectName}/spec/state", {
         params: { path: { projectName } },
       });
-      if (error || data === undefined) throw new Error(apiErrorMessage(error, "Couldn't load the spec"));
+      if (error || data === undefined) throw new ApiRequestError(error, "Couldn't load the spec", { retryAfterMs: retryAfterMs(response) });
       return data;
     },
+    // aep-api reads it through AE Studio: "retrying…" while AE Studio restarts.
+    refetchInterval: (query) => refetchWhileAeStudioRestarts(query.state.error),
   });
 }
 
@@ -139,19 +124,14 @@ export function sourceDocuments(state: SpecStateWire): SourceDocument[] {
 
 // ---- MOCK MODE ONLY ---------------------------------------------------------
 
-/** What the mock stands in for: the room's files, and the design comments' marks on the spec (E5, parked). */
+/** What the mock stands in for: the room's files. */
 export interface MockSpecExtras {
-  /** Markdown by room path ("specs/requirements/prd.md"): the local doc's seed. */
+  /** Text by room path ("specs/requirements/prd.md"): the local doc's seed. */
   files: Record<string, string>;
-  openComments: number;
-  specChanges: DesignSpecChange[];
 }
 
 /** The mock-only path MSW serves; `:projectName` is the project's slug. */
 export const MOCK_SPEC_PATH = "/api/v1/projects/:projectName/mock/spec";
-
-/** The user has seen the spec lines design comments changed: POST, answered with the extras. */
-export const MOCK_SPEC_CHANGES_SEEN_PATH = `${MOCK_SPEC_PATH}/design-changes/seen`;
 
 export function mockSpecKey(projectName: string) {
   return ["projects", projectName, "mock-spec"] as const;
@@ -173,19 +153,5 @@ export function useMockSpecExtras(projectName: string) {
     queryKey: mockSpecKey(projectName),
     queryFn: async () => readExtras(await fetch(url(MOCK_SPEC_PATH, { projectName })), "Couldn't load the spec"),
     enabled: env.apiMode === "mock",
-  });
-}
-
-/** Mark the spec lines design comments changed as seen: the Spec tab's dot goes. A no-op on the platform (E5). */
-export function useSeeDesignChanges(projectName: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () =>
-      env.apiMode === "mock"
-        ? readExtras(await fetch(url(MOCK_SPEC_CHANGES_SEEN_PATH, { projectName }), { method: "POST" }), "Couldn't update the spec")
-        : null,
-    onSuccess: (extras) => {
-      if (extras) queryClient.setQueryData(mockSpecKey(projectName), extras);
-    },
   });
 }

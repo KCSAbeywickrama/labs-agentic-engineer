@@ -18,7 +18,7 @@
 
 /**
  * Deterministic per-section checks (#355), binding the LIVE workspace
- * validators — `checkComponentDesign`, the DSL compilers, the issue fold —
+ * validators — `checkComponentDesign`, the design.cell compiler, the issue fold —
  * never vendored copies. A validator tightening is an explainable score-shift
  * event, not drift.
  */
@@ -31,8 +31,10 @@ import { listComponents, listFlows } from "@aep/playground/src/engine/gates.js";
 import { featureScenarios, parseFeatureFile } from "@aep/ui-acceptance-view/parse";
 import { compileProject } from "@aep/ui-cell-diagram-react/compiler";
 import type { SectionRunResult } from "../drivers/conversational.js";
-import { listRequirementFiles } from "../project.js";
+import { listRequirementFiles, readRequirementTexts } from "../project.js";
 import type { TaskPlanRunResult } from "../drivers/task-plan.js";
+import { closingProblem, decisionsProblems, gapCheckProblems, lineupOrderProblem } from "./design-lineup.js";
+import { prototypeProblems, webApplications } from "./prototype-check.js";
 
 export interface CheckResult {
   name: string;
@@ -46,12 +48,12 @@ export interface StructuralReport {
   checks: CheckResult[];
 }
 
-function report(checks: CheckResult[]): StructuralReport {
+export function report(checks: CheckResult[]): StructuralReport {
   const passed = checks.filter((c) => c.ok).length;
   return { score: checks.length ? passed / checks.length : 0, checks };
 }
 
-const check = (name: string, ok: boolean, detail?: string): CheckResult => ({
+export const check = (name: string, ok: boolean, detail?: string): CheckResult => ({
   name,
   ok,
   ...(detail && !ok ? { detail } : {}),
@@ -127,7 +129,16 @@ function acceptanceProblems(projectDir: string): string[] {
   return problems;
 }
 
-export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
+/**
+ * `requirementsBefore` is the requirements as the run found them
+ * (`readRequirementTexts`): the gap check is judged by what the run changed.
+ * Without it there is nothing to compare, and that check passes.
+ */
+export async function designChecks(
+  projectDir: string,
+  run: SectionRunResult,
+  requirementsBefore?: Record<string, string>,
+): Promise<StructuralReport> {
   const reader = {
     read: (p: string) => (existsSync(join(projectDir, p)) ? readFileSync(join(projectDir, p), "utf8") : undefined),
   };
@@ -177,10 +188,16 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
   const cellErrors = (cellCompile?.diagnostics ?? []).filter((d) => d.severity === "error");
 
   const oracleProblems = acceptanceProblems(projectDir);
+  const webApps = webApplications(projectDir, components);
+  const prototypes = await prototypeProblems(projectDir, webApps);
+  const decisions = decisionsProblems(readSafe(join(projectDir, "specs/design/decisions.md")), components);
+  const gaps = requirementsBefore ? gapCheckProblems(requirementsBefore, readRequirementTexts(projectDir)) : [];
+  const order = lineupOrderProblem(run.records);
+  const closing = closingProblem(run.records);
 
   return report([
     check("domain-model.md exists", domainModel.trim().length > 0, "specs/design/domain-model.md missing or empty"),
-    check("≥1 key flow", flowFiles.length > 0, "no non-blank .md files under specs/design/flows/"),
+    // Flows are written only when one is worth it (skills/design, "Flows"): none is not a fault; a bad one is.
     check("domain model is one valid erDiagram", domainModelProblem === null, domainModelProblem?.message),
     check("every flow is one valid sequenceDiagram whose participants resolve", flowProblems.length === 0, flowProblems.join(" | ")),
     check("≥1 component designed", components.length > 0, "no dirs under specs/design/components/"),
@@ -193,54 +210,37 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
     ),
     check("openapi.yaml documents valid", openapiProblems.length === 0, openapiProblems.join("; ")),
     check("≥1 acceptance .feature, each with named scenarios that have steps", oracleProblems.length === 0, oracleProblems.join("; ")),
+    check(
+      "every web application has a prototype that passes the kit check",
+      prototypes.length === 0,
+      prototypes.join("; "),
+    ),
+    check("decisions.md: one tagged line per decision, naming its features", decisions.length === 0, decisions.join("; ")),
+    check("gap check only adds *assumed* lines and open questions to the requirements", gaps.length === 0, gaps.slice(0, 5).join("; ")),
+    check("artifacts written in lineup order (acceptance tests last)", order === null, order ?? undefined),
+    check(
+      "no form question asked during design",
+      run.questionsAsked === 0,
+      `${run.questionsAsked} question(s) asked: ${run.records.flatMap((r) => r.questions).slice(0, 3).join(" | ")}`,
+    ),
+    check("the closing names the next step on the Design card", closing === null, closing ?? undefined),
     check("section completed", run.finishedInterview, run.error ?? "hit the turn cap"),
   ]);
 }
 
 export function tasksChecks(projectDir: string, run: TaskPlanRunResult): StructuralReport {
-  const issues = run.issues;
+  const items = run.plan?.items ?? [];
   const components = listComponents(projectDir);
-  const known = new Set(components);
-
-  const coveredComponents = new Set(issues.map((i) => i.component));
-  const uncovered = components.filter((c) => !coveredComponents.has(c));
-
-  const badRefs: string[] = [];
-  for (const i of issues) {
-    for (const dep of i.dependsOn) {
-      if (!known.has(dep)) badRefs.push(`#${i.issueNumber} → ${dep}`);
-    }
-  }
+  const named = new Set(items.flatMap((i) => i.components));
+  const uncovered = components.filter((c) => !named.has(c));
+  const foundation = items.findIndex((i) => i.item === "foundation");
 
   return report([
-    check("plan produced issues", (run.fold?.created.length ?? 0) + (run.fold?.updated.length ?? 0) > 0, run.error ?? "fold wrote nothing (no terminal manifest?)"),
-    check("every component covered", components.length > 0 && uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "no components"),
-    check("dependsOn refs resolve", badRefs.length === 0, badRefs.join("; ")),
-    check("dependsOn acyclic", isAcyclic(issues), "cycle in the component dependency graph"),
+    check("plan produced a build issue", run.issues.some((i) => i.version !== undefined), run.error ?? "no build issue written (the Plan turn did not complete?)"),
+    check("every component named by an item", components.length > 0 && uncovered.length === 0, uncovered.length ? `unnamed: ${uncovered.join(", ")}` : "no components"),
+    check("foundation, when present, comes first", foundation <= 0, `foundation is item ${foundation + 1}`),
     check("turn completed", !run.error, run.error),
   ]);
-}
-
-/** Cycle check over the component-level build-order graph the issues express. */
-export function isAcyclic(issues: Array<{ component: string; dependsOn: string[] }>): boolean {
-  const edges = new Map<string, Set<string>>();
-  for (const i of issues) {
-    const set = edges.get(i.component) ?? new Set<string>();
-    for (const d of i.dependsOn) if (d !== i.component) set.add(d);
-    edges.set(i.component, set);
-  }
-  const visiting = new Set<string>();
-  const done = new Set<string>();
-  const visit = (n: string): boolean => {
-    if (done.has(n)) return true;
-    if (visiting.has(n)) return false;
-    visiting.add(n);
-    for (const d of edges.get(n) ?? []) if (!visit(d)) return false;
-    visiting.delete(n);
-    done.add(n);
-    return true;
-  };
-  return [...edges.keys()].every(visit);
 }
 
 function readSafe(abs: string): string {

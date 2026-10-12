@@ -38,8 +38,11 @@ export const PATHS = {
   runsDir: join(PACKAGE_ROOT, ".runs"),
   /** The playground package — `play` is run out of it, see `play.ts`. */
   playgroundDir: join(REPO_ROOT, "playground"),
-  /** The one credential file (`credentials.ts`). */
-  envFile: join(REPO_ROOT, "deployments", ".env"),
+  /**
+   * The one credential file (`credentials.ts`). A git worktree has no
+   * `deployments/.env` of its own: point this at the main checkout's file.
+   */
+  envFile: envString("CODEGEN_EVAL_ENV_FILE", join(REPO_ROOT, "deployments", ".env")),
   /**
    * Where an attempt's project is staged: under $HOME (Colima shares only $HOME
    * with its VM) and outside the repo (the coding agent reads its whole project).
@@ -181,7 +184,7 @@ export const BANDS = {
  * The `AEP_MODEL_*` names a coding run reads as a model connection — the
  * playground's `CODING_CONNECTION_ENV` (`playground/src/kit/model-connection.ts`)
  * plus `AEP_MODEL_CONTEXT_WINDOW`. Copied, not imported: that module loads
- * `@aep/agents`, whose module scope merges `deployments/.env` into
+ * `@aep/ae-design-agent`, whose module scope merges `deployments/.env` into
  * `process.env`, and this process must never hold that file's API key.
  */
 export const CONNECTION_ENV = [

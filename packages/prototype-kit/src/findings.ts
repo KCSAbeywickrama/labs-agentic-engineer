@@ -38,6 +38,7 @@ export const FINDING_CODES = {
   NO_APP: "prototype.tsx does not `export default defineApp({ screens, data })`.",
   SCREEN_MISMATCH: "defineApp's screens are not exactly the manifest's screens.",
   UNKNOWN_NAV_TARGET: "A `to` or `go()` names a screen that does not exist, or one the viewing role cannot reach.",
+  TYPE_ERROR: "prototype.tsx does not type-check: it reads a property, prop or name its types do not have, or passes a value of the wrong type.",
   RENDER_FAILED: "The module, or a screen for some role and display state, throws or runs too long.",
   DUPLICATE_ELEMENT_ID: "Two elements on one screen share an id.",
 } as const;

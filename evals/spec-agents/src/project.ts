@@ -65,3 +65,25 @@ export function readProjectFile(projectDir: string, rel: string): string {
   const abs = join(projectDir, rel);
   return existsSync(abs) ? readFileSync(abs, "utf8") : "";
 }
+
+/** Every requirements file, keyed by its repo-relative path: what a design run found, or left. */
+export function readRequirementTexts(projectDir: string): Record<string, string> {
+  return Object.fromEntries(listRequirementFiles(projectDir).map((rel) => [rel, readProjectFile(projectDir, rel)]));
+}
+
+/**
+ * Every file under `specs/`, keyed by its repo-relative path, without the
+ * platform's compiled renderings (`*.gen.json`, `*.excalidraw`): what a turn
+ * found, or left.
+ */
+export function readSpecTree(projectDir: string): Record<string, string> {
+  const root = join(projectDir, "specs");
+  if (!existsSync(root)) return {};
+  return Object.fromEntries(
+    readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile() && !/\.(gen\.json|excalidraw)$/.test(e.name))
+      .map((e) => relative(projectDir, join(e.parentPath, e.name)))
+      .sort()
+      .map((rel) => [rel, readProjectFile(projectDir, rel)]),
+  );
+}

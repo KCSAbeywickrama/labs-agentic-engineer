@@ -16,57 +16,94 @@
  * under the License.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Which thread the project's conversation read resolves: the main chat's, or
-// a view's own.
+// The project conversation's two reads, on the org's design agent.
 
-const get = vi.fn<(path: string, init: Record<string, unknown>) => Promise<unknown>>();
-vi.mock("../../../api/client", () => ({
-  client: { GET: (path: string, init: Record<string, unknown>) => get(path, init) },
+vi.mock("../../../auth/token", () => ({
+  getAccessToken: () => Promise.resolve(null),
+  renewAccessToken: () => Promise.resolve(null),
+  redirectToSignIn: () => undefined,
 }));
 
-const { fetchCurrentConversationId } = await import("./conversation");
+const { AE_STUDIO_RESTARTING, setAeStudioUrls } = await import("../../../api/aeStudio");
+const { fetchConversationMessages, fetchCurrentConversationId } = await import("./conversation");
 const { IssueClosedError } = await import("./errors");
 
-const threads = {
-  data: { conversations: [{ conversationId: "old" }, { conversationId: "now", current: true }] },
-  error: undefined,
-};
+const POD = "http://ae-design-agent.mock/v1";
+const server = setupServer();
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => setAeStudioUrls({ designAgent: "http://ae-design-agent.mock" }));
+afterEach(() => {
+  server.resetHandlers();
+  setAeStudioUrls(null);
+});
+afterAll(() => server.close());
 
 describe("fetchCurrentConversationId", () => {
-  beforeEach(() => get.mockReset().mockResolvedValue(threads));
-
-  it("reads the main chat's current thread without a view", async () => {
-    expect(await fetchCurrentConversationId("shop")).toBe("now");
-    expect(get).toHaveBeenCalledWith("/projects/{projectName}/agents/conversations", {
-      params: { path: { projectName: "shop" } },
-    });
+  it("is the project's current thread, as the pod names it", async () => {
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ conversationId: "conv-1", createdAt: "2026-10-07T09:00:00Z", current: true }),
+      ),
+    );
+    expect(await fetchCurrentConversationId("shop")).toBe("conv-1");
   });
 
-  it("reads the issues chat's current thread in the issues view", async () => {
-    expect(await fetchCurrentConversationId("shop", "issues")).toBe("now");
-    expect(get).toHaveBeenCalledWith("/projects/{projectName}/agents/conversations", {
-      params: { path: { projectName: "shop" }, query: { view: "issues" } },
-    });
+  it("says AE Studio is restarting when the pod answers 503", async () => {
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ type: "about:blank", title: "x", status: 503, code: "idp_unavailable" }, { status: 503 }),
+      ),
+    );
+    await expect(fetchCurrentConversationId("shop")).rejects.toThrow(AE_STUDIO_RESTARTING);
   });
-
-  it("never puts the main chat on the wire as a view", async () => {
+  it("reads a view's own thread by its query, and never puts the main chat on the wire", async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({ conversationId: "conv-v", createdAt: "2026-10-07T09:00:00Z", current: true });
+      }),
+    );
     await fetchCurrentConversationId("shop", "main");
-    expect(get).toHaveBeenCalledWith("/projects/{projectName}/agents/conversations", {
-      params: { path: { projectName: "shop" } },
-    });
-  });
-
-  it("reads an issue's own thread in the issue view, by its number", async () => {
-    expect(await fetchCurrentConversationId("shop", "issue", 7)).toBe("now");
-    expect(get).toHaveBeenCalledWith("/projects/{projectName}/agents/conversations", {
-      params: { path: { projectName: "shop" }, query: { view: "issue", issueNumber: 7 } },
-    });
+    await fetchCurrentConversationId("shop", "issues");
+    await fetchCurrentConversationId("shop", "issue", 7);
+    expect(seen).toEqual(["", "?view=issues", "?view=issue&issueNumber=7"]);
   });
 
   it("reads a 409 issue_closed as the issue being closed: it has no thread", async () => {
-    get.mockResolvedValueOnce({ data: undefined, error: { code: "issue_closed", message: "the issue is closed" }, response: { status: 409 } });
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ type: "about:blank", title: "Conflict", status: 409, code: "issue_closed" }, { status: 409 }),
+      ),
+    );
     await expect(fetchCurrentConversationId("shop", "issue", 7)).rejects.toBeInstanceOf(IssueClosedError);
+  });
+});
+
+describe("fetchConversationMessages", () => {
+  it("is the thread's history, oldest first", async () => {
+    const messages = [
+      { role: "user", content: "Hi", author: { id: "sub-1", displayName: "Dev" }, scope: { kind: "design-review" } },
+      { role: "assistant", content: "Hello" },
+    ];
+    server.use(http.get(`${POD}/projects/shop/conversations/conv-1/messages`, () => HttpResponse.json({ messages })));
+    expect(await fetchConversationMessages("shop", "conv-1")).toEqual(messages);
+  });
+
+  it("carries the pod's words for a refusal", async () => {
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/conv-1/messages`, () =>
+        HttpResponse.json(
+          { type: "about:blank", title: "Not Found", status: 404, code: "conversation_unknown", detail: "no such conversation" },
+          { status: 404 },
+        ),
+      ),
+    );
+    await expect(fetchConversationMessages("shop", "conv-1")).rejects.toThrow("no such conversation");
   });
 });

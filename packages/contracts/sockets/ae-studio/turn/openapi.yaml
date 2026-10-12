@@ -1,0 +1,333 @@
+openapi: 3.0.3
+info:
+  title: ae-studio Turn socket
+  description: |-
+    Unix-socket API between ae-studio-tools and ae-design-agent inside one AE
+    Studio pod (socket path in AE_TURN_SOCKET, served by ae-design-agent, mode
+    0660). The mount is the gate, so there is no security scheme. ae-studio-tools
+    calls it to run the turns aep-api starts (kickoff and plan), and to remove
+    the chat thread of an issue aep-api saw closed or reopened. A turn keeps
+    running when the caller goes away. Errors are RFC 9457 problems
+    (application/problem+json) except the 409 turn_in_progress JSON body.
+  version: 1.0.0
+servers:
+- url: /
+tags:
+- name: Turns
+  description: Start a turn and follow it as NDJSON.
+- name: Threads
+  description: The chat threads the design agent keeps.
+paths:
+  /turns:
+    post:
+      operationId: start-turn
+      summary: Start (or reattach to) a turn and stream its result
+      description: |-
+        The answer is `application/x-ndjson`, one JSON object per line: zero or
+        more TaskOpFrame, KeepAliveFrame every 15 s, then one ResultFrame.
+      tags:
+      - Turns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnRequest'
+      responses:
+        '200':
+          description: The turn's NDJSON stream (frames TaskOpFrame, KeepAliveFrame,
+            ResultFrame)
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: A different turn runs for the project (TurnInProgress),
+            or the studio has no default model key (problem code no_default_key).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnInProgress'
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /projects/{project}/issues/{number}/thread:
+    delete:
+      operationId: remove-issue-thread
+      summary: Remove an issue's chat thread
+      description: |-
+        The issue's chat threads created before `before` go; one started after
+        it (a reopened issue's fresh thread) stays. A thread whose turn is
+        running is removed when that turn ends, so the turn's own save never
+        brings it back. Idempotent: an issue with no thread is a 204.
+      tags:
+      - Threads
+      parameters:
+      - name: project
+        in: path
+        required: true
+        description: Project name (DNS-label slug)
+        schema:
+          type: string
+      - name: number
+        in: path
+        required: true
+        description: The issue number
+        schema:
+          type: integer
+          minimum: 1
+      - name: before
+        in: query
+        required: true
+        description: When the close or reopen that removes the thread happened
+          (RFC 3339)
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '204':
+          description: Removed, deferred to the running turn's end, or there was
+            none
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: 'RFC 9457 problem. Codes: invalid_turn, invalid_request (a thread
+        removal''s issue number or time), project_unknown, no_default_key,
+        payload_too_large (a body over 4 MiB), shutting_down.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      required:
+      - type
+      - title
+      - status
+      - code
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+    TurnRequest:
+      type: object
+      additionalProperties: false
+      description: Starts one turn that is not a browser chat turn, a kickoff
+        (`start`) or a plan. Idempotent on turnId, a retry reattaches to the
+        running turn. A different turnId while a turn runs is 409.
+      required:
+      - turnId
+      - project
+      - kind
+      - credit
+      properties:
+        turnId:
+          type: string
+          format: uuid
+        project:
+          type: string
+          description: Project name (DNS-label slug)
+        kind:
+          type: string
+          enum:
+          - start
+          - plan
+        credit:
+          $ref: '#/components/schemas/TurnCredit'
+        at:
+          type: string
+          description: A plan turn only, the commit the planner reads the
+            repository at, as a 40-hex sha. The studio sends it, resolved from
+            the `at` aep-api gave it (`tags/<version>`), so the design agent
+            never resolves a ref. Omitted, the default-branch tip. It is the
+            pin and wins; scope.tag only describes the version and is not
+            checked against it. The design agent refuses it on a start turn
+            (400 invalid_turn), and answers 400 invalid_turn for a sha that
+            names no commit of the project's repository.
+          pattern: ^[0-9a-f]{40}$
+        scope:
+          $ref: '#/components/schemas/PlanScope'
+        text:
+          type: string
+          description: The free text of the turn (the project idea of a start turn).
+    TurnCredit:
+      type: object
+      additionalProperties: false
+      description: Who the turn's commits and records are credited to.
+      required:
+      - userId
+      - name
+      - email
+      properties:
+        userId:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+    PlanScope:
+      type: object
+      additionalProperties: false
+      description: What the spec version a plan turn plans carries, from its
+        tag's annotation, the features, the product-wide items and the stories
+        it holds back.
+      required:
+      - tag
+      properties:
+        tag:
+          type: string
+          description: The version's tag name, describing the version to the
+            planner. Not the pin and not checked against it; the turn's `at`
+            is.
+          pattern: ^[A-Za-z0-9._/-]{1,200}$
+        features:
+          type: array
+          description: The features the version carries, in ID order, each
+            with the carried features it is built after; each is one item of
+            the build's checklist.
+          items:
+            $ref: '#/components/schemas/PlanFeature'
+        productWide:
+          type: array
+          description: The product-wide items the version carries, in ID
+            order; the build's Foundation item builds them.
+          items:
+            $ref: '#/components/schemas/PlanItem'
+        heldBack:
+          type: array
+          description: The stories of carried features the version holds back,
+            in ID order; each needs a feature neither built nor carried.
+          items:
+            type: string
+            pattern: ^F[0-9]+\.[0-9]+$
+    PlanFeature:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          pattern: ^F[0-9]+$
+        name:
+          type: string
+        needs:
+          type: array
+          description: The carried features this one is built after, in ID
+            order (one an earlier version built is left out).
+          items:
+            type: string
+            pattern: ^F[0-9]+$
+    PlanItem:
+      type: object
+      additionalProperties: false
+      description: One product-wide item.
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          pattern: ^P[0-9]+$
+        text:
+          type: string
+        appliesTo:
+          type: array
+          description: The feature IDs the item applies to, or the single
+            entry `all`.
+          items:
+            type: string
+            pattern: ^(F[0-9]+|all)$
+    TurnInProgress:
+      type: object
+      additionalProperties: false
+      description: 409 body, a different turn already runs for the project.
+      required:
+      - code
+      - activeTurnId
+      properties:
+        code:
+          type: string
+          enum:
+          - turn_in_progress
+        activeTurnId:
+          type: string
+          format: uuid
+    TaskOpFrame:
+      type: object
+      additionalProperties: false
+      description: One line of the turn stream, the build plan the agent produced.
+      required:
+      - type
+      - op
+      - output
+      properties:
+        type:
+          type: string
+          enum:
+          - task-op
+        op:
+          type: string
+          enum:
+          - build
+        output:
+          type: object
+          additionalProperties: true
+          description: The operation's payload, as the planBuild tool emitted it.
+    KeepAliveFrame:
+      type: object
+      additionalProperties: false
+      description: One line of the turn stream, sent every 15 s.
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - keep-alive
+    ResultFrame:
+      type: object
+      additionalProperties: false
+      description: The last line of the turn stream. A shutdown ends a running turn
+        with status failed and code shutdown.
+      required:
+      - type
+      - status
+      properties:
+        type:
+          type: string
+          enum:
+          - result
+        status:
+          type: string
+          enum:
+          - completed
+          - failed
+        code:
+          type: string
+        message:
+          type: string
+        resetAt:
+          type: string
+          format: date-time
+          description: With code provider_limit, when the model provider said its
+            limit resets, if it said.

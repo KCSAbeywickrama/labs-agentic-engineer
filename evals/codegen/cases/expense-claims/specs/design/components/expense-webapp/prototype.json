@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 3,
+  "name": "Expense Claims",
+  "entryScreen": "screen.my-claims",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Manager", "name": "Manager" },
+    { "id": "PayrollExporter", "name": "Finance (payroll exporter)" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Claims service failed" }
+  ],
+  "screens": [
+    { "id": "screen.my-claims", "name": "My claims", "roleIds": ["Employee", "Manager"] },
+    { "id": "screen.claim-edit", "name": "Claim editor", "roleIds": ["Employee", "Manager"] },
+    { "id": "screen.claim-detail", "name": "My claim", "roleIds": ["Employee", "Manager"] },
+    { "id": "screen.team-queue", "name": "Team queue", "roleIds": ["Manager"] },
+    { "id": "screen.team-claim", "name": "Team claim", "roleIds": ["Manager"] },
+    { "id": "screen.team-history", "name": "Decided claims", "roleIds": ["Manager"] },
+    { "id": "screen.approved", "name": "Approved claims", "roleIds": ["PayrollExporter"] },
+    { "id": "screen.batches", "name": "Export batches", "roleIds": ["PayrollExporter"] },
+    { "id": "screen.batch-detail", "name": "Export batch", "roleIds": ["PayrollExporter"] },
+    { "id": "screen.employees", "name": "Reporting lines", "roleIds": ["PayrollExporter"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Manager", "PayrollExporter"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Manager", "PayrollExporter"] }
+  ],
+  "flows": [
+    { "id": "flow.submit-claim", "name": "Submit a claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.claim-edit", "screen.claim-detail"] },
+    { "id": "flow.decide-claim", "name": "Approve or reject a claim", "roleId": "Manager",
+      "screenIds": ["screen.team-queue", "screen.team-claim", "screen.team-history"] },
+    { "id": "flow.export-claims", "name": "Export approved claims", "roleId": "PayrollExporter",
+      "screenIds": ["screen.approved", "screen.batch-detail", "screen.batches"] },
+    { "id": "flow.reporting-lines", "name": "Set reporting lines", "roleId": "PayrollExporter",
+      "screenIds": ["screen.employees"] }
+  ]
+}

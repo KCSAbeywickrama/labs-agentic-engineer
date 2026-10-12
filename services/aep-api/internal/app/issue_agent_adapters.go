@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/clients/aestudiotools"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	scissues "github.com/wso2/aep/aep-api/internal/sourcecontrol/issues"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 )
@@ -41,6 +43,26 @@ func (p issueAgentPromoter) PromoteAndExecute(ctx context.Context, orgID, projec
 		return scissues.HandOffRefusedError{Reason: refusal.Error()}
 	}
 	return err
+}
+
+// podIssueThreads removes an issue's chat threads in the org's AE Studio pod,
+// whose design agent keeps the threads (scissues.IssueThreadRemover): the
+// issue agent's close_issue, and the webhook handler below. The pod answers
+// at once, removing a thread whose turn is running when that turn ends, so a
+// call from inside that turn never waits on it.
+type podIssueThreads struct {
+	repos sourcecontrol.ProjectRepoRows
+	pod   interface {
+		RemoveIssueThread(ctx context.Context, ref aestudiotools.RepoRef, project string, number int, before time.Time) error
+	}
+}
+
+func (t podIssueThreads) RemoveIssueThread(ctx context.Context, orgID, projectID string, issueNumber int, before time.Time) error {
+	ref, _, err := sourcecontrol.RepoRefFor(ctx, t.repos, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("resolve the issue's repository: %w", err)
+	}
+	return t.pod.RemoveIssueThread(ctx, ref, projectID, issueNumber, before)
 }
 
 // issueThreadRemoval removes an issue's chat thread on GitHub's issues.closed

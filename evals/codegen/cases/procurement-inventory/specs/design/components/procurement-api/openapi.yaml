@@ -2,349 +2,368 @@ openapi: 3.0.3
 info:
   title: Procurement API
   version: 0.1.0
-  description: Purchase requests, approvals, goods receipts and the stock views (proxied from the inventory service).
+  description: Purchase requests, approvals, goods receiving, and the catalogue, stock and ledger views fronted from the inventory service. The approval limit is configuration (APPROVAL_LIMIT_DEFAULT, 500000 minor units when unset; per-username overrides in APPROVAL_LIMITS), not managed through this API.
 servers:
   - url: /
+security:
+  - oauth2: []
 paths:
   /items:
     get:
       operationId: listItems
-      summary: Every catalogue item
+      summary: Browse catalogue items with current stock
       security:
-        - oauth2: [catalogue:read]
+        - oauth2: [items:read]
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
+        - { name: q, in: query, schema: { type: string }, description: Search by name or SKU }
+        - { name: includeInactive, in: query, schema: { type: boolean, default: false }, description: Include deactivated items; clerks only in the UI }
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
       responses:
         '200':
-          description: A page of items.
+          description: Items page
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching items }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data: { type: array, items: { $ref: '#/components/schemas/Item' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: createItem
-      summary: Add a catalogue item (starts with 0 in stock)
+      summary: Add an item to the catalogue
       security:
-        - oauth2: [catalogue:manage]
+        - oauth2: [items:manage]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ItemInput'
+            schema: { $ref: '#/components/schemas/ItemCreate' }
       responses:
         '201':
-          description: The new item.
+          description: Item created at zero stock
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Item'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/itemId'
+    get:
+      operationId: getItem
+      summary: Get one item with its stock level
+      security:
+        - oauth2: [items:read]
+      responses:
+        '200':
+          description: The item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: updateItem
-      summary: Edit a catalogue item's name, unit, unit price or reorder level
+      summary: Edit an item's name, unit, reorder level, price or active flag
       security:
-        - oauth2: [catalogue:manage]
-      parameters:
-        - name: itemId
-          in: path
-          required: true
-          schema: { type: string }
+        - oauth2: [items:manage]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ItemUpdate'
+            schema: { $ref: '#/components/schemas/ItemUpdate' }
       responses:
         '200':
-          description: The updated item.
+          description: Updated item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /items/{itemId}/ledger:
+    parameters:
+      - $ref: '#/components/parameters/itemId'
+    get:
+      operationId: listItemLedger
+      summary: Every ledger entry of one item, newest first
+      security:
+        - oauth2: [ledger:read]
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200': { $ref: '#/components/responses/LedgerPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ledger:
+    get:
+      operationId: listLedger
+      summary: Every ledger entry across items, newest first
+      security:
+        - oauth2: [ledger:read]
+      parameters:
+        - { name: itemId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200': { $ref: '#/components/responses/LedgerPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /low-stock:
+    get:
+      operationId: listLowStock
+      summary: Active items whose stock is below their reorder level
+      security:
+        - oauth2: [low-stock:read]
+      parameters:
+        - { name: sort, in: query, schema: { type: string, enum: [shortfall, name], default: shortfall } }
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Low-stock items
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Item'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /me/purchase-requests:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching items }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data: { type: array, items: { $ref: '#/components/schemas/LowStockItem' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/requests:
     get:
-      operationId: listMyPurchaseRequests
-      summary: The caller's purchase requests
+      operationId: listMyRequests
+      summary: The caller's purchase requests, newest first
       security:
         - oauth2: [requests:read]
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-        - $ref: '#/components/parameters/Status'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/RequestStatus' } }
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
       responses:
-        '200':
-          description: A page of the caller's requests.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequestPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        '200': { $ref: '#/components/responses/RequestPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
-      operationId: createPurchaseRequest
-      summary: Raise a purchase request as the caller
+      operationId: createMyRequest
+      summary: Create a draft purchase request for the caller
       security:
-        - oauth2: [requests:submit]
+        - oauth2: [requests:write]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/PurchaseRequestInput'
+            schema: { $ref: '#/components/schemas/RequestInput' }
       responses:
         '201':
-          description: The pending request.
+          description: Draft request created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequest'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /me/purchase-requests/{requestId}:
+              schema: { $ref: '#/components/schemas/PurchaseRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/requests/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
     get:
-      operationId: getMyPurchaseRequest
-      summary: One of the caller's purchase requests
+      operationId: getMyRequest
+      summary: One of the caller's requests
       security:
         - oauth2: [requests:read]
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
       responses:
-        '200':
-          description: The request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /purchase-requests:
-    get:
-      operationId: listPurchaseRequests
-      summary: Every purchase request
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateMyRequest
+      summary: Replace lines and justification of the caller's draft or pending request
       security:
-        - oauth2: [requests:read-all]
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-        - $ref: '#/components/parameters/Status'
-      responses:
-        '200':
-          description: A page of requests.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequestPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /purchase-requests/{requestId}:
-    get:
-      operationId: getPurchaseRequest
-      summary: Any purchase request
-      security:
-        - oauth2: [requests:read-all]
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
-      responses:
-        '200':
-          description: The request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /purchase-requests/{requestId}/approve:
-    post:
-      operationId: approvePurchaseRequest
-      summary: Approve a pending request within the approval limit
-      security:
-        - oauth2: [requests:approve]
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
-      responses:
-        '200':
-          description: The approved request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          description: Total exceeds the approval limit, or the caller raised the request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /purchase-requests/{requestId}/reject:
-    post:
-      operationId: rejectPurchaseRequest
-      summary: Reject a pending request
-      security:
-        - oauth2: [requests:reject]
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
+        - oauth2: [requests:write]
       requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequestInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/requests/{requestId}/submit:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    post:
+      operationId: submitMyRequest
+      summary: Submit the caller's draft request for approval
+      security:
+        - oauth2: [requests:write]
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/requests/{requestId}/withdraw:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    post:
+      operationId: withdrawMyRequest
+      summary: Withdraw the caller's draft or pending request
+      security:
+        - oauth2: [requests:write]
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /requests:
+    get:
+      operationId: listPendingRequests
+      summary: Every pending request within the caller's approval limit, oldest first
+      security:
+        - oauth2: [requests:read-all]
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200': { $ref: '#/components/responses/RequestPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /requests/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    get:
+      operationId: getRequestForApproval
+      summary: Any request within the caller's approval limit
+      security:
+        - oauth2: [requests:read-all]
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /requests/{requestId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    post:
+      operationId: approveRequest
+      summary: Approve a pending request within the caller's limit
+      security:
+        - oauth2: [requests:decide]
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /requests/{requestId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    post:
+      operationId: rejectRequest
+      summary: Reject a pending request with a reason
+      security:
+        - oauth2: [requests:decide]
+      requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [reason]
               properties:
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/decisions:
+    get:
+      operationId: listMyDecisions
+      summary: Requests the caller has approved or rejected
+      security:
+        - oauth2: [decisions:read]
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200': { $ref: '#/components/responses/RequestPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /orders:
+    get:
+      operationId: listOrdersToReceive
+      summary: Approved requests with goods still to receive, oldest first
+      security:
+        - oauth2: [orders:read]
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200': { $ref: '#/components/responses/RequestPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /orders/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    get:
+      operationId: getOrder
+      summary: An approved request with ordered, received and outstanding quantities
+      security:
+        - oauth2: [orders:read]
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orders/{requestId}/receipts:
+    parameters:
+      - $ref: '#/components/parameters/requestId'
+    get:
+      operationId: listReceipts
+      summary: Receipts recorded against a request
+      security:
+        - oauth2: [receipts:read]
       responses:
         '200':
-          description: The rejected request.
+          description: Receipts, newest first
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PurchaseRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          description: The caller raised the request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /purchase-requests/{requestId}/receipts:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total receipts }
+                  data: { type: array, items: { $ref: '#/components/schemas/Receipt' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
-      operationId: receiveGoods
-      summary: Receive goods against an approved order, raising stock
+      operationId: createReceipt
+      summary: Record a receipt and raise stock through ledger entries
       security:
         - oauth2: [receipts:create]
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/GoodsReceiptInput'
+            schema: { $ref: '#/components/schemas/ReceiptInput' }
       responses:
         '201':
-          description: The recorded receipt.
+          description: Receipt saved
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/GoodsReceipt'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          description: A quantity exceeds what is still outstanding on the line.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /approval-limit:
-    get:
-      operationId: getApprovalLimit
-      summary: The configured approval limit shared by all approvers
-      responses:
-        '200':
-          description: The limit.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApprovalLimit'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /stock-levels:
-    get:
-      operationId: listStockLevels
-      summary: Every item's stock level
-      security:
-        - oauth2: [stock:read]
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: A page of stock levels.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StockLevelPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /low-stock-items:
-    get:
-      operationId: listLowStockItems
-      summary: Every item below its reorder level
-      security:
-        - oauth2: [stock:read]
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: A page of low-stock levels.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StockLevelPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /items/{itemId}/ledger-entries:
-    get:
-      operationId: listLedgerEntries
-      summary: Ledger entries of any item, newest first
-      security:
-        - oauth2: [stock:read]
-      parameters:
-        - name: itemId
-          in: path
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: A page of ledger entries.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LedgerEntryPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-security:
-  - oauth2: []
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     oauth2:
@@ -354,60 +373,73 @@ components:
           authorizationUrl: /oauth2/authorize
           tokenUrl: /oauth2/token
           scopes:
-            catalogue:read: Every catalogue item
-            catalogue:manage: Add and edit catalogue items
+            items:read: Browse active catalogue items and stock levels
+            items:manage: Create, edit, price and deactivate items
             requests:read: The caller's own requests
-            requests:submit: Raise a request as the caller
-            requests:read-all: Every request
-            requests:approve: Approve a request within the approval limit
-            requests:reject: Reject a pending request
-            receipts:create: Receive goods against an approved order
-            stock:read: Stock levels, ledger and low-stock view
+            requests:write: Create, edit, submit and withdraw the caller's requests
+            requests:read-all: Pending requests within the caller's approval limit
+            requests:decide: Approve or reject within the caller's limit
+            decisions:read: The caller's own decisions
+            orders:read: Approved requests awaiting goods
+            receipts:create: Record a receipt
+            receipts:read: Receipts of a request
+            ledger:read: Every ledger entry
+            low-stock:read: The low-stock list
   parameters:
-    Limit:
-      name: limit
-      in: query
-      schema: { type: integer, default: 20, maximum: 100 }
-    Offset:
-      name: offset
-      in: query
-      schema: { type: integer, default: 0 }
-    Status:
-      name: status
-      in: query
-      schema:
-        type: string
-        enum: [pending, approved, rejected, partially-received, received]
-    RequestId:
-      name: requestId
-      in: path
-      required: true
-      schema: { type: string }
+    limit: { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+    offset: { name: offset, in: query, schema: { type: integer, default: 0 } }
+    itemId: { name: itemId, in: path, required: true, schema: { type: string } }
+    requestId: { name: requestId, in: path, required: true, schema: { type: string } }
   responses:
     BadRequest:
-      description: The request is malformed.
+      description: Invalid input
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+          schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
-      description: Not signed in or not permitted.
+      description: Missing token or scope
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+          schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      description: The resource does not exist.
+      description: No such row for the caller
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+          schema: { $ref: '#/components/schemas/Error' }
     Conflict:
-      description: The request is not in a state that allows this action.
+      description: Not allowed in the current state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Request:
+      description: The purchase request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/PurchaseRequest' }
+    RequestPage:
+      description: Purchase requests page
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            required: [count, data]
+            properties:
+              count: { type: integer, description: total matching requests }
+              next: { type: string, nullable: true, description: relative URI of the next page }
+              previous: { type: string, nullable: true, description: relative URI of the previous page }
+              data: { type: array, items: { $ref: '#/components/schemas/PurchaseRequest' } }
+    LedgerPage:
+      description: Ledger entries page
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [count, data]
+            properties:
+              count: { type: integer, description: total matching entries }
+              next: { type: string, nullable: true, description: relative URI of the next page }
+              previous: { type: string, nullable: true, description: relative URI of the previous page }
+              data: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
   schemas:
     Error:
       type: object
@@ -419,63 +451,62 @@ components:
         moreInfo: { type: string, description: URI to documentation }
     Item:
       type: object
-      required: [id, sku, name, unit, unitPrice]
+      required: [id, sku, name, unitOfMeasure, reorderLevel, unitPriceCents, active, stockQuantity]
       properties:
         id: { type: string }
         sku: { type: string }
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, description: low stock when on-hand is below this }
-    ItemInput:
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer }
+        unitPriceCents: { type: integer, description: price in cents of the company currency }
+        active: { type: boolean }
+        stockQuantity: { type: integer, description: current stock, the sum of the item's ledger entries }
+    ItemCreate:
       type: object
-      required: [name, unit, unitPrice, reorderLevel]
+      required: [sku, name, unitOfMeasure, reorderLevel, unitPriceCents]
       properties:
+        sku: { type: string, description: unique and immutable }
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, minimum: 0, description: low stock when on-hand is below this }
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer, minimum: 0 }
+        unitPriceCents: { type: integer, minimum: 0 }
     ItemUpdate:
       type: object
       properties:
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, minimum: 0, description: low stock when on-hand is below this }
-    StockLevel:
-      type: object
-      required: [itemId, sku, name, onHand, reorderLevel]
-      properties:
-        itemId: { type: string }
-        sku: { type: string }
-        name: { type: string }
-        onHand: { type: integer }
-        reorderLevel: { type: integer }
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer, minimum: 0 }
+        unitPriceCents: { type: integer, minimum: 0 }
+        active: { type: boolean }
+    LowStockItem:
+      allOf:
+        - $ref: '#/components/schemas/Item'
+        - type: object
+          required: [shortfall]
+          properties:
+            shortfall: { type: integer, description: reorder level minus current stock }
     LedgerEntry:
       type: object
-      required: [id, itemId, quantityChange, balanceAfter, reason, createdAt]
+      required: [id, itemId, itemName, quantityChange, resultingQuantity, actorName, sourceType, sourceId, createdAt]
       properties:
         id: { type: string }
         itemId: { type: string }
-        quantityChange: { type: integer, description: signed change; positive raises stock }
-        balanceAfter: { type: integer, description: on-hand quantity after this entry }
-        reason: { type: string }
-        reference: { type: string, description: receipt id that caused the change }
-        createdBy: { type: string }
-        createdAt: { type: string, format: date-time }
-    RequestLine:
-      type: object
-      required: [itemId, quantity]
-      properties:
-        itemId: { type: string }
         itemName: { type: string }
-        quantity: { type: integer, minimum: 1 }
-        unitPrice: { type: number, description: price per unit captured at request time }
-        receivedQuantity: { type: integer, description: units received so far }
-    PurchaseRequestInput:
+        quantityChange: { type: integer, description: signed; positive raises stock }
+        resultingQuantity: { type: integer, description: stock level after this entry }
+        actorName: { type: string, description: who caused the change }
+        sourceType: { type: string, enum: [receipt] }
+        sourceId: { type: string, description: id of the receipt }
+        requestId: { type: string, description: the purchase request the receipt belongs to }
+        createdAt: { type: string, format: date-time }
+    RequestStatus:
+      type: string
+      enum: [draft, pending, approved, rejected, withdrawn, received]
+    RequestInput:
       type: object
       required: [lines]
       properties:
+        justification: { type: string }
         lines:
           type: array
           minItems: 1
@@ -485,21 +516,33 @@ components:
             properties:
               itemId: { type: string }
               quantity: { type: integer, minimum: 1 }
-    PurchaseRequest:
+    RequestLine:
       type: object
-      required: [id, requesterId, status, totalValue, lines, createdAt]
+      required: [id, itemId, itemName, quantity, unitPriceCents, receivedQuantity, outstandingQuantity]
       properties:
         id: { type: string }
-        requesterId: { type: string }
-        status:
-          type: string
-          enum: [pending, approved, rejected, partially-received, received]
-        totalValue: { type: number, description: sum of quantity times unit price }
-        decidedBy: { type: string, nullable: true }
-        decisionReason: { type: string, nullable: true }
+        itemId: { type: string }
+        itemName: { type: string }
+        quantity: { type: integer, description: ordered quantity }
+        unitPriceCents: { type: integer, description: catalogue price, copied at submission }
+        receivedQuantity: { type: integer }
+        outstandingQuantity: { type: integer }
+    PurchaseRequest:
+      type: object
+      required: [id, requesterName, status, totalCents, lines, createdAt]
+      properties:
+        id: { type: string }
+        requesterName: { type: string }
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        justification: { type: string }
+        totalCents: { type: integer }
         lines: { type: array, items: { $ref: '#/components/schemas/RequestLine' } }
+        decidedByName: { type: string, nullable: true }
+        decisionReason: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
-    GoodsReceiptInput:
+        submittedAt: { type: string, format: date-time, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+    ReceiptInput:
       type: object
       required: [lines]
       properties:
@@ -508,53 +551,24 @@ components:
           minItems: 1
           items:
             type: object
-            required: [itemId, quantity]
+            required: [requestLineId, quantity]
             properties:
-              itemId: { type: string }
-              quantity: { type: integer, minimum: 1, description: units received now }
-    GoodsReceipt:
+              requestLineId: { type: string }
+              quantity: { type: integer, minimum: 1 }
+    Receipt:
       type: object
-      required: [id, requestId, receivedBy, receivedAt, ledgerEntries]
+      required: [id, requestId, clerkName, receivedAt, lines]
       properties:
         id: { type: string }
         requestId: { type: string }
-        receivedBy: { type: string }
+        clerkName: { type: string }
         receivedAt: { type: string, format: date-time }
-        ledgerEntries: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
-    ApprovalLimit:
-      type: object
-      required: [maxTotalValue]
-      properties:
-        maxTotalValue: { type: number, description: largest total request value any approver may approve; configured as 5000 }
-    ItemPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/Item' } }
-    PurchaseRequestPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/PurchaseRequest' } }
-    StockLevelPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/StockLevel' } }
-    LedgerEntryPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [requestLineId, itemName, quantity]
+            properties:
+              requestLineId: { type: string }
+              itemName: { type: string }
+              quantity: { type: integer }

@@ -28,7 +28,7 @@
  * (`checkPrototype`).
  *
  * Drawing every screen executes the generated module, so this package does not:
- * the host passes a `PrototypeRenderCheck` (the agents service passes the kit's
+ * the host passes a `PrototypeRenderCheck` (the design agent passes the kit's
  * isolated one) to `writeWithRenderCheck`, which runs it asynchronously, off
  * the host's event loop, before the write is made. Without one the files get
  * their static checks only (the console's mock replay).
@@ -74,10 +74,27 @@ export type FileWrite = { op: "add"; path: string; content: string } | { op: "ed
 
 const PROTOTYPE_PATH = /^specs\/design\/components\/[^/]+\/prototype\.(json|tsx)$/;
 
-/** Same move as every other gate: a refused write created nothing to edit. */
-const REMEDY =
-  "The write was refused and the file is unchanged. Fix every finding and retry: an editFile for a local " +
-  "fix, or ONE addFile of the whole corrected file (removeFile first only if the file already existed).";
+/**
+ * The one move that fixes a refusal, which depends on whether the file existed
+ * before the refused write. A refused write leaves the bundle unchanged, so a
+ * new file still does not exist: offering editFile there sent the model to
+ * NO_SUCH_FILE for a wasted round (seen in the design eval).
+ */
+function remedy(existed: boolean): string {
+  return existed
+    ? "The write was refused and the file is unchanged. Fix every finding and retry: an editFile for a local " +
+        "fix, or removeFile then ONE addFile of the whole corrected file."
+    : "The write was refused, so the file still does not exist and editFile has nothing to edit. Fix every " +
+        "finding and resend the whole corrected file with ONE addFile.";
+}
+
+/**
+ * True for either file of a web-application's prototype pair. A write to one is
+ * the write a client fold cannot judge: the render check runs only in the host.
+ */
+export function isPrototypePath(path: string): boolean {
+  return PROTOTYPE_PATH.test(path);
+}
 
 /** How many findings a refusal lists in its message before summarizing the rest. */
 const MAX_LISTED = 8;
@@ -93,6 +110,7 @@ const manifestPathOf = (sourcePath: string) => sourcePath.replace(/prototype\.ts
 export function checkPrototype(path: string, content: string, bundle: PrototypeReader): PrototypeProblem | null {
   const kind = PROTOTYPE_PATH.exec(path)?.[1];
   if (kind === undefined) return null;
+  const refuse = refuser(bundle.read(path) !== undefined);
   if (kind === "json") {
     const manifest = parseManifestJson(content);
     if (!manifest.ok) return refuse(`${path} is not a valid prototype manifest`, manifest.findings);
@@ -141,7 +159,9 @@ export function writeWithRenderCheck(bundle: FileBundle, write: FileWrite, rende
   const make = () => (write.op === "add" ? bundle.addFile(write.path, write.content) : bundle.editFile(write.path, write.oldString, write.newString));
   const pair = renderPair(plan.write, bundle);
   if (!pair) return make();
-  return render(pair.files).then((findings) => (findings.length > 0 ? renderRefusal(plan.write, pair.kind, findings) : make()));
+  // Judged before the write is made: whether the path holds a file now is whether it existed.
+  const existed = bundle.has(plan.write.path);
+  return render(pair.files).then((findings) => (findings.length > 0 ? renderRefusal(plan.write, pair.kind, findings, existed) : make()));
 }
 
 /** The whole pair a planned prototype write leaves, or null when it leaves none to draw. */
@@ -153,8 +173,8 @@ function renderPair(write: PlannedWrite, bundle: PrototypeReader): { kind: "json
   return manifest === undefined || source === undefined ? null : { kind, files: { manifest, source } };
 }
 
-function renderRefusal(write: PlannedWrite, kind: "json" | "tsx", findings: PrototypeFinding[]): OpErr {
-  const problem = refuse(kind === "json" ? brokenSource(write.path, sourcePathOf(write.path)) : `${write.path} is not a valid prototype`, findings);
+function renderRefusal(write: PlannedWrite, kind: "json" | "tsx", findings: PrototypeFinding[], existed: boolean): OpErr {
+  const problem = refuser(existed)(kind === "json" ? brokenSource(write.path, sourcePathOf(write.path)) : `${write.path} is not a valid prototype`, findings);
   return { ok: false, path: write.path, op: write.op, code: problem.code, message: problem.message, findings: problem.findings };
 }
 
@@ -162,9 +182,12 @@ function brokenSource(manifestPath: string, sourcePath: string): string {
   return `${manifestPath} would break ${sourcePath}, which is checked against it (to drop a screen, flow, role or state, first stop ${sourcePath} using it, then change the manifest)`;
 }
 
-function refuse(subject: string, findings: PrototypeFinding[]): PrototypeProblem {
-  const listed = findings.slice(0, MAX_LISTED).map((f) => `${f.code} in ${f.file} at ${f.location}: ${f.message}`);
-  const more = findings.length - listed.length;
-  const detail = more > 0 ? `${listed.join("; ")}; and ${more} more` : listed.join("; ");
-  return { code: "INVALID_PROTOTYPE", message: `${subject} - ${detail}. ${REMEDY}`, findings };
+/** Builds a refusal of a write to a file that `existed` before it, or not. */
+function refuser(existed: boolean): (subject: string, findings: PrototypeFinding[]) => PrototypeProblem {
+  return (subject, findings) => {
+    const listed = findings.slice(0, MAX_LISTED).map((f) => `${f.code} in ${f.file} at ${f.location}: ${f.message}`);
+    const more = findings.length - listed.length;
+    const detail = more > 0 ? `${listed.join("; ")}; and ${more} more` : listed.join("; ");
+    return { code: "INVALID_PROTOTYPE", message: `${subject} - ${detail}. ${remedy(existed)}`, findings };
+  };
 }

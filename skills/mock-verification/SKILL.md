@@ -1,6 +1,6 @@
 ---
 name: mock-verification
-description: "Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk every flow its wireframes draw, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is the `validation-task` skill's job instead."
+description: "Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk the flows of its prototype, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is the `validation-task` skill's job instead."
 metadata:
   aep:
     kind: platform
@@ -10,7 +10,7 @@ metadata:
 # Mock verification
 
 A clean build says the code is well formed and nothing about what the screens
-do: a route the wireframe draws and the router never registered, a button wired
+do: a screen the prototype shows and the router never registered, a button wired
 to nothing, a form that flips a row and sends no request. So you open the app
 and use it. Mock mode stands it up on this machine with no cluster, no sibling
 service and no IDP. You verify and repair in one pass.
@@ -18,39 +18,75 @@ service and no IDP. You verify and repair in one pass.
 **This is a smoke walk: breadth over depth.** You are looking for a screen that
 is missing, an arrow that goes nowhere, a control that does nothing, a request
 that never leaves the page. Data, layout and wording are not your questions.
-Your scope is the whole component: a cycle's regressions land in shared chrome
-and on pages nobody meant to touch, so every flow is walked, whichever issue
-built it.
+Your prompt names the flows in scope: the flows of its item and of earlier
+items. A cycle's regressions land in shared chrome and on pages nobody meant to
+touch, so walk every flow in scope, whichever issue built it.
 
 ## What you verify
 
 ### The map
 
-`specs/design/components/<component>/wireframes.dsl`, under the project root —
-your working directory, one level above the App Path you edit in. A `flow`
-block is the unit: one role and the screens that role walks, entry screen
-first. Walk every flow under its role (`?role=<name>`) by clicking from its
-entry screen; a screen in no flow is reached at its route. **The DSL is your
-only map**: you open a source file to repair, never to learn a route. A
-component with no `wireframes.dsl` gives you its registered routes instead, one
-flow per role.
+`specs/design/components/<component>/prototype.json`, under the project root:
+your working directory, one level above the App Path you edit in. A flow is
+one role (`roleId`) and the screens that role walks (`screenIds`), in order.
+`prototype.tsx` beside the manifest shows what each screen holds: the
+component for a screen id in `defineApp({ screens })` has the screen's
+controls and, as `to` or `useNav().go(…)`, where each one leads.
+
+**Each flow in scope is one item, by its `id`.** Walk it under its role
+(`?role=<id>`) by clicking from its first screen through its `screenIds`, and
+do what its `name` says. Two flows on one screen are two items: the screen is
+not the unit.
+
+**A flow starts where its control is.** Its start state is the state in which
+its first screen shows the control that its `name` needs. `prototype.tsx`
+gives that state as the branch around the control (`status === "draft"` around
+`Publish menu`). When the seed data does not start there, put the data in that
+state before you walk the flow:
+
+1. Through the app's own controls, by clicking (a close, a delete, a create).
+2. If no control of the app gets there, set that record of the seed in
+   `mock/handlers.ts` to the state, as the contract allows it, and `restart`.
+   After the flow, put the seed back as it was and `restart`. Change only the
+   seed, never what a handler answers.
+
+Open a screen in no flow at its route. Reach the shell screens (Account,
+Settings when the prototype has one, Signed out) through the user menu.
+
+The manifest lists the display states (`states`); `prototype.tsx` shows which
+screen renders each. Walk the states that mock mode can show: the empty state,
+and the validation error through the empty-submit probe. Mock mode cannot show
+a failed or a delayed state (a request failure, a slow dependency). Such a
+state is its own item, after its screen. Check it ONCE in the page source:
+name the condition and the element that renders it. Record it **outside**,
+with "mock mode cannot show it". Never try to force it: a forced failure costs
+more tool calls than the rest of the screen.
+
+**The manifest is your only map**: it sets what you walk. You open a source
+file to repair, to find the route of a screen in no flow, or to check a state
+that mock mode cannot show. A component with no `prototype.json` gives you its
+registered routes instead, one flow per role. The prototype is the review's
+copy, not the app's code: never edit it.
 
 ### Per screen
 
-Three questions, each one action and one snapshot with the first plausible
-input. A screen is answered in a handful of actions; past that you are past the
-smoke.
+On each screen that a flow reaches, and on each screen in no flow, ask three
+questions of the controls that the role sees there. A screen that an earlier
+item answered under the same role and state needs only the controls that this
+flow uses. Each question is one action and one snapshot with the first
+plausible input. A screen is answered in a handful of actions; past that you
+are past the smoke.
 
 | | Question | Evidence |
 |---|---|---|
-| **Reach** | Did the arrow that names this screen bring you here, and does every `->` it draws land where it says? | the target's snapshot |
-| **Act** | Does every drawn control change something visible when used? A create is in the next list as that list opens, with no filter changed by hand; a filter narrows; a toggle flips a row. | the snapshot after the action |
+| **Reach** | Did the step before this screen in its flow bring you here, and does every link it shows land on the screen it names? | the target's snapshot |
+| **Act** | Does every control the prototype shows change something visible when used? A create is in the next list as that list opens, with no filter changed by hand; a filter narrows; a toggle flips a row. | the snapshot after the action |
 | **Request** | Did a change leave the page as the request the contract declares, with the status it declares? A row that flips and sends nothing is the one defect a build cannot see. | `agent-browser network requests` |
 
 ### Once per app
 
 - **Roles** (`mock/authz/roles.gen.ts` exists): each flow's entry screen under its own
-  role (`?role=<name>`), and once under a role the DSL gives no flow there.
+  role (`?role=<id>`), and once under a role whose `roleIds` leave it out.
   Both directions are defects. Then three more, which the scope model makes
   walkable and which no build can see:
   - **Every role, and the no-role visitor.** Walk `?role=<name>` for each role
@@ -79,12 +115,12 @@ smoke.
   mock handler or a route guard to make it pass.
 - **Session** (an auth dependency): `?auth=out` on one entry screen runs the
   app's own guard and `signIn()` brings you back; then **Sign out** where the
-  wireframe draws it leaves the screen through `signOut()`. The mock signs the
-  next load in again, so the session being gone is outside; the click leaving
+  prototype puts it (the user menu) leaves the screen through `signOut()`. The
+  mock signs the next load in again, so the session being gone is outside; the click leaving
   the page is not.
 - **Probes**: submit one form empty; open one detail route with an id that does
-  not exist. The wireframe draws the happy path; these are the two states it
-  implies.
+  not exist. These are two states the happy path implies. The empty submit
+  also walks `state.validation-error` where the manifest lists it.
 - **Short window**: reload ONE screen that has a primary action low on the page
   at `agent-browser set viewport 1280 600`, and click that action. A layout that
   only works on a tall window is a layout most laptops do not have, and the way
@@ -106,16 +142,21 @@ Every item ends in exactly one:
 - **done** — what you did and what the page did back.
 - **fixed** — what was wrong; what you changed; what it does now, re-walked.
 - **open** — what happens, after three attempts.
-- **outside** — the truth lives outside the app: a computed total, a generated
-  checklist, what the real IdP grants a real account. The mock answers to
-  `openapi.yaml`, so it proves the request went out, never that the number is
-  right; `validation-task` judges that against the deployed system. A **refusal
-  is not outside** — the mock's gateway layer answers it from the contract's own
+- **outside** — the truth lives outside the app, or mock mode cannot show it.
+  Outside the app: a computed total, a generated checklist, what the real IdP
+  grants a real account. The mock answers to `openapi.yaml`, so it proves the
+  request went out, never that the number is right; `validation-task` judges
+  that against the deployed system. Mock mode cannot show a failed or a delayed
+  state: name the condition in the source and the element that renders it. A
+  **refusal is not outside** — the mock's gateway layer answers it from the contract's own
   handle, so `Forbidden` is something you walk and see.
 
 An unreachable screen is **open**, naming the navigation that failed, never
-**done** read off the source. A fix does not remove or hide what the wireframe
-draws. If the app cannot fill a drawn element, the item is **open**.
+**done** read off the source. A flow whose start state the walk did not reach
+is **open**, naming that state: a flow whose control the screen did not show
+was not walked, and it is never **done**. A fix does not remove or hide what
+the prototype shows. If the app cannot fill an element the prototype shows, the item is
+**open**.
 
 ## Progress
 
@@ -124,8 +165,10 @@ other: the plan once, one line per item as it settles, the close once.
 
 ```text
 Mock verification: <component> — <N> items
-1. <Screen> (<role>): <its controls>; -> <the screens its arrows name>
-2. <Screen>: ...
+1. <flow id> · <flow name> (<role>): <Screen> -> <Screen>; starts at <the state its control needs>; states: <its states>
+2. <Screen> · <state>: source check
+3. <flow id> · ...
+<k>. <Screen> (no flow): <its controls>; -> <the screens its `to`s name>
 <N-4>. Roles
 <N-3>. Session
 <N-2>. Probes
@@ -133,20 +176,24 @@ Mock verification: <component> — <N> items
 <N>. Console
 ```
 
+`<Item>` below is the flow id, the screen in no flow, the screen's state, or
+the once-per-app item.
+
 ```text
-<n>/<N> <Screen>: done — <what you did and what the page did back>
-<n>/<N> <Screen>: fixed — <what was wrong>; <what you changed>; re-walked, <what it does now>
-<n>/<N> <Screen>: open — <what happens>, 3 attempts
-<n>/<N> <Screen>: outside — <the truth that lives outside the app>
+<n>/<N> <Item>: done — <what you did and what the page did back>
+<n>/<N> <Item>: fixed — <what was wrong>; <what you changed>; re-walked, <what it does now>
+<n>/<N> <Item>: open — <what happens, or the start state not reached>, 3 attempts
+<n>/<N> <Item>: outside — <the truth that lives outside the app>
+<n>/<N> <Screen> · <state>: outside — mock mode cannot show it; <the condition> renders <the element>
 ```
 
 ```text
-Mock verification done: <component> — <N> items · <d> done, <f> fixed, <o> open (<n> <Screen>, ...), <t> outside
+Mock verification done: <component> — <N> items · <d> done, <f> fixed, <o> open (<n> <Item>, ...), <t> outside
 ```
 
 The newest line is where the walk is, and that is what the person watching
-reads. An item with no line is a screen you never reached, and it stays visible
-as one.
+reads. An item with no line is a flow or a screen you never reached, and it
+stays visible as one.
 
 ## 1 · Stand it up
 
@@ -169,13 +216,16 @@ it and run `up` again.
 ## 2 · Plan
 
 Before the browser opens, post the plan from the map alone: one numbered item
-per screen in each flow, in walking order under its role, then screens in no
-flow, then Roles (with `mock/authz/roles.gen.ts`), Session (with an auth dependency),
-Probes, Short window, and Console. Posting it first puts your coverage in front of the
-person watching while there is still time to say a screen is missing.
+per flow in scope, by its id in the manifest's order, with its role, its
+screens in walking order and the state it starts in, and one per state that
+mock mode cannot show, after the flow that reaches its screen. Then screens in
+no flow, the shell screens, Roles (with `mock/authz/roles.gen.ts`), Session (with an
+auth dependency), Probes, Short window, and Console. Posting it first puts
+your coverage in front of the person watching while there is still time to say
+a screen is missing.
 
-**Done when:** every screen and flow in the map has a number, and the plan is
-posted.
+**Done when:** every flow id in scope has a number, every screen in scope is in
+a flow item or has its own, and the plan is posted.
 
 ## 3 · Walk
 

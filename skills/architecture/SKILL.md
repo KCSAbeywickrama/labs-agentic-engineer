@@ -42,13 +42,13 @@ component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["wireframes", "react-webapp", <design system>]`,
+"go"]`); a web-application → `["react-webapp", <design system>]`,
 where `<design system>` is the skill name in the **UI design system** section of
 the Organization defaults block in your instructions. A web app's UI toolkit is
 a settled organization decision, so pin it on **every** web-application rather
 than leaving it to a description to trigger — and read the name from that
 section every time instead of remembering one, because it differs per
-organization. If that section is absent or empty, pin only the two stack skills.
+organization. If that section is absent or empty, pin only `react-webapp`.
 Never substitute a design system the organization defaults do not name.
 
 **Pin the design system; do not consult it.** A design system is built against,
@@ -372,7 +372,20 @@ provider's developer reference), `assumed` (you wrote it from less, under the
 user's authorization — `contract.accepted` is that record, and the platform
 writes it, never you).
 
-Work each one in order:
+Work each one in order. A design run does them in two passes:
+
+- **With the component that uses it** (the design's Architecture step):
+  steps 1, 2 and 5. The `dependency.json` of this pass says only what the
+  dependency is: `name`, and `resource.name`, `resource.description`, and
+  `resource.provider` or `suggestions`. No `web_search`, no `contract`, no
+  `config`, no `provenance`, no contract file, no `assumptions.md`.
+- **In the design's Dependencies step**, when the components show what they
+  call: steps 3 and 4 for a dependency with a provider. Edit its
+  `dependency.json` to add what they find, write the contract file when you
+  derive it, then write `assumptions.md` (**What the design assumes about a
+  dependency**, below).
+
+The steps:
 
 1. **Reuse first.** Call `list_external_resources`. It lists the resources
    the ORGANIZATION registered — never one another project defined for
@@ -389,8 +402,8 @@ Work each one in order:
 2. **The PRD names the service, or nobody has.** The user chooses providers;
    you never do. Two outcomes, never a `status`:
    - **The requirements' decisions name a service for this capability**
-     ("Payments: Stripe") → write `resource.provider` and go on to the
-     contract (step 3). An org or platform skill that mandates a vendor
+     ("Payments: Stripe") → write `resource.provider`. Its contract is
+     step 3. An org or platform skill that mandates a vendor
      counts the same way. Nothing else does: "the requirement implies it",
      "this one is popular", "there is only one real option" are guesses, and
      a guess is the user's to make.
@@ -443,6 +456,32 @@ Work each one in order:
    `style`, `package`, `specPath`, `suggestions`, `config` on the component
    are refused — they belong in the dependency file.
 
+### What the design assumes about a dependency
+
+The design can rely on a fact about an outside service that nothing confirms:
+not the contract, not the provider's documentation, not the requirements.
+Write each such fact in `specs/design/dependencies/<name>/assumptions.md`,
+beside the dependency's definition and contract, in the design's Dependencies
+step:
+
+```markdown
+# What the design assumes about Xero
+
+- Xero accepts up to 500 bill lines in one batch. *assumed* (F3)
+- Xero answers a duplicate bill number with an error, not a second bill. *assumed* (F3)
+```
+
+- One line per fact, in one sentence. Then `*assumed*`. Then, in parentheses,
+  the IDs of the features that rely on it.
+- A fact the contract states, or a requirement line with its source (`[Xero
+  API docs]`), is not an assumption: do not repeat it here.
+- A choice about the project's own system ("the export retries 3 times") is
+  a technical decision, not an assumption. It goes in
+  `specs/design/decisions.md` (`design`).
+- Write no file when the design assumes nothing about the service.
+- Keep each line that still holds on a later run. The tag comes off when
+  someone confirms the fact.
+
 ### Config-key conventions
 
 `resource.config` is the env-var schema the consuming component codes against. Use
@@ -492,7 +531,7 @@ naming the dependency file they moved to.
 
 The design-generate turn runs in the chat panel, so your turn text is what the
 user watches live. **Narrate each dependency decision in one plain-prose line as
-you settle it**, before moving to the next:
+you settle it** in the Dependencies step, before moving to the next:
 
 - resolved → `✓ <capability>: using <choice>` (say `, document fetched at
   save` when you pointed at a published one, `, interface derived from docs`
@@ -505,14 +544,12 @@ you settle it**, before moving to the next:
 
 Never block the design on an unresolved dependency — print the line
 and keep emitting the rest; the user replies in the same chat to steer it, now or
-later. Then **close with three parts and nothing more**: one line per component
-(name, type, one-clause role); a **"Needs your input"** block listing ONLY the
-dependencies still unresolved, each as a LINK to its definition —
+later. Then close as `design` says. Its **"Needs your input"** block lists ONLY
+the dependencies still unresolved, each as a LINK to its definition —
 `[currency-service](aep://spec/specs/design/dependencies/currency-service/dependency.json)`
 — followed by the single thing you need (the console opens the definition
 from the link; this link form is the one place a repo path is allowed in
-your prose); and a one-line pointer to `specs/design/`. The narration already carried the
-play-by-play, so a file-by-file recap would only bury the user's next action.
+your prose).
 Each **Needs your input** line names the dependency the way its definition in the spec view does, so
 the user can click through and press **Resolve** — that runs the
 `resolve-dependency` flow, which is where the contract gets provided or
@@ -555,8 +592,9 @@ resolvable, never a guess; a `platform-resource`'s says what it stores. The
 console shows it in the dependency drawer and the coding agent relies on it to
 integrate correctly.
 
-One component per directory. Every `web-application` gets a `wireframes.dsl`
-(`wireframes` governs it); every `service` gets an `openapi.yaml`
-(`openapi-conventions` governs it), emitted after domain-model.md's ER model.
-Other kinds (scheduled tasks, workers, …) carry no extra artifact yet — capture
-their behaviour fully in `description` and `dependencies`.
+One component per directory. Every `web-application` gets a prototype,
+`prototype.json` and `prototype.tsx` (`prototype` governs it); every `service`
+gets an `openapi.yaml` (`openapi-conventions` governs it); every `ai-agent`
+gets an `agent.afm.md` (`agent-building` governs it). `design` says when each
+is written. Other kinds (scheduled tasks, workers, …) carry no extra artifact
+yet — capture their behaviour fully in `description` and `dependencies`.

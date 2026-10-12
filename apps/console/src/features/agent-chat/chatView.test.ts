@@ -91,11 +91,8 @@ describe("viewTurnBody", () => {
     expect(viewTurnBody("main", roomTurn)).toBe(roomTurn);
   });
 
-  it("sends an issues turn as the words and the view alone: it has no spec room and no scope", () => {
-    expect(viewTurnBody("issues", roomTurn)).toEqual({ instruction: "Go", view: "issues" });
-  });
-
-  it("sends an issue's turn as the words, the view and the issue's number", () => {
-    expect(viewTurnBody("issue", roomTurn, 7)).toEqual({ instruction: "Go", view: "issue", issueNumber: 7 });
+  it("sends a branch's turn as the words alone: it has no spec room and no scope, and its thread names its chat", () => {
+    expect(viewTurnBody("issues", roomTurn)).toEqual({ instruction: "Go" });
+    expect(viewTurnBody("issue", roomTurn)).toEqual({ instruction: "Go" });
   });
 });

@@ -19,8 +19,8 @@
 /**
  * The app shell: the chrome every real product has, so a prototype need not
  * build it — a header with the product's name and the signed-in user, the
- * user menu (Account, Settings, Sign out) and the side navigation, around the
- * screen's content.
+ * user menu (Account, Settings when the application has settings, Sign out)
+ * and the side navigation, around the screen's content.
  */
 
 import type { ReactNode } from "react";
@@ -38,7 +38,7 @@ export interface AppShellUser {
 }
 
 export interface AppShellProps {
-  /** The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`. */
+  /** The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` (with `settings`) and `<id>.sign-out`. */
   id: string;
   /** The product's name in the header; prototype.json's `name` by default. */
   product?: string | undefined;
@@ -48,11 +48,11 @@ export interface AppShellProps {
   nav: NavigationItem[];
   /** The screen the user menu's Account entry opens. */
   account: string;
-  /** The screen the user menu's Settings entry opens. */
-  settings: string;
+  /** The screen the user menu's Settings entry opens. Leave it out when the application has nothing to set: the menu then has no Settings entry. */
+  settings?: string | undefined;
   /** The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`. */
   signOut: string;
-  /** More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out. */
+  /** More user-menu entries (a profile, billing), drawn after Account (and Settings) and before Sign out. */
   menu?: NavigationItem[] | undefined;
   /** The screen's content. */
   children?: ReactNode;
@@ -65,8 +65,8 @@ export interface ThemeAppShellProps {
   userRoot: SelectableRootProps;
   nav: ThemeNavigationItem[];
   /**
-   * The user menu's entries the viewing role reaches: Account, Settings and
-   * the prototype's own; Sign out is `signOut`. Keep them in the markup while the menu is closed (hidden),
+   * The user menu's entries the viewing role reaches: Account, Settings when
+   * the prototype has a settings screen, and the prototype's own; Sign out is `signOut`. Keep them in the markup while the menu is closed (hidden),
    * so the render check sees where they lead.
    */
   menu: ThemeNavigationItem[];
@@ -92,7 +92,11 @@ export function AppShell({ id, product, user, nav, account, settings, signOut, m
   const entry = (suffix: string, label: string, to: string): NavigationItem => ({ id: `${id}.${suffix}`, label, to });
   const menu = navigationItems(
     ctx,
-    [entry("account", "Account", requireTarget("account", "Account", account)), entry("settings", "Settings", requireTarget("settings", "Settings", settings)), ...extra],
+    [
+      entry("account", "Account", requireTarget("account", "Account", account)),
+      ...(settings === undefined ? [] : [entry("settings", "Settings", requireTarget("settings", "Settings", settings))]),
+      ...extra,
+    ],
     "AppShell menu entry",
   );
   const [out] = navigationItems(ctx, [entry("sign-out", "Sign out", requireTarget("signOut", "Sign out", signOut))], "AppShell menu entry");

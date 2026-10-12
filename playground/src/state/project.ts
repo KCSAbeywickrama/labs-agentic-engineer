@@ -23,8 +23,8 @@
  *
  * `project.json` holds what a fresh process needs to resume: the conversation
  * uuid (ONE `general` conversation per project — console parity), the issue
- * counter (task 6), and the last-folded spec hash that drives production's
- * D20 `filesChangedExternally` signal.
+ * counter (task 6), the last-folded spec hash that drives production's
+ * D20 `filesChangedExternally` signal, and the versions planned so far.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -38,16 +38,30 @@ export const STATE_DIR = ".aep-playground";
 export interface ProjectState {
   /** Fence-valid slug (from the directory name at init time). */
   slug: string;
-  /** The uuid segment of the project's single `general` conversation. */
+  /**
+   * The project's current thread (the design agent's conversation id), kept
+   * so the next session resumes it; a rotation replaces it.
+   */
   conversationUuid: string;
   /** Next issue file number to allocate (tasks phase). */
   nextIssueNumber: number;
-  /** Content hash of the spec files map after the last fold (D20 signal). */
-  lastFoldedHash?: string;
+  /**
+   * Each version `tasks` planned, oldest first: what a tag's annotation says
+   * in production (`Features:`, `Product-wide:`), so a later selection knows
+   * what is already built.
+   */
+  versions: LocalVersion[];
   /** The user confirmed coding runs may write this directory (§12 first-run confirm). */
   codingConfirmed?: boolean;
   /** The user confirmed `wire` may build and run this project's images locally. */
   wireConfirmed?: boolean;
+}
+
+/** One planned version: its name and what it carries. */
+export interface LocalVersion {
+  tag: string;
+  features: string[];
+  productWide: string[];
 }
 
 export function stateDir(projectDir: string): string {
@@ -71,12 +85,12 @@ export function loadProjectState(projectDir: string, slug: string): ProjectState
       slug: raw.slug ?? slug,
       conversationUuid: raw.conversationUuid ?? randomUUID(),
       nextIssueNumber: raw.nextIssueNumber ?? 1,
-      ...(raw.lastFoldedHash ? { lastFoldedHash: raw.lastFoldedHash } : {}),
+      versions: raw.versions ?? [],
       ...(raw.codingConfirmed ? { codingConfirmed: true } : {}),
       ...(raw.wireConfirmed ? { wireConfirmed: true } : {}),
     };
   }
-  return { slug, conversationUuid: randomUUID(), nextIssueNumber: 1 };
+  return { slug, conversationUuid: randomUUID(), nextIssueNumber: 1, versions: [] };
 }
 
 export function saveProjectState(projectDir: string, state: ProjectState): void {

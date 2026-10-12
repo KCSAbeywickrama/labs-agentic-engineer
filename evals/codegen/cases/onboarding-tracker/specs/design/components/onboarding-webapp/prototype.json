@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 3,
+  "name": "Onboarding Tracker",
+  "entryScreen": "screen.home",
+  "roles": [
+    { "id": "HRCoordinator", "name": "HR coordinator" },
+    { "id": "ITTeamMember", "name": "IT team member" },
+    { "id": "HRTeamMember", "name": "HR team member" },
+    { "id": "FacilitiesTeamMember", "name": "Facilities team member" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Tasks failed to load" }
+  ],
+  "screens": [
+    { "id": "screen.home", "name": "Home (onboardings or my department's tasks)", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] },
+    { "id": "screen.onboarding-new", "name": "Start onboarding", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.onboarding-detail", "name": "Onboarding detail", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.tasks", "name": "All tasks", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.overdue", "name": "Overdue tasks", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] }
+  ],
+  "flows": [
+    { "id": "flow.start-onboarding", "name": "Start an onboarding", "roleId": "HRCoordinator",
+      "screenIds": ["screen.home", "screen.onboarding-new", "screen.onboarding-detail"] },
+    { "id": "flow.review-overdue", "name": "Review overdue tasks", "roleId": "HRCoordinator",
+      "screenIds": ["screen.home", "screen.overdue"] },
+    { "id": "flow.filter-tasks", "name": "Filter all tasks", "roleId": "HRCoordinator",
+      "screenIds": ["screen.home", "screen.tasks"] },
+    { "id": "flow.complete-task-it", "name": "Complete a department task (IT)", "roleId": "ITTeamMember",
+      "screenIds": ["screen.home"] },
+    { "id": "flow.complete-task-hr", "name": "Complete a department task (HR)", "roleId": "HRTeamMember",
+      "screenIds": ["screen.home"] },
+    { "id": "flow.complete-task-facilities", "name": "Complete a department task (Facilities)", "roleId": "FacilitiesTeamMember",
+      "screenIds": ["screen.home"] }
+  ]
+}

@@ -42,7 +42,6 @@ export type ProjectPage = "overview" | "builds" | "validations" | "deploy" | "is
 export type ProjectCard =
   | "spec"
   | "design"
-  | "prototype"
   | "questions"
   | "build"
   | "validation"
@@ -105,7 +104,6 @@ const PAGE_ROUTES: Record<string, ProjectPage> = {
 const CARD_ROUTES: Record<string, { card: ProjectCard; page: ProjectPage }> = {
   "/projects/$projectName/_overview/spec": { card: "spec", page: "overview" },
   "/projects/$projectName/_overview/design": { card: "design", page: "overview" },
-  "/projects/$projectName/_overview/prototype": { card: "prototype", page: "overview" },
   "/projects/$projectName/_overview/questions": { card: "questions", page: "overview" },
   "/projects/$projectName/issues/questions": { card: "questions", page: "issues" },
   "/projects/$projectName/builds/$version": { card: "build", page: "builds" },
@@ -118,7 +116,6 @@ const CARD_ROUTES: Record<string, { card: ProjectCard; page: ProjectPage }> = {
 const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
   spec: "overview",
   design: "overview",
-  prototype: "overview",
   questions: "overview",
   build: "builds",
   validation: "validations",
@@ -189,7 +186,6 @@ export function pageTitle(page: ProjectPage): string {
 const CARD_TITLE: Record<ProjectCard, string> = {
   spec: "Spec",
   design: "Design",
-  prototype: "Prototype",
   questions: "Questions",
   build: "Build",
   validation: "Validation",
@@ -220,7 +216,7 @@ export function chatTopic(
 ): { topic: string; note: string | null } {
   if (view === "issues") return { topic: "the project's issues", note: null };
   if (view === "issue" && issueNumber !== undefined) return { topic: `issue #${issueNumber}`, note: null };
-  if (card === "design" || card === "prototype") return { topic: "the design review", note: null };
+  if (card === "design") return { topic: "the design review", note: null };
   if (card === "spec" && openFeature) {
     return { topic: openFeature, note: "A change that reaches other features is made there too." };
   }
