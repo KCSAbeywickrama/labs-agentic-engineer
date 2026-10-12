@@ -97,7 +97,6 @@ function Shell({ children }: { children: ReactNode }) {
         { id: "nav.overdue", label: "Overdue", to: "screen.overdue" },
       ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -427,21 +426,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const navigate = useNav();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.home")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.compact" label="Compact task lists" type="switch" defaultValue="off" />
-      </Form>
-    </Shell>
-  );
-}
 
 function SignedOut() {
   return (
@@ -460,7 +444,6 @@ export default defineApp({
     "screen.tasks": AllTasks,
     "screen.overdue": Overdue,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { onboardings, tasks, notes },

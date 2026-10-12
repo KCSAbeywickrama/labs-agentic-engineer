@@ -22,13 +22,13 @@ import { useRouter } from "@tanstack/react-router";
 import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { isDesignAgentReady, subscribeDesignAgentReady } from "../../api/aeStudio";
 import { designKey } from "../design/api/designModel";
-import { specKey } from "../spec/api/specModel";
 import { applyAgentWrite } from "../spec/collab/specDoc";
 import { flushSpecRoom } from "../spec/collab/specRoom";
 import { fetchConversationMessages, fetchCurrentConversationId } from "./api/conversation";
 import { getActiveTurn, getTurn, openTurnStream, startTurn } from "./api/turns";
 import { createChatStore, type ProjectChat } from "./chatStore";
 import { opensQuestionsCard } from "./openQuestions";
+import { readSpecStateUntilRecorded, RECORD_READ_DELAYS_MS } from "./turnRecord";
 import { shellScope } from "../shell/scope";
 
 // The app's one chat store, on the real transport (the org's design agent in
@@ -74,21 +74,33 @@ export function canSend(chat: ProjectChat): boolean {
 
 /**
  * When a turn ends, read again what the agent may have changed. The spec
- * model holds each feature's stage, which an interview moves on; the design
+ * state holds what the turn's record decides (each designed feature's basis,
+ * each design file's revision), which lands after the turn's end, so after a
+ * completed turn it is read until that changes (turnRecord.ts); the design
  * model, what a design turn wrote and replied (the overview's track is worked
  * out from both). Mounted once, in the shell, so a turn that ends with the
  * chat closed still refreshes.
  */
 export function useRefreshOnTurnEnd(): void {
   const queryClient = useQueryClient();
-  useEffect(
-    () =>
-      chatStore.onTurnEnd((projectName) => {
-        void queryClient.invalidateQueries({ queryKey: specKey(projectName) });
-        void queryClient.invalidateQueries({ queryKey: designKey(projectName) });
-      }),
-    [queryClient],
-  );
+  useEffect(() => {
+    // The reads after each project's last turn; a later turn's end takes over from them.
+    const reads = new Map<string, AbortController>();
+    const stop = chatStore.onTurnEnd((projectName, outcome) => {
+      void queryClient.invalidateQueries({ queryKey: designKey(projectName) });
+      reads.get(projectName)?.abort();
+      const controller = new AbortController();
+      reads.set(projectName, controller);
+      const delays = outcome === "completed" ? RECORD_READ_DELAYS_MS : [];
+      void readSpecStateUntilRecorded(queryClient, projectName, delays, controller.signal).finally(() => {
+        if (reads.get(projectName) === controller) reads.delete(projectName);
+      });
+    });
+    return () => {
+      stop();
+      for (const controller of reads.values()) controller.abort();
+    };
+  }, [queryClient]);
 }
 
 /**

@@ -33,14 +33,18 @@ type SpecState struct {
 	// read (reqspec.Basis), by the reading the build gate's staleness check
 	// uses, so the console's "out of date" and the gate's cannot disagree.
 	DesignedFrom map[string]string
+	// ArtifactRevisions maps each design artifact a run has changed (keyed
+	// as the review file keys it) to its revision number: how many completed
+	// runs changed it (L18).
+	ArtifactRevisions map[string]int
 	// Documents are the names of the source documents the user attached.
 	Documents []string
 }
 
-// SpecState reads each designed feature's basis at the commit its last design
-// read, and the attached documents' names.
+// SpecState reads each designed feature's basis as its last design left it,
+// the design artifacts' revisions, and the attached documents' names.
 func (s *artifactService) SpecState(ctx context.Context, orgID, projectID string) (SpecState, error) {
-	out := SpecState{DesignedFrom: map[string]string{}}
+	out := SpecState{DesignedFrom: map[string]string{}, ArtifactRevisions: map[string]int{}}
 	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return out, err
@@ -50,10 +54,17 @@ func (s *artifactService) SpecState(ctx context.Context, orgID, projectID string
 		return out, fmt.Errorf("list references: %w", err)
 	}
 	out.Documents = names
-	if s.designRuns == nil {
+	if s.ledger == nil {
 		return out, nil
 	}
-	runs, err := s.designRuns(ctx, orgID, projectID)
+	revisions, err := s.ledger.ArtifactRevisions(ctx, orgID, projectID)
+	if err != nil {
+		return out, fmt.Errorf("artifact revisions: %w", err)
+	}
+	if revisions != nil {
+		out.ArtifactRevisions = revisions
+	}
+	runs, err := s.ledger.DesignRuns(ctx, orgID, projectID)
 	if err != nil {
 		return out, fmt.Errorf("list design runs: %w", err)
 	}

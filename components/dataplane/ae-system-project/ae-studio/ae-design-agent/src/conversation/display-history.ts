@@ -46,8 +46,6 @@ export type DisplayMessage =
       anchor?: TurnJournalEntry["anchor"];
       /** What the user was looking at when they sent it (S6). */
       scope?: TurnJournalEntry["scope"];
-      /** The prototype review it sent (#860). */
-      prototypeFeedback?: TurnJournalEntry["prototypeFeedback"];
     };
 
 export function projectDisplayHistory(conv: Conversation): DisplayMessage[] {
@@ -57,16 +55,33 @@ export function projectDisplayHistory(conv: Conversation): DisplayMessage[] {
     if (m.role !== "user") return m;
     const entry = byIndex.get(index);
     if (!entry) return m;
+    const legacyFeedback = legacyFeedbackCount(entry);
     return {
       role: "user",
-      content: entry.text,
+      content: legacyFeedback === undefined ? entry.text : prototypeFeedbackLabel(legacyFeedback),
       ...(entry.author ? { author: entry.author } : {}),
       ...(entry.attachments && entry.attachments.length > 0
         ? { attachments: entry.attachments }
         : {}),
       ...(entry.anchor ? { anchor: entry.anchor } : {}),
       ...(entry.scope ? { scope: entry.scope } : {}),
-      ...(entry.prototypeFeedback ? { prototypeFeedback: entry.prototypeFeedback } : {}),
     };
   });
+}
+
+/**
+ * A journal entry written before #900 retired `prototypeFeedback` still holds
+ * the review batch it sent, and its text is only the command (`/prototype
+ * <component>`). It still loads: the row reads as the feedback it carried,
+ * counted, since the batch itself is no longer rendered anywhere.
+ */
+function legacyFeedbackCount(entry: TurnJournalEntry): number | undefined {
+  const batch: unknown = (entry as { prototypeFeedback?: unknown }).prototypeFeedback;
+  if (batch === null || typeof batch !== "object") return undefined;
+  const requests: unknown = (batch as { requests?: unknown }).requests;
+  return Array.isArray(requests) ? requests.length : 0;
+}
+
+function prototypeFeedbackLabel(count: number): string {
+  return `Prototype feedback (${count} ${count === 1 ? "comment" : "comments"})`;
 }

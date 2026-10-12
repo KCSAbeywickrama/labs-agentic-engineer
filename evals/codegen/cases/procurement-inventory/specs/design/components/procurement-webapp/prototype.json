@@ -28,7 +28,6 @@
     { "id": "screen.order-detail", "name": "Receive goods", "roleIds": ["WarehouseClerk"] },
     { "id": "screen.ledger", "name": "Stock ledger", "roleIds": ["WarehouseClerk"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Requester", "Approver", "WarehouseClerk"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Requester", "Approver", "WarehouseClerk"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Requester", "Approver", "WarehouseClerk"] }
   ],
   "flows": [

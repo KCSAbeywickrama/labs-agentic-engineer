@@ -32,6 +32,7 @@ import { specView } from "../specState";
 import { aeStudioReadRefusal } from "./aeStudio";
 
 type BuildResponse = components["schemas"]["BuildResponse"];
+type BuildPreflight = components["schemas"]["BuildPreflight"];
 type BuildList = components["schemas"]["BuildList"];
 type SpecVersionList = components["schemas"]["SpecVersionList"];
 type BuildRunList = components["schemas"]["BuildRunList"];
@@ -214,6 +215,12 @@ export const buildsHandlers = [
     return HttpResponse.json({ ...snapshot, scope: { features, heldBack: [] } });
   }),
 
+  // The mock's designs declare no platform resource and no cross-project
+  // endpoint, so a build has nothing to approve (buildSelection.ts).
+  http.get("*/api/v1/projects/:projectName/build/preflight", () =>
+    HttpResponse.json<BuildPreflight>({ needsInput: false, needsResolution: false, items: [] }),
+  ),
+
   http.post("*/api/v1/projects/:projectName/build", async ({ params, request }): Promise<Response> => {
     const projectName = String(params.projectName);
     const body = (await request.json()) as BuildBody;
@@ -237,8 +244,7 @@ export const buildsHandlers = [
       productWide: workspace.productWide,
       lines,
       dependencies: design.dependencies,
-      comments: design.comments,
-      artifacts: design.artifacts,
+      waitingComments: 0,
       builds,
     });
     const held = [...selection.features, ...selection.productWide].flatMap((id) => gateProblem(offer.rows, id) ?? []);

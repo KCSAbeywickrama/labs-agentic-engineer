@@ -27,7 +27,7 @@ import { designCatalog } from "./design";
 // Acme Expenses' v1 as the card reads it: the scripted run folded as the
 // progress stream would deliver it, then through the card's own models.
 
-const criteria = designCatalog("acme-expenses", [{ id: "F1" }, { id: "F2" }] as SpecFeature[], new Map(), new Set()).flatMap((a) =>
+const criteria = designCatalog("acme-expenses", [{ id: "F1" }, { id: "F2" }] as SpecFeature[], new Map()).flatMap((a) =>
   a.source.kind === "acceptance" ? [{ path: a.source.path, content: a.source.content }] : [],
 );
 

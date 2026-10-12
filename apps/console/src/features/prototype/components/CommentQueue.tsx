@@ -17,11 +17,10 @@
  */
 
 import { useId, useState, type ReactNode } from "react";
-import { Alert, Box, Button, ButtonBase, CircularProgress, IconButton, Paper, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { ChevronDown, ChevronUp, MessageSquarePlus, Send, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Alert, Box, Button, ButtonBase, IconButton, Paper, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { ChevronDown, ChevronUp, MessageSquarePlus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import type { PrototypeManifest } from "@wso2/prototype-kit/host";
 import { MAX_FEEDBACK_REQUESTS, targetLabel, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
-import { visuallyHidden } from "../../../components/visuallyHidden";
 import { commentCount, queueFull } from "../model/feedback";
 import { Key } from "./Key";
 import { DockGroup } from "./ReviewDock";
@@ -33,18 +32,12 @@ export interface CommentQueueProps {
   labels: ScreenLabels;
   /** The comments (0-based) written on an earlier revision than the one showing. */
   earlier: readonly number[];
-  /** The comments out with the agent (0 when none are): they keep their places, so fewer can be queued meanwhile. */
-  held: number;
-  /** Why the last Send did not go; the queue is kept. */
-  refused: string | null;
-  sending: boolean;
-  /** The agent is revising the prototype, working on this many sent comments; null when it is not. Send waits meanwhile. */
-  revising: number | null;
-  /** Why the last revision did not land (its comments are back in the queue); Retry sends the queue again. */
+  /** The agent is revising the prototype now. */
+  revising: boolean;
+  /** Why the last revision can't be shown (the previous one still is). */
   failed: string | null;
   /** The comments (0-based) whose elements the revision showing no longer draws on this screen. */
   orphans: readonly number[];
-  onSend: () => void;
   /** Keep the `index`th comment as a comment on its whole screen. */
   onKeepOnScreen: (index: number) => void;
   /** Comment on the whole screen showing, the bubble at the dock: the keyboard's way to what a click on empty space does. */
@@ -184,9 +177,10 @@ function QueueList({
  * has the full width: the comment count, whose list of every queued comment
  * opens upward over the prototype (with "Comment on this screen", the
  * keyboard's whole-screen comment, its bubble anchored at the dock; the
- * pointer's is a click on empty space), the revising status and Send to agent.
- * What the send has to say (a failed revision with Retry, a refused send, a
- * full queue, comments written on an earlier version or whose element went)
+ * pointer's is a click on empty space), and where they go: each is a Pending
+ * draft on the prototype, sent with Address comments on the Design card's
+ * Overview (L3). What the queue has to say (a revision that can't be shown,
+ * a full queue, comments written on an earlier version or whose element went)
  * shows as callouts above the dock.
  */
 export function CommentQueue({
@@ -194,21 +188,16 @@ export function CommentQueue({
   requests,
   labels,
   earlier,
-  held,
-  refused,
-  sending,
   revising,
   failed,
   orphans,
-  onSend,
   onKeepOnScreen,
   onCommentOnScreen,
   onOpen,
   onRemove,
 }: CommentQueueProps) {
   const [expanded, setExpanded] = useState(false);
-  const full = queueFull(requests.length, held);
-  const blocked = requests.length === 0 || requests.length > MAX_FEEDBACK_REQUESTS || sending || revising !== null;
+  const full = queueFull(requests.length);
   const listId = useId();
   return (
     <DockGroup label="Comments">
@@ -229,28 +218,13 @@ export function CommentQueue({
         {earlier.length > 0 && <Callout severity="warning" role="note">{`${commentCount(earlier.length)} ${earlier.length === 1 ? "was" : "were"} written on an earlier version of the prototype.`}</Callout>}
         {orphans.length > 0 && <Callout severity="warning" role="note">{`${commentCount(orphans.length)} ${orphans.length === 1 ? "points" : "point"} at an element no longer on this screen.`}</Callout>}
         {failed && (
-          <Callout
-            severity="error"
-            role="alert"
-            action={
-              <Button color="inherit" size="small" onClick={onSend} disabled={blocked}>
-                Retry
-              </Button>
-            }
-          >
+          <Callout severity="error" role="alert">
             {failed}
           </Callout>
         )}
         {full && (
           <Callout severity="info" role="note">
-            {held > 0
-              ? `The queue is full (${MAX_FEEDBACK_REQUESTS} comments, counting the ${commentCount(held)} the agent is working on): add more once it is done, or remove one.`
-              : `The queue is full (${MAX_FEEDBACK_REQUESTS} comments): send it or remove one to add another.`}
-          </Callout>
-        )}
-        {refused && (
-          <Callout severity="warning" role="alert">
-            {refused}
+            {`The queue is full (${MAX_FEEDBACK_REQUESTS} comments): address them from the Overview, or remove one to add another.`}
           </Callout>
         )}
         {expanded && (
@@ -286,20 +260,13 @@ export function CommentQueue({
       >
         {commentCount(requests.length)}
       </Button>
-      {/* While the agent revises, Send itself says so: it is disabled anyway, so the state takes no extra room. */}
-      <Box component="span" aria-live="polite" sx={visuallyHidden}>
-        {revising === null ? "" : revising > 0 ? `Agent is revising… (${commentCount(revising)})` : "Agent is revising…"}
-      </Box>
-      <Button
-        size="small"
-        variant="contained"
-        startIcon={revising === null ? <Send size={16} /> : <CircularProgress size={14} color="inherit" aria-hidden />}
-        onClick={onSend}
-        disabled={blocked}
-        sx={{ textTransform: "none", flexShrink: 0 }}
-      >
-        {revising === null ? "Send to agent" : "Revising…"}
-      </Button>
+      <Typography component="span" variant="caption" color="text.secondary" aria-live="polite" sx={{ flexShrink: 1, minWidth: 0 }}>
+        {revising
+          ? "The agent is revising the prototype…"
+          : requests.length > 0
+            ? `${requests.length} pending · sent with Address comments on the Overview`
+            : ""}
+      </Typography>
     </DockGroup>
   );
 }

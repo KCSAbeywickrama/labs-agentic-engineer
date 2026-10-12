@@ -1,41 +1,51 @@
 Feature: F2 Approvals
 
   @story-F2.1
-  Rule: An approver sees every submitted claim in one queue, from any employee
+  Rule: An approver sees every submitted claim in one queue, oldest first
 
-    Scenario: Approver sees all pending claims
-      Given Olivia has submitted a claim for "Taxi to client site" of "42.00" dated "2026-09-12"
-      And Dan has submitted a claim for "Hotel stay" of "220.00" dated "2026-09-10"
-      When Priya the approver opens the approval queue
-      Then she sees both Olivia's claim and Dan's claim waiting for a decision
+    Scenario: Dinesh sees the queue ordered oldest first
+      Given a claim from Ana was submitted on "2026-01-09" and a claim from Ravi was submitted on "2026-01-13"
+      When Dinesh the Approver opens the approval queue
+      Then Ana's claim appears above Ravi's claim
+
+    Scenario: A decided claim does not appear in the queue
+      Given Maya's claim for "Conference ticket" has already been approved
+      When Dinesh the Approver opens the approval queue
+      Then "Conference ticket" is not in the queue
 
   @story-F2.2
-  Rule: An approver can approve a submitted claim
+  Rule: An approver approves a submitted claim
 
-    Scenario: Approving a submitted claim
-      Given Olivia has submitted a claim for "Taxi to client site" of "42.00" dated "2026-09-12"
-      When Priya the approver approves that claim
-      Then the claim's status is "approved"
-      And the claim no longer appears in the approval queue
+    Scenario: Dinesh approves a claim
+      Given a submitted claim from Ravi for "Hotel stay"
+      When Dinesh the Approver approves it
+      Then the claim's status is "Approved" and it leaves the queue
 
   @story-F2.3
-  Rule: An approver can reject a submitted claim with a reason
+  Rule: An approver rejects a submitted claim with a reason
 
-    Scenario: Rejecting a submitted claim
-      Given Olivia has submitted a claim for "Team lunch" of "60.00" dated "2026-08-20"
-      When Priya the approver rejects that claim with reason "Missing itemised receipt"
-      Then the claim's status is "rejected"
-      And the claim's reason is "Missing itemised receipt"
+    Scenario: Dinesh rejects a claim with a reason
+      Given a submitted claim from Ana for "Software license"
+      When Dinesh the Approver rejects it with the reason "Needs a manager's pre-approval"
+      Then the claim's status is "Rejected" with reason "Needs a manager's pre-approval" and it leaves the queue
 
-  @story-F2.2 @story-F2.3 @negative
-  Rule: A decision is final — an approved or rejected claim cannot be decided again
+    @negative
+    Scenario: A rejection with no reason is refused
+      Given a submitted claim from Ana for "Software license"
+      When Dinesh the Approver tries to reject it with an empty reason
+      Then the claim's status is still "Submitted"
 
-    Scenario: Approving an already-approved claim is refused
-      Given Olivia's claim for "Taxi to client site" has been approved
-      When Priya the approver tries to approve that claim again
-      Then the claim's status is still "approved"
+  @story-F2.2 @story-F2.3
+  Rule: A decision is final
 
-    Scenario: Rejecting an already-rejected claim is refused
-      Given Olivia's claim for "Team lunch" has been rejected with reason "Missing itemised receipt"
-      When Priya the approver tries to reject that claim again with reason "Different reason"
-      Then the claim's reason is still "Missing itemised receipt"
+    @negative
+    Scenario: An already-approved claim cannot be approved again
+      Given Maya's claim for "Conference ticket" has already been approved
+      When Dinesh the Approver tries to approve it again
+      Then the claim's status is still "Approved"
+
+    @negative
+    Scenario: An already-rejected claim cannot be rejected again
+      Given Maya's claim for "Team lunch" has already been rejected with reason "Receipts were not itemized per person."
+      When Dinesh the Approver tries to reject it again with the reason "Different reason"
+      Then the claim's reason is still "Receipts were not itemized per person."

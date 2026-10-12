@@ -32,6 +32,7 @@ import {
   componentDesignJsonSchema,
   dependencyDesignJsonSchema,
   securityDesignJsonSchema,
+  designReviewJsonSchema,
   buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
@@ -39,6 +40,7 @@ import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
   DEPENDENCY_DESIGN_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_SCHEMA_ARTIFACT,
+  DESIGN_REVIEW_SCHEMA_ARTIFACT,
   BUILD_PLAN_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_MESSAGES_ARTIFACT,
@@ -51,6 +53,7 @@ const artifacts: [string, Record<string, unknown>][] = [
   [COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema()],
   [DEPENDENCY_DESIGN_SCHEMA_ARTIFACT, dependencyDesignJsonSchema()],
   [SECURITY_DESIGN_SCHEMA_ARTIFACT, securityDesignJsonSchema()],
+  [DESIGN_REVIEW_SCHEMA_ARTIFACT, designReviewJsonSchema()],
   [BUILD_PLAN_SCHEMA_ARTIFACT, buildPlanJsonSchema()],
   [AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema()],
   // Not schemas, but the same anti-drift deal: one source module, one

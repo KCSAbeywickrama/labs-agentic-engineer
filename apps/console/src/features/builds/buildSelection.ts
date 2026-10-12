@@ -23,12 +23,20 @@ import type { components } from "../../generated/aep-api";
 // applies to. It rides the contract's `selection`; the server plans the rest
 // (what the picked features need) and refuses a feature that cannot be built.
 //
+// Starting a build is also the user's consent to what the build provisions.
+// The platform derives the platform resources from the design itself (POST
+// /build ignores a request's `platform-resource` entries). The cross-project
+// endpoints the build will ask for are the one consent the body carries: the
+// build preflight lists them, and `inputs` holds one approval per item.
+//
 // A repair build (Fix on a failing scenario: v1.1 fixes v1) rides the
 // contract's `repair`, naming the version to fix; the server files the
 // scenarios that version's final validation failed as the repair's work.
 
 type BuildRequest = components["schemas"]["BuildRequest"];
 type BuildRepair = components["schemas"]["BuildRepair"];
+type BuildInputItem = components["schemas"]["BuildInputItem"];
+type PreflightItem = components["schemas"]["PreflightItem"];
 
 /** What goes into a build: features by ID ("F1"), and new product-wide items ("P5"). */
 export interface BuildSelection {
@@ -40,13 +48,27 @@ export interface BuildSelection {
 export type BuildBody = BuildRequest;
 
 /**
- * The request body that starts a build of this selection. No inputs and no
- * version: the platform names the version, as an untouched name field does
- * in the old console's Start build dialog.
+ * The approvals a build carries, one per preflight item it consents to: each
+ * `org-service`, an unresolved cross-project endpoint the build asks for
+ * access to (the classic console's `approvalInputsFor`). Every other kind
+ * carries no approval: the server derives a platform resource's from the
+ * design, an external dependency's values are collected while the build runs,
+ * and a resolution blocker has no input to submit.
  */
-export function buildBody(selection: BuildSelection): BuildBody {
+export function approvalInputsFor(items: readonly PreflightItem[]): BuildInputItem[] {
+  return items.flatMap(({ component, dependency, kind }): BuildInputItem[] =>
+    kind === "org-service" ? [{ component, dependency, kind: "org-service", approved: true }] : [],
+  );
+}
+
+/**
+ * The request body that starts a build of this selection, approving what the
+ * current preflight lists. No version: the platform names the version, as an
+ * untouched name field does in the old console's Start build dialog.
+ */
+export function buildBody(selection: BuildSelection, preflight: readonly PreflightItem[]): BuildBody {
   return {
-    inputs: [],
+    inputs: approvalInputsFor(preflight),
     selection: { features: [...selection.features], productWide: [...selection.productWide] },
   };
 }

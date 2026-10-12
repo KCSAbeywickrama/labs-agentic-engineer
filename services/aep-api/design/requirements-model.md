@@ -32,11 +32,14 @@ feature. Decisions: ADR-0039, ADR-0040, ADR-0041, ADR-0050. Terms:
 acceptance at one commit and refuses the tag on: requirement ID problems;
 designs or roles citing a feature instead of its stories, or stale stories; an
 acceptance file missing a carried story's tag; a feature out of date
-(`staleFeatures`: its basis now vs at its last design run, from
-`CompletedFlows`); a pick it cannot carry (`build_selection.go`). A design
+(`staleFeatures`: its basis now vs as its last design run left it, from
+`DesignRuns`); a pick it cannot carry (`build_selection.go`). A design
 run's scope is the feature IDs its ledger row's `Summary` holds ("F1 F2",
 from the pod's `designFeatures`; empty = every designable feature), read by
-`DesignedFeatures`; `Summary` holds nothing else for a design turn. The tag's
+`DesignedFeatures`; `Summary` holds nothing else for a design turn. Its basis
+is read at its `end_ref`, the commit its Room work was saved at as it
+finished, so its own requirement edits are not a change since (L30); an
+Address comments run designs the features its own edits reached. The tag's
 annotation records the plan (`scopeBody` / `parseScope`).
 
 - `BuildScopeAtTag` — what a version carries: its features with the carried
@@ -55,9 +58,9 @@ annotation records the plan (`scopeBody` / `parseScope`).
 
 `build.Service.Run` carries the pick into the tag; `dependencyGate` blocks the
 features an open external dependency's component serves. The build gate
-(`spec/build_gate.go`) asks a service for `openapi.yaml`. It does not require
-a web application's prototype; one that is present must be both files, pass
-the save gate's prototype rules, and offer only roles `security.json`
+(`spec/build_gate.go`) asks a service for `openapi.yaml` and a web
+application for its prototype (root ADR-0051): both files, each passing the
+save gate's prototype rules, and offering only roles `security.json`
 declares. The click also derives the provision payload from the design
 (`InputsCoordinator.BuildProvisionInputs`): one approved input per platform
 resource not yet provisioned or in flight.

@@ -24,7 +24,6 @@
     { "id": "screen.front-desk", "name": "Front desk", "roleIds": ["Receptionist"] },
     { "id": "screen.patients", "name": "Patients", "roleIds": ["Receptionist"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Patient", "Doctor", "Receptionist"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Patient", "Doctor", "Receptionist"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Patient", "Doctor", "Receptionist"] }
   ],
   "flows": [

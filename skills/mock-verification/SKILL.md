@@ -28,11 +28,30 @@ touch, so walk every flow in scope, whichever issue built it.
 
 `specs/design/components/<component>/prototype.json`, under the project root:
 your working directory, one level above the App Path you edit in. A flow is
-the unit: one role (`roleId`) and the screens that role walks (`screenIds`), in
-order. Walk each flow in scope under its role (`?role=<id>`) by clicking from
-its first screen. Open a screen in no flow at its route. Reach the shell
-screens (Account, Settings, Signed out) through the user menu.
-`prototype.tsx` beside the manifest shows what each screen holds.
+one role (`roleId`) and the screens that role walks (`screenIds`), in order.
+`prototype.tsx` beside the manifest shows what each screen holds: the
+component for a screen id in `defineApp({ screens })` has the screen's
+controls and, as `to` or `useNav().go(…)`, where each one leads.
+
+**Each flow in scope is one item, by its `id`.** Walk it under its role
+(`?role=<id>`) by clicking from its first screen through its `screenIds`, and
+do what its `name` says. Two flows on one screen are two items: the screen is
+not the unit.
+
+**A flow starts where its control is.** Its start state is the state in which
+its first screen shows the control that its `name` needs. `prototype.tsx`
+gives that state as the branch around the control (`status === "draft"` around
+`Publish menu`). When the seed data does not start there, put the data in that
+state before you walk the flow:
+
+1. Through the app's own controls, by clicking (a close, a delete, a create).
+2. If no control of the app gets there, set that record of the seed in
+   `mock/handlers.ts` to the state, as the contract allows it, and `restart`.
+   After the flow, put the seed back as it was and `restart`. Change only the
+   seed, never what a handler answers.
+
+Open a screen in no flow at its route. Reach the shell screens (Account,
+Settings when the prototype has one, Signed out) through the user menu.
 
 The manifest lists the display states (`states`); `prototype.tsx` shows which
 screen renders each. Walk the states that mock mode can show: the empty state,
@@ -46,13 +65,17 @@ more tool calls than the rest of the screen.
 **The manifest is your only map**: it sets what you walk. You open a source
 file to repair, to find the route of a screen in no flow, or to check a state
 that mock mode cannot show. A component with no `prototype.json` gives you its
-registered routes instead, one flow per role.
+registered routes instead, one flow per role. The prototype is the review's
+copy, not the app's code: never edit it.
 
 ### Per screen
 
-Three questions, each one action and one snapshot with the first plausible
-input. A screen is answered in a handful of actions; past that you are past the
-smoke.
+On each screen that a flow reaches, and on each screen in no flow, ask three
+questions of the controls that the role sees there. A screen that an earlier
+item answered under the same role and state needs only the controls that this
+flow uses. Each question is one action and one snapshot with the first
+plausible input. A screen is answered in a handful of actions; past that you
+are past the smoke.
 
 | | Question | Evidence |
 |---|---|---|
@@ -129,8 +152,10 @@ Every item ends in exactly one:
   handle, so `Forbidden` is something you walk and see.
 
 An unreachable screen is **open**, naming the navigation that failed, never
-**done** read off the source. A fix does not remove or hide what the prototype
-shows. If the app cannot fill an element the prototype shows, the item is
+**done** read off the source. A flow whose start state the walk did not reach
+is **open**, naming that state: a flow whose control the screen did not show
+was not walked, and it is never **done**. A fix does not remove or hide what
+the prototype shows. If the app cannot fill an element the prototype shows, the item is
 **open**.
 
 ## Progress
@@ -140,9 +165,10 @@ other: the plan once, one line per item as it settles, the close once.
 
 ```text
 Mock verification: <component> — <N> items
-1. <Screen> (<role>, <flow>): <its controls>; -> <the next screen>; states: <its states>
+1. <flow id> · <flow name> (<role>): <Screen> -> <Screen>; starts at <the state its control needs>; states: <its states>
 2. <Screen> · <state>: source check
-3. <Screen>: ...
+3. <flow id> · ...
+<k>. <Screen> (no flow): <its controls>; -> <the screens its `to`s name>
 <N-4>. Roles
 <N-3>. Session
 <N-2>. Probes
@@ -150,21 +176,24 @@ Mock verification: <component> — <N> items
 <N>. Console
 ```
 
+`<Item>` below is the flow id, the screen in no flow, the screen's state, or
+the once-per-app item.
+
 ```text
-<n>/<N> <Screen>: done — <what you did and what the page did back>
-<n>/<N> <Screen>: fixed — <what was wrong>; <what you changed>; re-walked, <what it does now>
-<n>/<N> <Screen>: open — <what happens>, 3 attempts
-<n>/<N> <Screen>: outside — <the truth that lives outside the app>
+<n>/<N> <Item>: done — <what you did and what the page did back>
+<n>/<N> <Item>: fixed — <what was wrong>; <what you changed>; re-walked, <what it does now>
+<n>/<N> <Item>: open — <what happens, or the start state not reached>, 3 attempts
+<n>/<N> <Item>: outside — <the truth that lives outside the app>
 <n>/<N> <Screen> · <state>: outside — mock mode cannot show it; <the condition> renders <the element>
 ```
 
 ```text
-Mock verification done: <component> — <N> items · <d> done, <f> fixed, <o> open (<n> <Screen>, ...), <t> outside
+Mock verification done: <component> — <N> items · <d> done, <f> fixed, <o> open (<n> <Item>, ...), <t> outside
 ```
 
 The newest line is where the walk is, and that is what the person watching
-reads. An item with no line is a screen you never reached, and it stays visible
-as one.
+reads. An item with no line is a flow or a screen you never reached, and it
+stays visible as one.
 
 ## 1 · Stand it up
 
@@ -187,15 +216,16 @@ it and run `up` again.
 ## 2 · Plan
 
 Before the browser opens, post the plan from the map alone: one numbered item
-per screen in each flow in scope, in walking order under its role, and one per
-state that mock mode cannot show, after its screen. Then screens in no flow,
-the shell screens, Roles (with `mock/authz/roles.gen.ts`), Session (with an
+per flow in scope, by its id in the manifest's order, with its role, its
+screens in walking order and the state it starts in, and one per state that
+mock mode cannot show, after the flow that reaches its screen. Then screens in
+no flow, the shell screens, Roles (with `mock/authz/roles.gen.ts`), Session (with an
 auth dependency), Probes, Short window, and Console. Posting it first puts
 your coverage in front of the person watching while there is still time to say
 a screen is missing.
 
-**Done when:** every screen and flow in scope has a number, and the plan is
-posted.
+**Done when:** every flow id in scope has a number, every screen in scope is in
+a flow item or has its own, and the plan is posted.
 
 ## 3 · Walk
 

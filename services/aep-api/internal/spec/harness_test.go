@@ -254,3 +254,17 @@ func (r *rig) repoRef() sourcecontrol.RepoRef {
 	r.t.Helper()
 	return rowRef(r.t, r.org, r.rec)
 }
+
+// stubLedger is a DesignLedger that answers with what it holds.
+type stubLedger struct {
+	runs      []DesignRun
+	revisions map[string]int
+}
+
+func (l stubLedger) DesignRuns(context.Context, string, string) ([]DesignRun, error) {
+	return l.runs, nil
+}
+
+func (l stubLedger) ArtifactRevisions(context.Context, string, string) (map[string]int, error) {
+	return l.revisions, nil
+}

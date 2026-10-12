@@ -80,20 +80,7 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   assert.deepEqual(web.connections, [{ id: "http://expense-api", type: "http", onPlatform: true }]);
   assert.equal(web.artifacts.prototype, "specs/design/components/expense-webapp/prototype.json");
   assert.equal(web.artifacts.prototypeSource, "specs/design/components/expense-webapp/prototype.tsx");
-  assert.equal(web.artifacts.wireframes, undefined);
 });
-
-test("a design written before the prototype still projects its wireframes", () => {
-  const dj = buildProjectDesign("legacy", {
-    "specs/design/components/web/design.json": JSON.stringify({ name: "web", type: "web-application" }),
-    "specs/design/components/web/wireframes.dsl": "screen A\n",
-  });
-  const web = dj.components.find((c) => c.id === "web")!;
-  assert.equal(web.artifacts.wireframes, "specs/design/components/web/wireframes.dsl");
-  assert.equal(web.artifacts.prototype, undefined);
-});
-
-
 
 test("a bundle without a design tree projects to an empty component list", () => {
   const dj = buildProjectDesign("empty", { "requirements.md": "# hi\n" });

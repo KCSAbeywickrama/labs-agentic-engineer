@@ -28,6 +28,7 @@ import {
   dockerInvocation,
   FORWARDED_AGENT_SETTINGS,
   hostInvocation,
+  hostUserToAdopt,
   resolveRuntime,
   isFailedAgent,
   renderMergedTimeline,
@@ -107,6 +108,25 @@ test("docker mode always passes the key through — a container reaches no crede
     assert.ok(at > 0, "the key must be forwarded into the container");
     assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
   });
+});
+
+// A Linux bind mount keeps the host's numeric owners, so the image's `aep`
+// (uid 999) could neither write the project and run dirs nor leave files the
+// host user can delete. On Linux the run starts as root only to give `aep` the
+// host user's ids, then goes through the image's own entrypoint as `aep`.
+test("a Linux docker run adopts the host user; a macOS run keeps the image's user", () => {
+  assert.deepEqual(hostUserToAdopt("linux", 1000, 1001), { uid: 1000, gid: 1001 });
+  assert.equal(hostUserToAdopt("darwin", 501, 20), null);
+
+  const linux = dockerInvocation(invocationOpts, "/r", "c1", { uid: 1000, gid: 1001 }).args;
+  assert.equal(linux[linux.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-adopt-host-user");
+  assert.equal(linux[linux.indexOf("--user") + 1], "0:0");
+  assert.ok(linux.includes("AEP_HOST_UID=1000") && linux.includes("AEP_HOST_GID=1001"));
+  assert.ok(linux.includes(`${join(REPO_ROOT, "runners", "remote-worker", "local", "adopt-host-user.sh")}:/usr/local/bin/aep-adopt-host-user:ro`));
+
+  const mac = dockerInvocation(invocationOpts, "/r", "c1", null).args;
+  assert.equal(mac[mac.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-runner-entrypoint");
+  assert.equal(mac.includes("--user"), false);
 });
 
 // AEP_CODING_ANTHROPIC_KEY is the local half of the platform's per-org

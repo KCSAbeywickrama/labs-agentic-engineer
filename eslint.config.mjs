@@ -30,6 +30,8 @@ export default tseslint.config(
       "playground/.devtools/**",
       // Prototype fixtures: some are deliberately broken (a syntax error, a forbidden API) for `prototype check` to report.
       "packages/prototype-cli/test/fixtures/**",
+      // The kit's prototype fixtures are agent output kept verbatim (unused imports included).
+      "packages/prototype-kit/test/fixtures/**/*.tsx",
       // Codegen eval archives: each attempt keeps the generated app's source.
       "evals/codegen/.runs/**",
     ],

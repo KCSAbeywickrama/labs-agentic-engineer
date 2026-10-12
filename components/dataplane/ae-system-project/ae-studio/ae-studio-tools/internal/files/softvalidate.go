@@ -31,9 +31,9 @@ import (
 // softValidate returns non-blocking warnings for a written file (the hard
 // semantic gate stays at save/tag). A component design.json or dependency
 // dependency.json is validated against its published schema plus the
-// name==dir rule; security.json is parsed with the platform's own rules; any
-// other .json gets a cheap parseability check. Warnings never block the
-// commit.
+// name==dir rule; security.json is parsed with the platform's own rules;
+// review.json against its schema and cross-entry rules; any other .json gets
+// a cheap parseability check. Warnings never block the commit.
 func softValidate(path, content string) []Warning {
 	// The security.json document is the ONE spec file the platform later acts
 	// on deterministically (directory roles and test users at build time), so
@@ -45,6 +45,18 @@ func softValidate(path, content string) []Warning {
 				return []Warning{{Path: path, Code: ve.Code, Message: ve.Message}}
 			}
 			return []Warning{{Path: path, Code: securityspec.CodeSchemaViolation, Message: err.Error()}}
+		}
+		return nil
+	}
+	// The review file is the one design file the console writes as often as
+	// the agent (comments, checks), so a console write that breaks it is
+	// flagged on the flush that commits it.
+	if path == designspec.ReviewPath {
+		if err := designspec.ValidateDesignReview([]byte(content)); err != nil {
+			var ve *designspec.ValidationError
+			if errors.As(err, &ve) {
+				return []Warning{{Path: path, Code: ve.Code, Message: ve.Message}}
+			}
 		}
 		return nil
 	}

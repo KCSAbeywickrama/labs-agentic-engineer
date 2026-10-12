@@ -90,10 +90,20 @@ export function parseDesignCommand(line: string): { featureIds: string[] } | nul
 }
 
 /**
+ * `/address-comments` — the design review's Address comments: the agent acts
+ * on every comment waiting in `specs/design/review.json` (`DesignReview` in
+ * `@aep/agent-stream`) and regenerates the design from the earliest artifact
+ * the comments touch. The line is always bare: the comments ride the review
+ * file, not the turn, so the client marks its drafts `sent` and flushes the
+ * file before it sends the line. It goes with the design review's scope
+ * (`TurnScope` `{kind: "design-review"}`), like any message from the review.
+ */
+export const ADDRESS_COMMENTS_COMMAND = "/address-comments";
+
+/**
  * `/prototype <component>` — write or revise the clickable prototype of one
  * web-application component (the `prototype` skill); a bare `/prototype`
- * covers every web application the design has. A review's feedback rides the
- * same command, as the turn's typed `prototypeFeedback`.
+ * covers every web application the design has.
  */
 export const PROTOTYPE_COMMAND = "/prototype";
 

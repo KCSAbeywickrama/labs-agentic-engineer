@@ -27,20 +27,37 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
 
-// stubDesignTurns answers "the newest successful design run" and nothing else.
+// stubDesignTurns answers "the newest successful design runs" and nothing
+// else: runs, latest-finished first, or lastDesign alone.
 type stubDesignTurns struct {
 	lastDesign *spec.AgentTurn
+	runs       []spec.AgentTurn
 	err        error
-	askedFlow  string
+	askedFlows []string
 }
 
 func (s *stubDesignTurns) Newest(context.Context, string, string) (*spec.AgentTurn, error) {
 	return nil, nil
 }
 
-func (s *stubDesignTurns) NewestCompletedFlow(_ context.Context, _, _, flow string) (*spec.AgentTurn, error) {
-	s.askedFlow = flow
-	return s.lastDesign, s.err
+func (s *stubDesignTurns) CompletedFlows(_ context.Context, _, _ string, flows []string, _ int) ([]spec.AgentTurn, error) {
+	s.askedFlows = flows
+	if s.runs != nil || s.lastDesign == nil {
+		return s.runs, s.err
+	}
+	return []spec.AgentTurn{*s.lastDesign}, s.err
+}
+
+// svcAt answers each commit's requirements fingerprint from fps.
+func svcAt(turns specTurnRows, fps map[string]string) *Service {
+	svc := &Service{}
+	svc.specTurns = turns
+	svc.artifactSvc = &artifactstest.FakeArtifactService{
+		RequirementsFingerprintAtFunc: func(_ context.Context, _, _, at string) (string, error) {
+			return fps[at], nil
+		},
+	}
+	return svc
 }
 
 func svcFor(turns specTurnRows, fingerprintAt string, fpErr error) *Service {
@@ -97,10 +114,10 @@ func TestDesignOutdated(t *testing.T) {
 		}
 	})
 
-	// Only a full re-derivation reconciles the design with the requirements —
-	// a targeted edit to one document leaves the set inconsistent, so the
-	// baseline may only ever come from a design run.
-	t.Run("asks for the design flow specifically", func(t *testing.T) {
+	// Only a design run reconciles the design with the requirements as a
+	// whole, and an Address comments run with its own edits: the baseline may
+	// only ever come from those.
+	t.Run("asks for the design runs specifically", func(t *testing.T) {
 		t.Parallel()
 		turns := &stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "abc"}}
 		svc := svcFor(turns, "same", nil)
@@ -108,8 +125,42 @@ func TestDesignOutdated(t *testing.T) {
 		if _, err := svc.designOutdated(context.Background(), "acme", "proj", "same"); err != nil {
 			t.Fatalf("designOutdated: %v", err)
 		}
-		if turns.askedFlow != "design" {
-			t.Fatalf("looked up flow %q, want the design flow", turns.askedFlow)
+		if fmt.Sprint(turns.askedFlows) != "[design address-comments]" {
+			t.Fatalf("looked up flows %v, want the design runs", turns.askedFlows)
+		}
+	})
+
+	// L30: the baseline is where the run LEFT the requirements, so the gap
+	// check's own edits are not a move.
+	t.Run("the design run's own edits are not a move", func(t *testing.T) {
+		t.Parallel()
+		svc := svcAt(&stubDesignTurns{lastDesign: &spec.AgentTurn{BaseRef: "start", EndRef: "end"}},
+			map[string]string{"start": "before", "end": "after"})
+
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "after"); err != nil || got {
+			t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+		}
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "later"); err != nil || !got {
+			t.Fatalf("an edit after the run: designOutdated = (%v, %v), want (true, nil)", got, err)
+		}
+	})
+
+	// An Address comments run's own edits are not a move either; an edit made
+	// before it still is.
+	t.Run("an Address comments run moves the baseline it started from", func(t *testing.T) {
+		t.Parallel()
+		runs := []spec.AgentTurn{
+			{Flow: spec.FlowAddressComments, BaseRef: "from", EndRef: "addressed"},
+			{Flow: spec.FlowDesign, BaseRef: "start", EndRef: "designed"},
+		}
+		svc := svcAt(&stubDesignTurns{runs: runs}, map[string]string{"designed": "A", "from": "A", "addressed": "B"})
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "B"); err != nil || got {
+			t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+		}
+
+		svc = svcAt(&stubDesignTurns{runs: runs}, map[string]string{"designed": "A", "from": "edited", "addressed": "B"})
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "B"); err != nil || !got {
+			t.Fatalf("an edit before Address comments: designOutdated = (%v, %v), want (true, nil)", got, err)
 		}
 	})
 

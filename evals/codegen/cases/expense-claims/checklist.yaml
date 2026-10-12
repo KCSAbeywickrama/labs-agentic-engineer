@@ -98,13 +98,6 @@ items:
     steps: Open the user menu in the app header and choose the account entry.
     expect: The Account screen shows Name, Email and Role (Employee) of the signed-in user, and a note that sign-in is through the organisation's single sign-on.
     weight: 1
-  - id: employee-settings
-    role: Employee
-    screen: My claims
-    flow: Settings
-    steps: Open the user menu and choose settings. Turn on 'Compact tables' and press 'Save settings'.
-    expect: The Settings screen shows the 'Compact tables' switch. After saving, the app arrives on My claims without error.
-    weight: 1
   - id: manager-lands-on-queue
     role: Manager
     screen: Team queue

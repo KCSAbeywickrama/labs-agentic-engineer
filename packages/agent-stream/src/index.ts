@@ -66,8 +66,6 @@ export type {
   TurnAim,
   TurnScope,
   TurnAimIntent,
-  PrototypeFeedback,
-  PrototypeFeedbackRequest,
   ManifestPart,
   TurnUsage,
   Toolset,
@@ -92,8 +90,6 @@ export {
   isToolset,
   isSurface,
   isTurnSpec,
-  isPrototypeFeedback,
-  PROTOTYPE_FLOW_SKILL,
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,
   isTurnConnection,
@@ -231,10 +227,34 @@ export {
 } from "./security-design-messages.js";
 export type { SecurityMessageKey } from "./security-design-messages.js";
 
+// --- The review.json write-gate (the Design step's comments and checks) -----
+export {
+  checkDesignReview,
+  designReviewSchema,
+  reviewedArtifactSchema,
+  reviewCommentSchema,
+  reviewCommentStatusSchema,
+  reviewAuthorSchema,
+  reviewAnchorSchema,
+  DESIGN_REVIEW_PATH,
+  REVIEW_ARTIFACT_PATH_RE,
+  PROTOTYPE_ARTIFACT_RE,
+} from "./design-review-schema.js";
+export type { DesignReviewProblem } from "./design-review-schema.js";
+export type {
+  DesignReview,
+  ReviewedArtifact,
+  ReviewComment,
+  ReviewCommentStatus,
+  ReviewAuthor,
+  ReviewAnchor,
+} from "./contracts/design-review.js";
+
 // --- JSON Schema publication (the BFF validates the same definitions) --------
 export {
   componentDesignJsonSchema,
   securityDesignJsonSchema,
+  designReviewJsonSchema,
   buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "./json-schema.js";

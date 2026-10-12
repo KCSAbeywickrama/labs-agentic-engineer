@@ -57,6 +57,20 @@ type AgentTurn struct {
 	BaseRef   string `gorm:"not null" json:"baseRef"`
 	SkillsRef string `gorm:"type:text" json:"skillsRef,omitempty"`
 
+	// EndRef is the commit a design run's Room work was saved at when it
+	// finished (L30): the requirements as the run left them are its features'
+	// basis, so the run's own edits never read as out of date. "" when the
+	// pod did not report one (any other flow, a flush that did not land, a
+	// row older than the column); the basis then falls back to BaseRef.
+	EndRef string `gorm:"type:text;not null;default:''" json:"-"`
+
+	// ChangedPaths are the project files the turn changed, as the pod
+	// reported them (L18): what the turn's own writes left different from
+	// what it started with. Each design artifact's revision number counts the
+	// completed turns that changed it (ArtifactRevisions). NULL on a row
+	// older than the column and on a turn that changed nothing.
+	ChangedPaths []string `gorm:"type:jsonb;serializer:json" json:"-"`
+
 	// Status is completed | failed, as the pod reported it.
 	Status string `gorm:"not null;index" json:"status"`
 

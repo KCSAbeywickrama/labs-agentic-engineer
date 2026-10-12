@@ -19,7 +19,7 @@ compile error, not a runtime surprise.
 | `services/` | long-lived deployables (Go + TS) | yes |
 | `components/` | deployables arranged as they are deployed: `dataplane/ae-system-project/ae-studio/` is the per-org AE Studio; `controlplane/` and `dataplane/user-project/` are placeholders | yes (`ae-studio`: per org, by `aep-api`) |
 | `runners/` | one-shot / job images | as jobs |
-| `packages/` | shared libraries: `contracts`, `clients`, `ui`, `agent-stream`, `collab-doc`, `design-projection`, `excalidraw-dsl`, `progress-view`, `sse-cassette`, `platform-idp-auth`, `web-search`, `agent-eval`, `bal-library-tool`, `prototype-kit`, `prototype-theme-default`, `prototype-theme-oxygen`, `prototype-cli` | no |
+| `packages/` | shared libraries: `contracts`, `clients`, `ui`, `agent-stream`, `collab-doc`, `design-projection`, `progress-view`, `sse-cassette`, `platform-idp-auth`, `web-search`, `agent-eval`, `bal-library-tool`, `prototype-kit`, `prototype-theme-default`, `prototype-theme-oxygen`, `prototype-cli` | no |
 | `skills/` | the authored skill library, seeded and reconciled into each org's own repo | no — delivered as content |
 | `playground/` | local harness that runs the real agents against a plain directory (no cluster, no GitHub, no database) | no |
 | `evals/` | on-demand evaluation suites for the platform's agents (`spec-agents`: per-section + chained evals over the real design agent; see its README) | no — never in CI |
@@ -38,8 +38,8 @@ compile error, not a runtime surprise.
   - `sockets/ae-studio/{files,mcp,turn}/openapi.yaml` — one spec per Unix
     socket inside the AE Studio pod.
 - Artifacts the agents produce are JSON Schema under `packages/contracts/schemas/`
-  (`component-design`, `build-plan` and more), consumed by `@aep/agent-stream`
-  and the design views.
+  (`component-design`, `design-review`, `build-plan` and others), consumed by
+  `@aep/agent-stream` and the design views.
 - Both sides of every boundary listed above are generated from its spec, and
   generated clients/servers are never hand-edited. Whether they are committed
   differs by consumer: Go codegen is **committed** (aep-api's `internal/gen/`,
@@ -109,6 +109,28 @@ Inside the pod the containers talk over Unix sockets, and the mount is the
 gate. Resources, routes, env and converge:
 [`ae-studio/design/README.md`](../components/dataplane/ae-system-project/ae-studio/design/README.md).
 
+## The design loop
+
+Design → Address comments → Build
+([ADR-0051](decisions/ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)).
+A `/design` run writes the whole design in generation order. It starts with a
+gap check, which closes holes as `*assumed*` requirement lines, technical
+decisions in `specs/design/decisions.md`, or open questions. Then come the
+architecture, the data model, roles and permissions, one artifact per component
+(a web application's prototype, a service's `openapi.yaml`, an agent's
+`agent.afm.md`), the dependencies, the flows, and the acceptance tests last.
+The user reviews each file on the console's Design card: Checked, comments and
+answers live in `specs/design/review.json`
+([ADR-0052](decisions/ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
+`/address-comments` revises the files those comments touch, starting at the
+earliest. Build reads a web application's prototype as its screen brief, and
+the build gate requires one. Review items never block Build. aep-api numbers
+each file's revisions from the finished-turn ledger, and reads each designed
+feature's basis at the commit its design run ended. Detail:
+[`skills/design`](../skills/design/SKILL.md),
+[console Design card](../apps/console/design/design-card.md),
+[`internal/spec`](../services/aep-api/internal/spec/README.md).
+
 ## Codegen pipeline
 
 ```
@@ -137,15 +159,20 @@ kit reference an agent writes against is generated to
 `packages/prototype-kit/reference.md`. Each package's `design/README.md` has
 the details.
 
-In AEP the Prototype stage follows Design. The console's Design card offers
-Make prototype, which sends `/prototype`; the `prototype` skill has the agent
-write `specs/design/components/<c>/prototype.{json,tsx}` into the Room (ae-collab),
+In AEP the prototype is made inside Design: after the data model and the
+roles, the `design` run calls the `prototype` skill, which has the agent write
+`specs/design/components/<c>/prototype.{json,tsx}` into the Room (ae-collab),
 gated on write by the design agent's file tool (the manifest and source rules
 plus an isolated render check) and again when a build cuts the version
-(aep-api's save gate, `internal/spec/save_gate.go`). The reviewer opens it full screen in the
-console, annotates, and Send all returns the requests as a typed
-`prototypeFeedback` on the next `/prototype` turn
-([console design note](../apps/console/design/prototype-review.md)).
+(aep-api's save gate, `internal/spec/save_gate.go`). The reviewer opens it full
+screen from its item on the console's Design card and annotates it; each
+comment is a Pending draft on the prototype in `specs/design/review.json`, the
+design's review file. Address comments on the Design card's Overview sends
+every waiting comment with `/address-comments`, and the agent revises the
+prototype in that run, with the contract change it needs, and answers each
+comment in the review file
+([console design notes](../apps/console/design/design-card.md),
+[prototype review](../apps/console/design/prototype-review.md)).
 
 ## Service map
 
@@ -196,7 +223,7 @@ on where a feed is kept).
 rather than after a deployment. Once a `web-application` builds clean the cycle
 dispatches one more agent for it: it stands the app up in mock mode — MSW
 answering `/api`, a substituted auth module, no cluster and no sibling service —
-walks every flow the component's prototype names, and repairs each failure the
+walks every flow of the component's prototype, and repairs each failure the
 moment it finds it, clearing the line by clicking it again rather than by the
 edit compiling. It reports one verdict per user story. Running the walk before
 the commit is what makes one pull request carry the build *and* its fixes. It is distinct

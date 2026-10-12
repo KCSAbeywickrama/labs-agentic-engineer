@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Slack Incoming Webhook
+  version: "1.0.0"
+  description: Posts a single message to the Slack channel bound to an incoming webhook URL.
+servers:
+  - url: https://hooks.slack.com
+paths:
+  /services/{webhookPath}:
+    post:
+      operationId: postMessage
+      summary: Post a message to the webhook's channel
+      x-aep-source: https://api.slack.com/messaging/webhooks
+      parameters:
+        - name: webhookPath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The webhook-specific path segment from the configured webhook URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: The message text.
+      responses:
+        '200':
+          description: Message posted.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid payload.
+        '404':
+          description: Unknown or revoked webhook.

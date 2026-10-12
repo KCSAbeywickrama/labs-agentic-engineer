@@ -15,7 +15,6 @@
 #  - Refusal items are written for Speaker, Reviewer, Attendee and Organizer, one screen each; the grants in security.json refuse each role more screens than listed, and other screens are left out to avoid repetition.
 #  - Rejecting a proposal for a session speaker assignment: before any proposal is accepted, the assign-speaker dialog shows 'No accepted talks yet'; not covered since an earlier item already accepts one.
 #  - The PRD says organizers edit or delete 'an event I created', while the prototype shows Edit and Delete on every event; the walk uses a single organizer so ownership is not tested.
-#  - Settings: the PRD has no story for the settings switch and the prototype only saves and returns to Events; the switch's effect on times is not tested.
 #  - Session capacity validation, room removal when sessions use it, session deletion when registrations exist, session waitlists and reviewers scoring their own proposal need data or identities the UI cannot create from an empty database (a second user, or a user who is both speaker and reviewer), so they have no items.
 
 items:
@@ -515,13 +514,6 @@ items:
     flow: Account
     steps: Open the user menu and choose the account entry.
     expect: The Account screen shows the signed-in user's name, email and role Speaker.
-    weight: 1
-  - id: speaker-settings
-    role: Speaker
-    screen: Events
-    flow: Settings
-    steps: Open the user menu and choose settings. Read the screen, then press 'Save settings'.
-    expect: The Settings screen shows a switch 'Show times in the event's time zone' that is on; after saving you arrive on the Events screen.
     weight: 1
   - id: speaker-refused-event-proposals
     role: Speaker

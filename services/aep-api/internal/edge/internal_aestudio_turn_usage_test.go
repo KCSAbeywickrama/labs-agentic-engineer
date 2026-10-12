@@ -170,6 +170,36 @@ func TestTurnUsage_CarriesTheDesignFeatures(t *testing.T) {
 	}
 }
 
+// A design run's end and the paths a turn changed reach the ledger as the pod
+// sent them (L30, L18); a record without them leaves both empty.
+func TestTurnUsage_CarriesTheEndAndTheChangedPaths(t *testing.T) {
+	stack := newInternalStack(t)
+	ledger := &fakeTurnLedger{}
+	deps := stack.deps
+	deps.AEStudioRepositories = aeStudioProjects()
+	deps.TurnLedger = ledger
+	h := NewHandler(AppParams{InternalDeps: deps})
+
+	paths := []string{"specs/design/domain-model.md", "specs/requirements/features/F1-core.md"}
+	body := turnUsageBody(t,
+		turnRecordJSON(t, func(r map[string]any) {
+			r["endRef"] = "cccccccccccccccccccccccccccccccccccccccc"
+			r["changedPaths"] = paths
+		}),
+		turnRecordJSON(t, func(r map[string]any) { r["turnId"] = "11111111-2222-4333-8444-555555555555" }),
+	)
+	if rec := postTurnUsage(t, h, "Bearer "+stack.mintStudio("acme"), body); rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body %s)", rec.Code, rec.Body)
+	}
+	got := ledger.batches[0]
+	if got[0].EndRef != "cccccccccccccccccccccccccccccccccccccccc" || !reflect.DeepEqual(got[0].ChangedPaths, paths) {
+		t.Fatalf("record = (%q, %v), want the end and the paths", got[0].EndRef, got[0].ChangedPaths)
+	}
+	if got[1].EndRef != "" || got[1].ChangedPaths != nil {
+		t.Fatalf("record without them = (%q, %v), want neither", got[1].EndRef, got[1].ChangedPaths)
+	}
+}
+
 // Optional fields stay empty: a failed marketplace turn with no author, no
 // project and no context measure.
 func TestTurnUsage_OptionalFieldsStayEmpty(t *testing.T) {
@@ -317,6 +347,7 @@ func TestTurnUsage_Statuses(t *testing.T) {
 		// Postgres refuses a NUL byte in text on every attempt: a permanent
 		// refusal, so a 400 the sender drops rather than a 500 it retries.
 		{name: "NUL byte in a text field", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["flow"] = "de\u0000sign" })), want: 400},
+		{name: "NUL byte in a changed path", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["changedPaths"] = []string{"specs/a\u0000b"} })), want: 400},
 		{name: "NUL byte in the author", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) {
 			r["author"] = map[string]any{"id": "ada@example.com", "name": "A\u0000da"}
 		})), want: 400},

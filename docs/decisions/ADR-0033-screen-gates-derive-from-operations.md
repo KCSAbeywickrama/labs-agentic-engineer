@@ -1,6 +1,8 @@
 # ADR-0033 — A screen's gate is the scope of the operation it loads
 
-**Status:** Accepted · 2026-09-16
+**Status:** Accepted · 2026-09-16 · points 4 and 7 amended 2026-10-11 by
+[ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
+(the prototype replaces the wireframes)
 **Amends:** [ADR-0030](ADR-0030-scopes-are-the-authorization-authority-for-a-generated-app.md)
 point 1 ("which operation every screen reaches" is no longer authored) and
 [ADR-0031](ADR-0031-reach-is-the-path.md) point 6 (the screen reachability
@@ -142,7 +144,10 @@ cure: `gen` before `tsc`, always.
 
 ## Amendment 2026-10-11 — the screens come from the prototype
 
-The prototype replaced `wireframes.dsl` as a web-application's UI contract
+Design writes a prototype for each web application instead of
+`wireframes.dsl`
+([ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and the prototype is a web-application's UI contract
 ([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
 The decision stands: a screen's gate is the scope of the operation it loads,
 and nothing about screens is authored in `security.json`. Where this ADR says
@@ -153,19 +158,22 @@ the wireframe declares the screens, read the prototype:
   of each role. `roleIds` is not an authorization statement (the third
   alternative above stands): the gate is still the operation.
 - **The coding agent writes `src/authz/screens.ts` from it** (point 2): one
-  entry per manifest screen, the shell screens included. It reads `loads`
-  from what `prototype.tsx` draws and the `openapi.yaml` behind it
+  entry per manifest screen, the shell screens included, in the order of the
+  `<AppShell>` navigation. It reads `loads` from what `prototype.tsx` draws
+  and the `openapi.yaml` behind it
   (`skills/prototype/references/implementing.md`).
 - **A public screen** (point 4) is, in the coding run, a screen drawn on a bare
   `<Screen>` root with no app shell (Signed out, a landing page). It is routed
   above the sign-in guard.
-- **`security-design` writes grants without screens.** `/prototype` runs after
-  `/design`, so at design time no screens exist. Before it writes a role's
-  `grants`, the skill walks that role's flows in `specs/design/flows/*.md` and
-  the stories of the role's actor in the feature files, and grants the
-  operation each step loads.
-- **The mock walk** (point 6) opens each prototype flow's first screen as its
-  role.
+- **Point 7.** The `wireframes` skill is retired. `prototype` owns which
+  screens exist and which role's flow walks them. `security-design` writes
+  each role's grants from its stories before the prototype exists, and the
+  design's grants pass walks each role's flows in `prototype.json` once the
+  screens and the operations exist, granting the operation each screen loads.
+- **The mock walk** (point 6) walks each prototype flow as its role, from its
+  first screen.
 - **The build gate** refuses a prototype that offers a role `security.json`
   does not declare, so the roles a reviewer saw are the roles the platform
   provisions.
+
+The console no longer reads wireframes for anything.

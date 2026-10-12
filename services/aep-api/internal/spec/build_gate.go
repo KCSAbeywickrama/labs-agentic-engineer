@@ -28,12 +28,11 @@ package spec
 //     between requirements and design);
 //   - every deployable component is ENRICHED (its design.json moved off the
 //     scaffold placeholder, a language decided) and carries its type-mandated
-//     artifact (service → openapi.yaml);
-//   - a web-application's prototype (prototype.json + prototype.tsx, the UI
-//     contract the coding run builds against) is not required yet, but one that
-//     is present is whole, sound, and current with the design: both files,
-//     each passing the save gate's rules, and every role it offers a role of
-//     specs/design/security.json when that file exists;
+//     artifact (service → openapi.yaml, web-application → its prototype,
+//     prototype.json + prototype.tsx), and a web-application's prototype is
+//     sound and current with the design: each file passing the save gate's
+//     rules, and every role it offers a role of specs/design/security.json
+//     when that file exists;
 //   - a design with END-USER SIGN-IN carries specs/design/security.json, it parses,
 //     and every story its roles cite is a real story. The platform creates
 //     the roles and test users that file declares when the tag is built, so a
@@ -216,12 +215,17 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 	return errs
 }
 
-// prototypeBuildErrors judges a web-application's prototype at build time. No
-// prototype passes: it is not mandatory yet. A present one is the contract the
-// coding run builds the UI against, so it must be whole (half a prototype
-// renders nothing), pass the save gate's rules, and be current with the
-// design: every role it offers is a role security.json declares, the roles the
-// platform provisions and the built app gates on.
+// prototypeBuildErrors judges a web-application's prototype at build time. It
+// is the contract the coding run builds the UI against, so it must be whole:
+// the manifest (prototype.json) and the screens (prototype.tsx) are one
+// artifact, and the coding agent builds the app from both. A whole one must
+// also pass the save gate's rules and be current with the design: every role
+// it offers is a role security.json declares, the roles the platform provisions
+// and the built app gates on.
+//
+// A design made before the prototype carries wireframes.dsl instead. The design
+// bundle does not read `.dsl` (decision L6), so such a project is refused here
+// like one with no design for the app, and running Design writes the prototype.
 func prototypeBuildErrors(designFiles map[string]string, component string) []FileValidationError {
 	manifestKey := prototypespec.ManifestPath(component)
 	sourceKey := prototypespec.SourcePath(component)
@@ -229,16 +233,19 @@ func prototypeBuildErrors(designFiles map[string]string, component string) []Fil
 	hasSource := strings.TrimSpace(designFiles[sourceKey]) != ""
 	switch {
 	case !hasManifest && !hasSource:
-		return nil
-	case !hasManifest || !hasSource:
-		missing, present := "prototype.json", "prototype.tsx"
-		path := manifestKey
-		if hasManifest {
-			missing, present, path = "prototype.tsx", "prototype.json", sourceKey
-		}
 		return []FileValidationError{{
-			Path: path, Code: codeMissingComponentArtifact,
-			Message: fmt.Sprintf("component %q has %s but no %s — a prototype is both files; write the missing one or remove the other", component, present, missing),
+			Path: manifestKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s has no prototype yet: run Design", component),
+		}}
+	case !hasSource:
+		return []FileValidationError{{
+			Path: sourceKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no screens (prototype.tsx): run Design again", component),
+		}}
+	case !hasManifest:
+		return []FileValidationError{{
+			Path: manifestKey, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no manifest (prototype.json): run Design again", component),
 		}}
 	}
 

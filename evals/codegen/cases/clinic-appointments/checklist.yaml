@@ -13,9 +13,9 @@
 #  - The 'Slot just taken' conflict (P1, F2.5) needs two people booking the same slot at once and is not walkable. The 'Clinic service failed' state needs the backend to fail and is not walkable.
 #  - The prototype's validation-error state for the reschedule dialog and for the note forms needs inputs the UI does not allow; the blank-field validation is walked only for publish slot and register patient.
 #  - A patient cannot be linked to a receptionist-registered patient record: the Patient role test user does not appear in the Patients list, so receptionist-booked appointments for registered patients are not visible to a Patient login, and a patient overlap-booking rule (no two overlapping appointments) was not walked.
-#  - Role refusal: one refused screen is walked per role (Patient, Doctor, Receptionist). Home, Account and Settings are open to all roles, so no refusal item applies to them; the other screens of each role could be added by hand as extra refusal items. Doctor is also refused Open slots, My appointments and Patients; Patient also Front desk and Patients; Receptionist also My appointments, My availability and the consultation screen.
+#  - Role refusal: one refused screen is walked per role (Patient, Doctor, Receptionist). Home and Account are open to all roles, so no refusal item applies to them; the other screens of each role could be added by hand as extra refusal items. Doctor is also refused Open slots, My appointments and Patients; Patient also Front desk and Patients; Receptionist also My appointments, My availability and the consultation screen.
 #  - The doctor's name is unknown before the walk (the specification does not seed users), so items refer to 'the doctor who published the slots'.
-#  - Account and settings are walked once, as Patient, since the specification asks for one item each. The Settings switch has no stated effect beyond saving and returning to Home.
+#  - Account is walked once, as Patient. The requirements name no settings, so the prototype has no Settings screen.
 #  - The spec describes P5 (clinic time zone) but there is no UI way to verify it, so no item covers it.
 
 items:
@@ -263,13 +263,6 @@ items:
     flow: Account
     steps: Open the user menu in the app header and choose the account entry.
     expect: The Account screen shows the user's name, email and the role Patient.
-    weight: 1
-  - id: patient-settings
-    role: Patient
-    screen: Home
-    flow: Settings
-    steps: Open the user menu and choose settings. On Settings turn on 'Compact tables' and click 'Save settings'.
-    expect: The Settings screen loads with the Compact tables switch, and after saving the app arrives on the Home screen.
     weight: 1
   - id: patient-refused-availability
     role: Patient

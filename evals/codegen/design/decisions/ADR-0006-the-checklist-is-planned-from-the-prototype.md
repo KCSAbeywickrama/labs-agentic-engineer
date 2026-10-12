@@ -30,8 +30,9 @@ one to one:
   the prototype wins for the walk, and the difference goes into `gaps`.
 - **`screen` is the manifest `name`** of the screen an item ends on (rule 10).
 - **Coverage adds the shell screens** (rule 11): every prototype flow, every
-  story with a UI, and one item each for Account and Settings, reached through
-  the user menu. The coding run builds them in every app.
+  story with a UI, and one item each for Account and, when the prototype has
+  one, Settings, reached through the user menu. The coding run builds them in
+  every app.
 - **Display states count when the walk can cause them** (new rule 12). A state
   the UI can bring about from an empty database (an empty list, a required
   field left blank) is an item, with the state named in `expect`. A state that
@@ -61,3 +62,9 @@ checklist planned without the contract would be one the build cannot match.
   claim, an approval limit set "outside the product", or a person who exists
   only after their first call. Their checklists grew (expense-claims 22 to 46
   items, conference-planner 53 to 80), so the baseline is taken again.
+- **Amendment (2026-10-11): no invented Settings screen.** None of the seven
+  cases' requirements names a setting, so their prototypes have no Settings
+  screen and their checklists no Settings item (the `prototype` skill writes
+  one only for settings the requirements name; root ADR-0051). Each case's
+  `Compact tables`-style switch, which no requirement asked for, was removed by
+  hand from `prototype.json`, `prototype.tsx` and `checklist.yaml`.

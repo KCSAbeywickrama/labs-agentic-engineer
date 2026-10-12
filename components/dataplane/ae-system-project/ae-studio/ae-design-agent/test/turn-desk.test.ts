@@ -397,6 +397,24 @@ test("onFinished gets the whole TurnRecord, usage included on failure", async ()
   ]);
 });
 
+// L30, L18: the run's end and changed files reach the record as the socket's
+// schema takes them; an item it would refuse is left out, since one bad item
+// costs the whole record.
+test("the record carries the run's end and the files it changed, within the schema", async () => {
+  const records: TurnRecord[] = [];
+  const desk = new TurnDesk({ onFinished: (r) => records.push(r), log: () => {} });
+  const paths = ["", "x".repeat(513), ...Array.from({ length: 201 }, (_, i) => `specs/design/f${String(i).padStart(3, "0")}.md`)];
+  desk.start(proj, meta({ flow: "design" }), async () => done({ endRef: "e".repeat(40), changedPaths: paths }));
+  await settle();
+  assert.equal(records[0]!.endRef, "e".repeat(40));
+  assert.deepEqual(records[0]!.changedPaths, paths.slice(2, 202));
+
+  desk.start(proj, meta(), async () => done({ changedPaths: [] }));
+  await settle();
+  assert.equal("endRef" in records[1]!, false);
+  assert.equal("changedPaths" in records[1]!, false);
+});
+
 test("a thrown run still hands over a record with zero usage and no refs", async () => {
   const records: TurnRecord[] = [];
   const desk = new TurnDesk({ onFinished: (r) => records.push(r), log: () => {} });

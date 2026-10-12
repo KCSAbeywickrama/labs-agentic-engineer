@@ -45,7 +45,7 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `KickoffService.Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn in the org's AE Studio pod |
 | `aestudiotools.Turns` · `aestudiotools.References` | needs | `clients/aestudiotools` — the org pod's `/internal/v1` turns (kickoff) and reference store (the references upload, a pass-through) |
-| `TurnRepository.Newest` · `NewestCompletedFlow` · `SumUsageByProject` | offers | `projects` — the status poll's `spec.agent` (has the project run a turn, and did the newest fail), the build gate's design baseline, Settings → Usage |
+| `TurnRepository.Newest` · `CompletedFlows` · `SumUsageByProject` | offers | `projects` — the status poll's `spec.agent` (has the project run a turn, and did the newest fail), its `designOutdated` baseline (the newest design runs, read where each ended), Settings → Usage. Inside this domain the same repository is the artifact service's `DesignLedger` (`DesignRuns`, `ArtifactRevisions`): the build gate's staleness input and the spec state's `designedFrom` and `artifactRevisions` |
 | `TurnRepository.RecordFinished` | offers | `edge` — `record-turn-usage`, the pod's finished turns |
 | Turn and tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
@@ -149,22 +149,36 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
   recovered there as the "could not be read" 400 and logged as `references.office_conversion_panicked`
   with the panic's class only (its value can carry document text). The held kickoff fires only on the pod's
   `2xx`.
-- **Design staleness is derived per feature, never stored** (#575, E1). A feature's design is out
-  of date when its basis (`reqspec.Basis`: its file plus the product-wide items that reach it) differs
-  between today and the commit the run that last designed it read. That run is the newest completed
-  design run (`CompletedFlows`, latest-finished first, the last 50) that covered the feature: one
-  that named it (`/design F1 F2`, the IDs in the run's ledger `Summary`), or a bare `/design`, which
-  covered every feature designable at its commit (`designedFrom`). `SaveSpec` (`staleFeatures`)
-  marks each such feature unavailable: a build that carries or needs it (no pick carries every
-  designable feature) is refused `FEATURE_NOT_BUILDABLE` ("update the design for F<n> first"); a
-  pick that leaves it out builds without it. `GET /spec/state` (`SpecState.DesignedFrom`) reports the same per-feature basis, so the
-  console's "out of date" and the gate's agree. A run whose commit is unreadable is skipped. The
-  status poll's `designOutdated` flag is coarser and display-only: the whole requirements tree
-  (`RequirementsFingerprint`, path + blob sha) now versus at the newest completed design run
-  (`NewestCompletedFlow`, the run that finished last, as `CompletedFlows` orders them). Nothing is stamped because a turn NEVER commits: its file changes stream
-  to the project's Room and the Room's committer (`ae-collab`) commits them later with no turn id
-  and no author, so there is no moment the platform controls and no way to tell that flush from a
-  hand edit. Only the run's base commit and the feature IDs it named are recorded.
+- **Design staleness is derived per feature, never stored** (#575, E1, L30). A feature's design is
+  out of date when its basis (`reqspec.Basis`: its file plus the product-wide items that reach it)
+  differs between today and the requirements as the run that last designed it LEFT them: the
+  commit its Room work was saved at when it finished (the ledger's `end_ref`; its base commit when
+  it recorded none). The gap check's `*assumed*` lines and questions, and Address comments' edits,
+  are part of what the run designed, so they never read as out of date; an edit after the run
+  does. That run is the newest completed design run (`DesignRuns`: `CompletedFlows` over
+  `DesignRunFlows`, latest-finished first, the last 50) that covered the feature: one that named it
+  (`/design F1 F2`, the IDs in the run's ledger `Summary`), a bare `/design`, which covered every
+  feature designable at the commit it READ, or an Address comments run (`address-comments`) whose
+  own requirement edits reached it (its basis differs between its base and its end; with no end,
+  none) (`DesignRun.designed`). `SaveSpec` (`staleFeatures`) marks each such feature unavailable: a
+  build that carries or needs it (no pick carries every designable feature) is refused
+  `FEATURE_NOT_BUILDABLE` ("update the design for F<n> first"); a pick that leaves it out builds
+  without it. `GET /spec/state` (`SpecState.DesignedFrom`) reports the same per-feature basis, so
+  the console's "out of date" and the gate's agree. A run whose commit is unreadable is skipped (an
+  unreadable end falls back to its base). The status poll's `designOutdated` flag is coarser and
+  display-only: the whole requirements tree (`RequirementsFingerprint`, path + blob sha) now versus
+  at the end of the newest completed design run, moved on by each Address comments run since that
+  started from it (`CompletedFlows`, the last 10). Nothing but commits is recorded: a turn never
+  commits itself (its file changes stream to the project's Room, and the Room's committer,
+  `ae-collab`, commits them with no turn id), but a design run asks the Room for a forced save as
+  it ends and reports the project's head after it as its end (the pod's `endRef`).
+- **Artifact revisions** (L18). Every turn's record carries the files its own writes changed
+  (`changedPaths`, stored in `changed_paths`). A design artifact's revision number is how many
+  completed turns changed it (`ArtifactRevisions`, `artifactRevisions`), keyed as
+  `specs/design/review.json` keys artifacts: a prototype by its `prototype.json`, so a change to
+  its `prototype.tsx` is a change to the prototype; the review file itself and anything outside
+  `specs/design/` is not an artifact. `GET /spec/state` serves them as `artifactRevisions`
+  (display only; the Checked tick is the review file's content hash).
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   read and written through the org's AE Studio pod (`sourcecontrol.Git`). aep-api's own writes are
@@ -181,7 +195,7 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
   by `DesignedFeatures`) and is empty on every other turn: the field is ignored off a design turn,
   and the line the user typed never reaches aep-api. `created_at` is the turn's start, so
   `Newest` orders ledger rows by when the turn ran, whatever order they arrive in;
-  `NewestCompletedFlow` and `CompletedFlows` order by when the run finished
+  `CompletedFlows` orders by when the run finished
   (`COALESCE(finished_at, created_at)`): of two overlapping runs, the one that finished last wrote last. The edge refuses the whole batch with 404 when any record names a project outside
   the token's org; a record with no project (a marketplace turn) is stored under
   `project_id = ''`. The primary key is `(org_id, id)`: the pod chooses turn ids (the kickoff's

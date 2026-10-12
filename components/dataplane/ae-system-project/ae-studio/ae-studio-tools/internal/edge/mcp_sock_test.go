@@ -583,7 +583,7 @@ func TestTurnUsage_OptionalFieldsStayAbsent(t *testing.T) {
 		t.Fatalf("outbox = %+v", got)
 	}
 	sent, _ := json.Marshal(got[0])
-	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`} {
+	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`, `"endRef"`, `"changedPaths"`} {
 		if strings.Contains(string(sent), key) {
 			t.Fatalf("%s invented: %s", key, sent)
 		}
@@ -608,6 +608,21 @@ func TestTurnUsage_DesignFeaturesCarriedOver(t *testing.T) {
 	}
 }
 
+// A design run's end and the paths a turn changed reach the record aep-api
+// gets as the agent sent them.
+func TestTurnUsage_EndAndChangedPathsCarriedOver(t *testing.T) {
+	s := newMCPHarness(t, &fakeUpstream{})
+	record := strings.Replace(turnRecordJSON, `,"contextTokens":15}`,
+		`,"contextTokens":15,"endRef":"cccc","changedPaths":["specs/design/a.md","specs/design/b.md"]}`, 1)
+	if c, body := s.post("/turn-usage", record); c != http.StatusAccepted {
+		t.Fatalf("POST /turn-usage = %d %s", c, body)
+	}
+	got := s.usage.got()
+	if len(got) != 1 || got[0].EndRef != "cccc" || !reflect.DeepEqual(got[0].ChangedPaths, []string{"specs/design/a.md", "specs/design/b.md"}) {
+		t.Fatalf("outbox = %+v", got)
+	}
+}
+
 // A record the contract refuses is 400 and never reaches the outbox.
 func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 	s := newMCPHarness(t, &fakeUpstream{})
@@ -622,6 +637,8 @@ func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 		"a story, not a feature": strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","designFeatures":["F1.2"]`, 1),
 		"a feature over 16":      strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","designFeatures":["F`+strings.Repeat("1", 16)+`"]`, 1),
 		"201 features":           strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","designFeatures":[`+strings.Repeat(`"F1",`, 200)+`"F1"]`, 1),
+		"201 changed paths":      strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[`+strings.Repeat(`"specs/a.md",`, 200)+`"specs/a.md"]`, 1),
+		"an empty changed path":  strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[""]`, 1),
 	} {
 		if c, out := s.post("/turn-usage", body); c != http.StatusBadRequest || !strings.Contains(out, "invalid_request") {
 			t.Fatalf("%s: POST /turn-usage = %d %s", name, c, out)

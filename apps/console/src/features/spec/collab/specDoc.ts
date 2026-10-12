@@ -100,8 +100,8 @@ export function applyAgentWrite(projectName: string, part: StreamPart): void {
   // its gates (the prototype kit's parsers among them): mock-only code, so it
   // loads on the first write, never with the app. Writes apply in order: each
   // waits on the same module promise.
-  agentWrites ??= import("./agentWrites");
-  void agentWrites.then((m) => m.applyAgentToolCall(doc, part));
+  agentWrites ??= import("./agentWrites").then(({ applyAgentToolCall }) => applyAgentToolCall);
+  void agentWrites.then((apply) => apply(doc, part));
 }
 
-let agentWrites: Promise<typeof import("./agentWrites")> | null = null;
+let agentWrites: Promise<typeof import("./agentWrites").applyAgentToolCall> | null = null;

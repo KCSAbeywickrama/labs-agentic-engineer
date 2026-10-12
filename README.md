@@ -42,7 +42,7 @@ tools and skills it needs. The flow:
   + PRs** (no merge without human review), and the platform watches webhooks to drive
   each task through `pending → in_progress → ready_for_review → merged → building → deployed`.
 - Because agents share context across artifacts, the system stays internally
-  consistent — change a requirement and the design, prototypes, and tasks move with it.
+  consistent — change a requirement and the prototypes, design, and tasks move with it.
 
 ## Demo
 

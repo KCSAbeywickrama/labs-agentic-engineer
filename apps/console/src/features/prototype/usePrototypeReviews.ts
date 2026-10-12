@@ -17,22 +17,17 @@
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { QueueUpdate } from "@wso2/prototype-kit/host";
-import { chatStore } from "../agent-chat/useProjectChat";
-import type { PrototypeFeedback } from "../agent-chat/turnScope";
 import type { AppPrototype } from "./model/prototypes";
 import { createReviewStore, followAll } from "./model/reviewStore";
-import { NEW_SESSION, sendStarted, type ReviewSession } from "./model/revision";
+import { NEW_SESSION, type ReviewSession } from "./model/revision";
 
-/** The app's one review store, on the app's chat: each project's prototype reviews, outliving the Prototype tab. */
-const reviewStore = createReviewStore(chatStore);
+/** The app's one review store: each project's prototype reviews, outliving the Design card. */
+const reviewStore = createReviewStore();
 
 export interface PrototypeReviews {
-  /** The review of `component`: its queue, the batch out with the agent, what to say, and the revision to show. */
+  /** The review of `component`: the revision to show, what to say of the last one, and what this browser keeps of its comments. */
   session: (component: string) => ReviewSession;
-  onQueue: (component: string, update: QueueUpdate) => void;
-  /** The batch went to the agent as a turn. */
-  onSent: (component: string, feedback: PrototypeFeedback) => void;
+  change: (component: string, fn: (s: ReviewSession) => ReviewSession) => void;
   /** The notice was seen (the toast closed). */
   onNoticeSeen: (component: string) => void;
 }
@@ -43,19 +38,18 @@ export interface PrototypeReviews {
  * revision that lands is never drawn half-followed, and into the store once
  * drawn.
  */
-export function usePrototypeReviews(projectName: string, prototypes: readonly AppPrototype[] | undefined): PrototypeReviews {
+export function usePrototypeReviews(projectName: string, prototypes: readonly AppPrototype[]): PrototypeReviews {
   const subscribe = useCallback((fn: () => void) => reviewStore.subscribe(projectName, fn), [projectName]);
   const sessions = useSyncExternalStore(subscribe, () => reviewStore.get(projectName));
-  const followed = prototypes ? followAll(sessions, prototypes) : sessions;
+  const followed = followAll(sessions, prototypes);
   useEffect(() => {
-    if (prototypes) reviewStore.follow(projectName, prototypes);
+    reviewStore.follow(projectName, prototypes);
   }, [projectName, prototypes]);
 
   const change = (component: string, fn: (s: ReviewSession) => ReviewSession) => reviewStore.change(projectName, component, fn);
   return {
     session: (component) => followed[component] ?? NEW_SESSION,
-    onQueue: (component, update) => change(component, (s) => ({ ...s, queue: update(s.queue) })),
-    onSent: (component, feedback) => change(component, (s) => sendStarted(s, feedback)),
+    change,
     onNoticeSeen: (component) => change(component, (s) => ({ ...s, notice: null })),
   };
 }

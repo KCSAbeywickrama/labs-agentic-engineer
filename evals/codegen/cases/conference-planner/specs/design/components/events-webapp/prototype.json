@@ -27,7 +27,6 @@
     { "id": "screen.my-registrations", "name": "My registrations", "roleIds": ["Attendee"] },
     { "id": "screen.event-registrations", "name": "Event registrations", "roleIds": ["Organizer"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Organizer", "Speaker", "Reviewer", "Attendee"] }
   ],
   "flows": [

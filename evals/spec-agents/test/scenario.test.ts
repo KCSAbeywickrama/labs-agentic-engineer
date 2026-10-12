@@ -44,4 +44,6 @@ test("committed scenarios all validate against their schemas", () => {
   // must not throw either way.
   loadScenarios("design");
   loadScenarios("tasks");
+  // Address comments: every comment in the review names its expected outcome, and only those.
+  for (const sc of loadScenarios("address-comments")) assert.ok(Object.keys(sc.expect).length > 0);
 });

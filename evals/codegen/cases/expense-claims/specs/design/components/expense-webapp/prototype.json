@@ -25,7 +25,6 @@
     { "id": "screen.batch-detail", "name": "Export batch", "roleIds": ["PayrollExporter"] },
     { "id": "screen.employees", "name": "Reporting lines", "roleIds": ["PayrollExporter"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Manager", "PayrollExporter"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Manager", "PayrollExporter"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Manager", "PayrollExporter"] }
   ],
   "flows": [

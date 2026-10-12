@@ -21,7 +21,6 @@
     { "id": "screen.tasks", "name": "All tasks", "roleIds": ["HRCoordinator"] },
     { "id": "screen.overdue", "name": "Overdue tasks", "roleIds": ["HRCoordinator"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["HRCoordinator", "ITTeamMember", "HRTeamMember", "FacilitiesTeamMember"] }
   ],
   "flows": [

@@ -22,22 +22,17 @@ import type { ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { artifactMarker } from "./model/artifacts";
-
+import { expenseTrackerDesign } from "./model/expenseTrackerDesign.testing";
 // The design model on a real project: worked out from the room's design
-// files, which carry no design revisions. Nothing the review shows may lean
-// on a revision it does not have: no artifact reads "new" forever.
+// files, which carry no design revisions, and the design-review turn running
+// now, read from the chat.
 
-const ROOT = "../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/";
-const raw = import.meta.glob<string>(
-  "../../../../../evals/spec-agents/scenarios/fixtures/expense-tracker-design/specs/**/*.{md,json,yaml,cell,dsl,feature}",
-  { query: "?raw", import: "default", eager: true },
-);
-const files = Object.fromEntries(Object.entries(raw).map(([path, content]) => [path.slice(ROOT.length), content]));
+const files = expenseTrackerDesign;
 
 vi.mock("../spec/collab/specDoc", () => ({ useSpecDoc: () => null }));
 vi.mock("../spec/collab/useRoomFiles", () => ({ useRoomFiles: () => files }));
-vi.mock("../agent-chat/useProjectChat", () => ({ useProjectChat: () => ({ turn: { phase: "idle" } }) }));
+let turn: { phase: string; instruction?: string } = { phase: "idle" };
+vi.mock("../agent-chat/useProjectChat", () => ({ useProjectChat: () => ({ turn }) }));
 vi.mock("../../api/client", () => ({ client: { GET: async () => ({ data: { items: [] } }) } }));
 
 const { useDesignModel } = await import("./useDesignModel");
@@ -47,12 +42,20 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useDesignModel on the platform", () => {
-  it("tracks no revision, so no artifact is marked new or changed", async () => {
+  it("tracks no revision, and reads the design's artifacts from the room", async () => {
+    turn = { phase: "idle" };
     const { result } = renderHook(() => useDesignModel("s0"), { wrapper });
     await waitFor(() => expect(result.current.data?.artifacts.length).toBeGreaterThan(0));
-    const model = result.current.data!;
-    expect(model.revision).toBeNull();
-    expect(model.artifacts.map((a) => artifactMarker(a, model.revision, []))).toEqual(model.artifacts.map(() => null));
-    expect(artifactMarker(model.artifacts[0]!, model.revision, model.artifacts[0]!.features)).toBe("out of date");
+    expect(result.current.data?.revision).toBeNull();
+    expect(result.current.data?.running).toBeNull();
+  });
+
+  it("says which design-review turn runs: a design, or Address comments", async () => {
+    turn = { phase: "running", instruction: "/design F1 F2" };
+    const designing = renderHook(() => useDesignModel("s0"), { wrapper });
+    await waitFor(() => expect(designing.result.current.data?.running).toEqual({ kind: "design", features: ["F1", "F2"] }));
+    turn = { phase: "running", instruction: "/address-comments" };
+    const addressing = renderHook(() => useDesignModel("s0"), { wrapper });
+    await waitFor(() => expect(addressing.result.current.data?.running).toEqual({ kind: "address", features: [] }));
   });
 });

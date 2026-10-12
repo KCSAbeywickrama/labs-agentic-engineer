@@ -17,20 +17,21 @@
  */
 
 /**
- * The prototype verb's file side: the review batch the preview saved, and the
- * preview itself. The review page is `@wso2/prototype-cli`'s preview on the
- * Oxygen theme, the theme the console's review frame and the design agent's
- * render check draw with; its saved batch is the submission the console sends.
+ * The prototype verb's review side. The review page is `@wso2/prototype-cli`'s
+ * preview on the Oxygen theme, the theme the console's review frame and the
+ * design agent's render check draw with. Each Save feedback there becomes
+ * draft comments on the prototype in `specs/design/review.json`, as the
+ * console's review queue is its drafts; Address comments sends them.
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, unwatchFile, watchFile } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { isPrototypeFeedback, type PrototypeFeedback } from "@aep/agent-stream";
 import { FEEDBACK_PATH } from "@wso2/prototype-cli/feedback";
-import { prototypeHash } from "@wso2/prototype-kit/feedback";
+import { parseFeedbackSubmission } from "@wso2/prototype-kit/feedback";
 import { REPO_ROOT } from "../paths.js";
+import { readReviewFile, withSavedDrafts, writeReviewFile } from "./review-file.js";
 
 const PROTOTYPE_THEME = "@wso2/prototype-theme-oxygen";
 
@@ -39,55 +40,71 @@ export function prototypeDir(projectDir: string, component: string): string {
   return join(projectDir, "specs/design/components", component);
 }
 
-export type SavedFeedback = { ok: true; feedback: PrototypeFeedback; file: string } | { ok: false; reason: string };
+/** The review file's key for a prototype: its manifest, as the console keys it. */
+export function prototypeReviewPath(component: string): string {
+  return `specs/design/components/${component}/prototype.json`;
+}
+
+export type FoldedReview = { ok: true; ids: string[]; count: number } | { ok: false; reason: string };
 
 /**
- * The batch the preview saved for `component`, checked as the design agent
- * checks it and against the prototype on disk. A batch saved on an earlier
- * revision is refused: its element ids may name what the revision since
- * removed.
+ * Fold the review the preview saved for `component` into the project's
+ * review file, as drafts that replace this session's earlier ones
+ * (`previous`), then remove the saved file: its comments now live in the
+ * review. Nothing saved is `{ ok: true, ids: previous, count: 0 }`.
  */
-export function savedFeedback(projectDir: string, component: string): SavedFeedback {
-  const dir = prototypeDir(projectDir, component);
-  const file = join(dir, FEEDBACK_PATH);
-  if (!existsSync(file)) {
-    return { ok: false, reason: `no saved review for ${component}: open the preview (--preview), comment, and Save feedback` };
-  }
-  let saved: { prototypeHash?: unknown; requests?: unknown };
+export function foldSavedReview(projectDir: string, component: string, previous: readonly string[], now: string): FoldedReview {
+  const file = join(prototypeDir(projectDir, component), FEEDBACK_PATH);
+  if (!existsSync(file)) return { ok: true, ids: [...previous], count: 0 };
+  let value: unknown;
   try {
-    saved = JSON.parse(readFileSync(file, "utf8")) as typeof saved;
+    value = JSON.parse(readFileSync(file, "utf8"));
   } catch {
     return { ok: false, reason: `${file} is not JSON` };
   }
-  const feedback = { component, prototypeHash: saved.prototypeHash, requests: saved.requests };
-  if (!isPrototypeFeedback(feedback)) return { ok: false, reason: `${file} is not a valid review batch` };
-  const manifest = join(dir, "prototype.json");
-  const source = join(dir, "prototype.tsx");
-  if (!existsSync(manifest) || !existsSync(source)) return { ok: false, reason: `${component} has no prototype to revise` };
-  if (prototypeHash(readFileSync(manifest, "utf8"), readFileSync(source, "utf8")) !== feedback.prototypeHash) {
-    return { ok: false, reason: `the review was saved on an earlier revision of ${component}'s prototype: review the current one and save again` };
-  }
-  return { ok: true, feedback, file };
-}
-
-/** A sent batch is done with: the next save starts a new review. */
-export function clearSavedFeedback(file: string): void {
+  const parsed = parseFeedbackSubmission(value);
+  if ("reason" in parsed) return { ok: false, reason: `${file}: ${parsed.reason}` };
+  const read = readReviewFile(projectDir);
+  if (!read.ok) return { ok: false, reason: read.reason };
+  const folded = withSavedDrafts(read.review, prototypeReviewPath(component), previous, parsed.submission.requests, now);
+  writeReviewFile(projectDir, folded.review);
   rmSync(file, { force: true });
+  return { ok: true, ids: folded.ids, count: folded.ids.length };
 }
 
 /**
- * Serve the preview until it is interrupted; resolves to its exit code. The
- * playground waits out its own Ctrl-C so the preview's shutdown finishes first.
+ * Serve the preview until it is interrupted; resolves to its exit code. Each
+ * Save feedback is folded into the review file as it lands, and once more at
+ * the end. The playground waits out its own Ctrl-C so the preview's shutdown
+ * finishes first.
  */
-export function previewPrototype(projectDir: string, component: string, opts: { open: boolean }): Promise<number> {
+export function previewPrototype(
+  projectDir: string,
+  component: string,
+  opts: { open: boolean; report: (line: string) => void },
+): Promise<number> {
   const bin = join(dirname(createRequire(import.meta.url).resolve("@wso2/prototype-cli/package.json")), "dist", "bin.js");
   const args = [bin, "preview", prototypeDir(projectDir, component), "--theme", PROTOTYPE_THEME, ...(opts.open ? ["--open"] : [])];
+  const saved = join(prototypeDir(projectDir, component), FEEDBACK_PATH);
+  let session: string[] = [];
+  const fold = (): void => {
+    const folded = foldSavedReview(projectDir, component, session, new Date().toISOString());
+    if (!folded.ok) return opts.report(`✗ ${folded.reason}`);
+    session = folded.ids;
+    if (folded.count > 0) opts.report(`✓ ${folded.count} comment(s) saved as drafts in specs/design/review.json: send them with address-comments`);
+  };
+  const onSave = (now: { mtimeMs: number }): void => {
+    if (now.mtimeMs > 0) fold();
+  };
+  watchFile(saved, { interval: 300 }, onSave);
   const ignore = (): void => {};
   process.on("SIGINT", ignore);
   return new Promise((resolve) => {
     // The theme resolves from the playground package, which depends on it.
     const child = spawn(process.execPath, args, { cwd: join(REPO_ROOT, "playground"), stdio: "inherit" });
     const done = (code: number): void => {
+      unwatchFile(saved, onSave);
+      fold();
       process.off("SIGINT", ignore);
       resolve(code);
     };

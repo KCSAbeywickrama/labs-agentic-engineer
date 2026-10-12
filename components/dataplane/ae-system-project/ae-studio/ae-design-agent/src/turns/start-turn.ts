@@ -44,7 +44,6 @@ import { randomUUID } from "node:crypto";
 import type { FilePart, LanguageModel } from "ai";
 import type {
   PlanScope,
-  PrototypeFeedback,
   StreamPart,
   Surface,
   TurnAim,
@@ -53,6 +52,7 @@ import type {
   TurnSpec,
 } from "@aep/agent-stream";
 import type { RoomPeer } from "../collab/room-peer.js";
+import { orgDesignSystem } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
 import { AttachmentRefusedError, fitAttachments, fitReferences, type UnreadableReference } from "../conversation/attachments.js";
 import {
@@ -71,7 +71,7 @@ import { connectionHost, type ModelConnection } from "../shared/model.js";
 import { projectSnapshotDir, skillsSnapshotDir } from "../shared/snapshot-path.js";
 import type { ConversationStore } from "../store/conversation-store.js";
 import { ToolsSocketError, type ProjectSnapshot, type ToolsSocket } from "../tools-socket/client.js";
-import { designFeaturesOf, startTurnSummary, turnSpecFor } from "./start-spec.js";
+import { designFeaturesOf, savesItsEnd, startTurnSummary, turnSpecFor } from "./start-spec.js";
 import {
   DeskClosedError,
   errorClassOf,
@@ -135,8 +135,6 @@ export interface TurnInput {
   /** What the user was looking at (S6); absent = the whole product. */
   scope?: TurnScope;
   aim?: TurnAim;
-  /** A review batch on one prototype, valid only on a `/prototype` Room turn (`turn-input.ts` checks the body). */
-  prototypeFeedback?: PrototypeFeedback;
   /** Chat attachments, bytes base64 (`turn-input.ts` caps them). */
   attachments: TurnAttachment[];
 }
@@ -172,12 +170,6 @@ export interface TurnStarterDeps {
    * bundle over the snapshot (nothing persists).
    */
   room?: JoinRoom;
-  /**
-   * The caller saves a roomless turn's edits itself, by folding its stream
-   * into its own store (the playground's project folder). The pod never sets
-   * it: there, only the Room's committer saves.
-   */
-  callerSavesEdits?: boolean;
   /** Who reads the turns' prose (`console` in the pod; absent in a local run). */
   surface?: Surface;
   /** The pod's org, named on provider log lines. */
@@ -259,11 +251,8 @@ export class TurnStarter {
   /** Start a browser turn in the project's current thread; resolves to its turn id. */
   async startProjectTurn(req: { project: string; conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
-    // A revision must be saved: a batch on a roomless turn whose caller does
-    // not save its edits would be applied to a throwaway bundle and read as done.
-    if (req.input.prototypeFeedback && !this.deps.room && !this.deps.callerSavesEdits) throw feedbackNeedsRoom();
     const lookup = await this.lookup(req.project);
-    const { spec, flow } = turnSpecFor(req.input.instruction, lookup, req.input.prototypeFeedback);
+    const { spec, flow } = turnSpecFor(req.input.instruction, lookup);
     const material = await this.material(req.input, spec, () => this.projectDirs(req.project, lookup), conn);
     const scope: Scope = { kind: "project", project: req.project };
     this.refuseBusy(scope);
@@ -375,7 +364,6 @@ export class TurnStarter {
   /** Start a turn in a marketplace conversation (no project, no Room); the caller checked ownership. */
   async startMarketplaceTurn(req: { conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
-    if (req.input.prototypeFeedback) throw feedbackNeedsRoom();
     const { skillsSha } = await this.toolsCall(() => this.deps.tools.skills());
     const { spec, flow } = turnSpecFor(req.input.instruction, { references: [] });
     // The marketplace reads only the Org skills snapshot: it is both the
@@ -442,6 +430,20 @@ export class TurnStarter {
         throw new TurnStartError(503, "tools_unavailable", "the studio's tools are not answering");
       }
       throw err;
+    }
+  }
+
+  /**
+   * The project's head once a design run's Room work has been saved: the
+   * commit its run ended at. undefined when the tools socket cannot say;
+   * the run then records no end, and aep-api reads its start instead.
+   */
+  private async headAfterSave(project: string): Promise<string | undefined> {
+    try {
+      return (await this.deps.tools.lookup(project))?.headSha;
+    } catch (err) {
+      (this.deps.log ?? stdoutTurnLog)({ msg: "turn_end_unread", source: "ae-design-agent", errorClass: errorClassOf(err) });
+      return undefined;
     }
   }
 
@@ -532,6 +534,7 @@ export class TurnStarter {
       previousTurnFailed: last?.status === "failed",
       ...(l.input.aim ? { aim: l.input.aim } : {}),
       ...(this.deps.headless ? { headless: true } : {}),
+      now: new Date().toISOString(),
     });
     const filesChangedExternally = last !== null && last.baseRef !== l.material.baseRef;
     // The start awaited the lookup and the snapshot read since `admissible`:
@@ -557,7 +560,7 @@ export class TurnStarter {
     const roomScoped = l.roomProject !== undefined;
     const gates = { flow: l.flow, roomScoped };
     const toolset = toolsetFor(l.spec);
-    const eager = eagerSkillsFor(l.spec, l.input.scope);
+    const eager = eagerSkillsFor(l.spec, l.input.scope, orgDesignSystem(l.material.skillSource));
     const m = l.material;
     const author = authorOf(l.credit);
     return async (emit, signal): Promise<TurnOutcome> => {
@@ -610,11 +613,9 @@ export class TurnStarter {
               // The names that reached the model, not the ones that were sent.
               ...(m.chatAttachments.length ? { attachments: m.chatAttachments.flatMap((p) => (p.filename ? [p.filename] : [])) } : {}),
               ...(l.input.aim ? { anchor: l.input.aim.anchor } : {}),
-              // Likewise the scope the instruction was composed from, and the
-              // review batch the flow carries, so a reloaded thread can say
-              // what each message was about.
+              // Likewise the scope the instruction was composed from, so a
+              // reloaded thread can say what each message was about.
               ...(l.input.scope ? { scope: l.input.scope } : {}),
-              ...(l.spec.kind === "flow" && l.spec.prototypeFeedback ? { prototypeFeedback: l.spec.prototypeFeedback } : {}),
             },
             model,
             connection: l.conn,
@@ -622,7 +623,14 @@ export class TurnStarter {
             onEvent,
             abortSignal: signal,
           });
-          const usage = { usage: res.usage, ...(contextTokens !== undefined ? { contextTokens } : {}) };
+          const usage = {
+            usage: res.usage,
+            ...(contextTokens !== undefined ? { contextTokens } : {}),
+            changedPaths: res.changedPaths,
+          };
+          // A design run saves its Room work before it leaves, so the commit
+          // it ends at holds its own requirement edits (L30).
+          const saved = peer !== undefined && savesItsEnd(l.flow) ? await peer.flush() : false;
           // A turn whose edits did not all reach the Room has not completed:
           // its Room connection dropped and the rejoin failed or never synced.
           const dropped = await leaveRoom();
@@ -636,7 +644,8 @@ export class TurnStarter {
               ...refs,
             };
           }
-          return { status: "completed", ...usage, ...refs };
+          const endRef = saved && l.roomProject !== undefined ? await this.headAfterSave(l.roomProject) : undefined;
+          return { status: "completed", ...usage, ...refs, ...(endRef ? { endRef } : {}) };
         } catch (err) {
           if (signal.aborted) throw err; // the desk already ended the turn (cap or shutdown)
           const frame = turnErrorFrame(err, host);
@@ -658,10 +667,6 @@ export class TurnStarter {
       }
     };
   }
-}
-
-function feedbackNeedsRoom(): TurnStartError {
-  return new TurnStartError(400, "invalid_turn", "prototypeFeedback must be a Room turn: only the Room's committer saves the revision");
 }
 
 /** A design turn's feature IDs for its usage record; none for a bare `/design` or any other flow. */

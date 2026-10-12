@@ -27,11 +27,21 @@ import { spawn } from "node:child_process";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary } from "./kit/render.js";
 import type { StreamPart, TurnScope } from "@aep/agent-stream";
-import { designGate, interviewGate, listWebApplications, prototypeGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
-import { clearSavedFeedback, previewPrototype, savedFeedback } from "./engine/prototype.js";
+import {
+  addressCommentsGate,
+  designGate,
+  interviewGate,
+  listWebApplications,
+  prototypeGate,
+  requirementsGate,
+  tasksGate,
+  type GateResult,
+} from "./engine/gates.js";
+import { previewPrototype } from "./engine/prototype.js";
+import { readReviewFile, sendWaiting, unsend, writeReviewFile } from "./engine/review-file.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
-import { runSpecTurn, type SpecTurnOptions, type SpecTurnResult } from "./engine/turn.js";
+import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
 import { lastBuildPlan, runPlanTurn } from "./engine/plan-turn.js";
 import { renderBuildIssue, selectBuild, type BuildPlanRunner, type Selection } from "./engine/build-plan.js";
 import { runCodingAgent } from "./engine/coding-run.js";
@@ -78,19 +88,13 @@ function gateFail(gate: GateResult): PhaseOutcome {
 }
 
 /** Run one spec turn inside a fresh session (open → turn → close). */
-async function runPhaseTurn(
-  projectDir: string,
-  instruction: string,
-  opts: PhaseOptions,
-  turn: Pick<SpecTurnOptions, "prototypeFeedback"> = {},
-): Promise<PhaseOutcome> {
+async function runPhaseTurn(projectDir: string, instruction: string, opts: PhaseOptions): Promise<PhaseOutcome> {
   // One-shot phase run — no human answers questions here, so the channel says
   // so explicitly (#373: posture is channel state, not skill prose).
   const session = await openSession(projectDir, { ...opts, headless: true });
   try {
     const onPart = onPartFor(opts);
     const result = await runSpecTurn(session, instruction, {
-      ...turn,
       ...(opts.scope ? { scope: opts.scope } : {}),
       ...(onPart ? { onPart } : {}),
     });
@@ -151,34 +155,57 @@ export async function designCommand(projectDir: string, opts: PhaseOptions): Pro
 export interface PrototypeOptions extends PhaseOptions {
   /** `--preview`: serve the review page instead of running a turn. */
   preview?: boolean;
-  /** `--feedback`: send the review the preview saved as a revision turn. */
-  feedback?: boolean;
   /** `--no-open`: the preview prints its URL instead of opening a browser. */
   noOpen?: boolean;
 }
 
 /**
- * `play <dir> prototype [component]` — the console's `/prototype` line, with its
- * review: `--preview` serves the review page, and `--feedback` sends the batch
- * saved there as the console's Send all does, then clears it.
+ * `play <dir> prototype [component]` — the `/prototype` line: (re)generate the
+ * prototypes. `--preview` serves one for review instead: each Save feedback
+ * there becomes draft comments in specs/design/review.json, which
+ * `address-comments` sends.
  */
 export async function prototypeCommand(projectDir: string, opts: PrototypeOptions, component?: string): Promise<PhaseOutcome> {
   const gate = prototypeGate(projectDir, component);
   if (!gate.ok) return gateFail(gate);
-  if (!opts.preview && !opts.feedback) return runPhaseTurn(projectDir, component ? `/prototype ${component}` : "/prototype", opts);
+  if (!opts.preview) return runPhaseTurn(projectDir, component ? `/prototype ${component}` : "/prototype", opts);
 
   // A review is of one prototype: the named one, or the design's only one.
   const apps = listWebApplications(projectDir);
   const target = component ?? (apps.length === 1 ? apps[0] : undefined);
   if (!target) return { ok: false, detail: `name the web-application to review (${apps.join(", ")})` };
-  if (opts.preview) {
-    const code = await previewPrototype(projectDir, target, { open: !opts.noOpen });
-    return code === 0 ? { ok: true } : { ok: false, detail: `the preview exited ${code}` };
+  const report = (line: string): void => {
+    if (!opts.silent) output.write(`${line}\n`);
+  };
+  const code = await previewPrototype(projectDir, target, { open: !opts.noOpen, report });
+  return code === 0 ? { ok: true } : { ok: false, detail: `the preview exited ${code}` };
+}
+
+/** The Address comments line, as the console sends it. */
+const ADDRESS_COMMENTS = "/address-comments";
+
+/**
+ * `play <dir> address-comments` — the Overview's Address comments: every
+ * waiting comment in specs/design/review.json (a draft, or one reopened by an
+ * answer) is marked sent, then the bare `/address-comments` turn runs, scoped
+ * to the design review. Should the turn fail before the agent wrote the file,
+ * the comments are put back as they were.
+ */
+export async function addressCommentsCommand(projectDir: string, opts: PhaseOptions): Promise<PhaseOutcome> {
+  const gate = addressCommentsGate(projectDir);
+  if (!gate.ok) return gateFail(gate);
+  const read = readReviewFile(projectDir);
+  if (!read.ok) return { ok: false, detail: read.reason };
+  const sent = sendWaiting(read.review, new Date().toISOString());
+  if (sent.sent.length === 0) return { ok: false, detail: "no comment waits to be sent: add drafts with prototype --preview" };
+  const written = writeReviewFile(projectDir, sent.review);
+  const outcome = await runPhaseTurn(projectDir, ADDRESS_COMMENTS, { ...opts, scope: { kind: "design-review" } });
+  if (!outcome.ok) {
+    const after = readReviewFile(projectDir);
+    if (after.ok && JSON.stringify(after.review) === JSON.stringify(JSON.parse(written))) {
+      writeReviewFile(projectDir, unsend(after.review, sent.sent));
+    }
   }
-  const saved = savedFeedback(projectDir, target);
-  if (!saved.ok) return { ok: false, detail: saved.reason };
-  const outcome = await runPhaseTurn(projectDir, `/prototype ${target}`, opts, { prototypeFeedback: saved.feedback });
-  if (outcome.ok) clearSavedFeedback(saved.file);
   return outcome;
 }
 

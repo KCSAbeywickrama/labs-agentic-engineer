@@ -117,14 +117,22 @@ test("author is omitted, not empty, when the journal has none", () => {
   assert.ok(!("author" in (out[0] as object)));
 });
 
-test("a user row that sent a prototype review carries its batch", () => {
-  const prototypeFeedback = {
-    prototypeHash: "0".repeat(64),
-    component: "expense-web",
-    requests: [{ screenId: "screen.queue", roleId: "approver", stateId: "state.default", elementIds: [], text: "Sort oldest first" }],
-  };
+test("a journal entry from before prototypeFeedback was retired still loads, as the feedback it sent", () => {
+  const legacy = {
+    ...entry(0, "/prototype expense-web"),
+    prototypeFeedback: { component: "expense-web", prototypeHash: "h", requests: [{ text: "a" }, { text: "b" }] },
+  } as TurnJournalEntry;
+  const single = { ...entry(2, "/prototype expense-web"), prototypeFeedback: { requests: [{ text: "a" }] } } as TurnJournalEntry;
   const out = projectDisplayHistory(
-    conv([{ role: "user", content: PROMPT_2 }], [{ ...entry(0, "/prototype expense-web", AUTHOR), prototypeFeedback }]),
+    conv(
+      [
+        { role: "user", content: PROMPT_1 },
+        { role: "assistant", content: "revised" },
+        { role: "user", content: PROMPT_2 },
+      ],
+      [legacy, single],
+    ),
   );
-  assert.deepEqual(out[0], { role: "user", content: "/prototype expense-web", author: AUTHOR, prototypeFeedback });
+  assert.deepEqual(out[0], { role: "user", content: "Prototype feedback (2 comments)" });
+  assert.deepEqual(out[2], { role: "user", content: "Prototype feedback (1 comment)" });
 });

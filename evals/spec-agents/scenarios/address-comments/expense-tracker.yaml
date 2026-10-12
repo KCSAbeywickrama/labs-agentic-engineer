@@ -1,0 +1,103 @@
+# Address comments, standalone: the frozen expense-tracker design (prototype
+# included) and its review as the console flushes it before it sends
+# /address-comments. Four comments, one per rule of the design skill's
+# "Addressing comments":
+#  - c-category: on the prototype, but the change starts earlier (the
+#    requirements or the data model) and reaches the contract and the screens.
+#  - c-rename: on the contract, but the field is the data model's: the change
+#    starts there, and the rename reaches every place.
+#  - c-sort: ambiguous (sort by what?): a question on the comment, no guess.
+#  - c-draft: a draft: not sent, not the agent's.
+
+brief:
+  name: expense-tracker
+  idea: >-
+    A shared expense tracker: an employee files a claim for money they spent at
+    work and follows its status, an approver works one queue of everything
+    waiting for a decision and approves or rejects each one, and Finance reads
+    the monthly total from the same record.
+  persona: >-
+    Finance operations lead at a 300-person company; knows the claim lifecycle
+    cold, has no interest in technology choices, answers in plain language.
+  facts:
+    - A claim's category is one of Travel, Meals, Equipment or Other; the employee picks it when filing.
+    - The approval queue is fine sorted oldest first; when asked, sort it by amount, largest first.
+  fallback: Prefer the smallest change that does what the comment asks.
+
+fixture: expense-tracker-design
+
+review:
+  version: 1
+  artifacts:
+    - path: specs/design/components/expense-webapp/prototype.json
+      comments:
+        - id: c-category
+          author: { id: u-maya, name: Maya Perera }
+          text: >-
+            Each claim needs a category: Travel, Meals, Equipment or Other. Let me
+            pick it when I file a claim, and show it as a column here and in the
+            approval queue.
+          createdAt: "2026-10-11T08:00:00.000Z"
+          sentAt: "2026-10-11T08:05:00.000Z"
+          status: sent
+          anchor: { screenId: screen.my-claims, roleId: Employee, stateId: state.default, elementIds: [table.my-claims] }
+        - id: c-sort
+          author: { id: u-dinesh, name: Dinesh Silva }
+          text: This list should be sorted differently.
+          createdAt: "2026-10-11T08:01:00.000Z"
+          sentAt: "2026-10-11T08:05:00.000Z"
+          status: sent
+          anchor: { screenId: screen.queue, flowId: flow.approve-claim, roleId: Approver, stateId: state.default, elementIds: [table.queue] }
+        - id: c-draft
+          author: { id: u-dinesh, name: Dinesh Silva }
+          text: Maybe a chart of the last six months here?
+          createdAt: "2026-10-11T08:02:00.000Z"
+          status: draft
+          anchor: { screenId: screen.report, roleId: Approver, stateId: state.default, elementIds: [] }
+    - path: specs/design/components/expense-api/openapi.yaml
+      comments:
+        - id: c-rename
+          author: { id: u-dinesh, name: Dinesh Silva }
+          text: >-
+            Call decisionReason rejectionReason everywhere: only a rejection has a
+            reason, an approval never does.
+          createdAt: "2026-10-11T08:03:00.000Z"
+          sentAt: "2026-10-11T08:05:00.000Z"
+          status: sent
+
+expect:
+  c-category:
+    outcome: act
+    earliest:
+      - specs/requirements/features/F1-claims.md
+      - specs/design/domain-model.md
+    changes:
+      - specs/design/domain-model.md
+      - specs/design/components/expense-api/openapi.yaml
+      - specs/design/components/expense-webapp/prototype.tsx
+  c-rename:
+    outcome: act
+    earliest:
+      - specs/design/domain-model.md
+    changes:
+      - specs/design/domain-model.md
+      - specs/design/components/expense-api/openapi.yaml
+  c-sort:
+    outcome: ask
+  c-draft:
+    outcome: wait
+
+rubric:
+  mustCover:
+    - item: "A claim has a category (Travel, Meals, Equipment, Other) under the same name in the data model, the contract's claim schema and the create request, and in the prototype: a field on the New claim form and a column in My claims and in the approval queue"
+      weight: 3
+    - item: "decisionReason is renamed rejectionReason in the data model and the contract, with no decisionReason left in either"
+      weight: 2
+    - item: "c-sort carries a question that offers the user concrete readings to pick from in one line (for example by amount, by employee, or by date), and the queue's order is not changed"
+      weight: 2
+    - "Each addressed comment's reply says in one line, in the reader's words, what changed and where"
+    - "The category is a product rule written in the requirements (F1's stories or Decisions, in the comment's words, without *assumed*), or the run designs it from the data model on: either way the requirements and the design agree"
+  mustNot:
+    - "The approval queue's sort order changed, or a guess at c-sort's meaning applied anywhere"
+    - "A chart, or anything c-draft asks for, added to the design"
+    - "A change that no comment asks for and no comment's change makes necessary"

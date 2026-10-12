@@ -519,10 +519,8 @@ func TestSaveSpec_DesignOutOfDatePerFeature(t *testing.T) {
 		`"stories":["F1.1","F2.1"],"dependencies":[],"description":"a service"}`
 	r := newRig(t, seed)
 	designedAt := r.headSHA()
-	r.svc.SetDesignRunsResolver(func(context.Context, string, string) ([]DesignRun, error) {
-		// One bare `/design` at the seed: it covered every designable feature.
-		return []DesignRun{{BaseRef: designedAt}}, nil
-	})
+	// One bare `/design` at the seed: it covered every designable feature.
+	r.svc.SetDesignLedger(stubLedger{runs: []DesignRun{{BaseRef: designedAt}}})
 
 	// Confirming nothing, touching only the product page: no feature moved.
 	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD\n\nA new problem statement.\n"}, "frame edit")
@@ -545,9 +543,7 @@ func TestSaveSpec_DesignOutOfDatePerFeature(t *testing.T) {
 	// A later `/design F2` at the new commit designs F2 again; F1 keeps its
 	// design from the first run.
 	redesignedAt := r.headSHA()
-	r.svc.SetDesignRunsResolver(func(context.Context, string, string) ([]DesignRun, error) {
-		return []DesignRun{{BaseRef: redesignedAt, Features: []string{"F2"}}, {BaseRef: designedAt}}, nil
-	})
+	r.svc.SetDesignLedger(stubLedger{runs: []DesignRun{{BaseRef: redesignedAt, Features: []string{"F2"}}, {BaseRef: designedAt}}})
 	if _, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("after F2's update the build was refused: %v", err)
 	}

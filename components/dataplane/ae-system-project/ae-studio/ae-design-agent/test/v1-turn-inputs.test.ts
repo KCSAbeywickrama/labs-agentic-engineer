@@ -31,7 +31,6 @@ import assert from "node:assert/strict";
 import { mockModel } from "../src/shared/mock-model.js";
 import { config } from "../src/shared/config.js";
 import { unreadableReferencesNote } from "../src/prompts/turn.js";
-import { InputError, prototypeFeedbackOf } from "../src/edge/turn-input.js";
 import type { ModelConnection } from "../src/shared/model.js";
 import { minimalPdf } from "./pdf-fixture.js";
 import { CONNECTION, PROJECT, call, startEdge, startTurn, streamOf, type Edge, type EdgeOptions } from "./helpers/edge.js";
@@ -196,18 +195,9 @@ test("a run with no one to interview (the playground's phase verbs) tells the ag
   assert.doesNotMatch(JSON.stringify(pod.firstUser?.content), new RegExp(note));
 });
 
-// --- scope, prototypeFeedback and the retired target (port of main's #878 server.test.ts) ---
+// --- scope and the retired target and prototypeFeedback (port of main's #878 server.test.ts) ---
 
 const FEATURE_FILE = "specs/requirements/features/F2-approvals.md";
-
-/** A Room the turn joins that holds the snapshot's files and keeps every write. */
-const fakeRoom: EdgeOptions["room"] = async () => ({ files: () => ({}), set: () => {}, delete: () => {}, leave: async () => 0 });
-
-const BATCH = {
-  prototypeHash: "0".repeat(64),
-  component: "expense-web",
-  requests: [{ screenId: "screen.queue", roleId: "approver", stateId: "state.default", elementIds: ["btn.approve"], text: "Make it primary" }],
-};
 
 /** POST a turn body to the project's current conversation; resolves to the problem (or the 202 body). */
 async function refusal(edge: Edge, body: unknown | FormData): Promise<{ status: number; code: string; detail: string }> {
@@ -295,105 +285,17 @@ test("a feature scope is composed after the snapshot read (it names the feature'
   }
 });
 
-test("a /prototype Room turn carries the review batch into the brief and the journal", async () => {
-  const model = mockModel([{ kind: "text", text: "ok" }]);
-  const edge = await startEdge({ models: [model], room: fakeRoom });
+test("prototypeFeedback is retired: a JSON body carrying it is refused as an unknown field; no turn starts", async () => {
+  const edge = await startEdge();
   try {
-    const tok = await edge.token();
-    const res = await startTurn(edge, tok, { instruction: "/prototype expense-web", prototypeFeedback: BATCH });
-    assert.equal(res.status, 202, await res.clone().text());
-    const { turnId } = (await res.json()) as { turnId: string };
-    await streamOf(edge, tok, turnId);
-    const status = (await (await call(edge, `/v1/projects/${PROJECT}/turns/${turnId}`, tok)).json()) as Record<string, unknown>;
-    assert.equal(status.flow, "prototype");
-    const stored = await edge.store.get(edge.threads.current(PROJECT).conversationId);
-    assert.equal(stored!.turns[0]?.text, "/prototype expense-web");
-    assert.deepEqual(stored!.turns[0]?.prototypeFeedback, BATCH);
-    const firstUser = stored!.messages.find((m) => m.role === "user");
-    assert.match(JSON.stringify(firstUser?.content), /Make it primary/);
-  } finally {
-    await edge.close();
-  }
-});
-
-test("a roomless /prototype turn takes a review batch when its caller saves the edits (the playground)", async () => {
-  const model = mockModel([{ kind: "text", text: "ok" }]);
-  const edge = await startEdge({ models: [model], callerSavesEdits: true });
-  try {
-    const tok = await edge.token();
-    const res = await startTurn(edge, tok, { instruction: "/prototype expense-web", prototypeFeedback: BATCH });
-    assert.equal(res.status, 202, await res.clone().text());
-    const { turnId } = (await res.json()) as { turnId: string };
-    await streamOf(edge, tok, turnId);
-    const stored = await edge.store.get(edge.threads.current(PROJECT).conversationId);
-    assert.deepEqual(stored!.turns[0]?.prototypeFeedback, BATCH);
-  } finally {
-    await edge.close();
-  }
-});
-
-test("a review batch rides only a bare or same-component /prototype Room turn, never with an aim, and JSON only", async () => {
-  const anchor = { file: "specs/requirements/prd.md", nodes: [{ name: "Goals", kind: "heading" }] };
-  const room = await startEdge({ room: fakeRoom });
-  try {
-    const placement = "prototypeFeedback is only valid on a /prototype instruction, bare or followed by its component";
-    for (const instruction of ["make it pop", "/design", "/prototype other-web", "/prototype expense-web now"]) {
-      assert.deepEqual(await refusal(room, { instruction, prototypeFeedback: BATCH }), { status: 400, code: "invalid_turn", detail: placement }, instruction);
-    }
-    assert.deepEqual(await refusal(room, { instruction: "/prototype", prototypeFeedback: BATCH, anchor, intent: "change" }), {
+    const batch = { prototypeHash: "0".repeat(64), component: "expense-web", requests: [] };
+    assert.deepEqual(await refusal(edge, { instruction: "/prototype expense-web", prototypeFeedback: batch }), {
       status: 400,
       code: "invalid_turn",
-      detail: "prototypeFeedback cannot be combined with anchor and intent",
+      detail: "unknown field: prototypeFeedback",
     });
-    const bad = await refusal(room, { instruction: "/prototype", prototypeFeedback: { ...BATCH, prototypeHash: "abc" } });
-    assert.equal(bad.status, 400);
-    assert.match(bad.detail, /^prototypeFeedback: prototypeHash must be/);
-    const form = new FormData();
-    form.set("instruction", "/prototype");
-    form.set("prototypeFeedback", JSON.stringify(BATCH));
-    assert.deepEqual(await refusal(room, form), { status: 400, code: "invalid_turn", detail: "prototypeFeedback is JSON only: send the batch without attachments" });
-    assert.equal(room.desk.active({ kind: "project", project: PROJECT }), null);
+    assert.equal(edge.desk.active({ kind: "project", project: PROJECT }), null);
   } finally {
-    await room.close();
-  }
-
-  const roomless = await startEdge();
-  try {
-    const r = await refusal(roomless, { instruction: "/prototype", prototypeFeedback: BATCH });
-    assert.deepEqual(r, {
-      status: 400,
-      code: "invalid_turn",
-      detail: "prototypeFeedback must be a Room turn: only the Room's committer saves the revision",
-    });
-    const ann = await roomless.token({ sub: "ann" });
-    const conv = (await (await call(roomless, "/v1/marketplace/conversations", ann, { method: "POST" })).json()) as { conversationId: string };
-    const market = await call(roomless, `/v1/marketplace/conversations/${conv.conversationId}/turns`, ann, {
-      json: { instruction: "/prototype", prototypeFeedback: BATCH },
-    });
-    assert.equal(market.status, 400);
-    assert.equal(((await market.json()) as { detail: string }).detail, r.detail);
-  } finally {
-    await roomless.close();
-  }
-});
-
-/** The kit's loader for the shared table, as `@aep/agent-stream`'s and the kit's own tests read it. */
-interface FeedbackTableModule {
-  feedbackTable: { cases: Array<{ name: string; valid: boolean }> };
-  feedbackBatch(row: { name: string; valid: boolean }): Record<string, unknown>;
-}
-
-test("the pod judges every row of the shared feedback table (prototype-kit feedback-cases.json) as the kit does", async () => {
-  // A runtime import: the loader sits in another package's test tree, outside this package's compilation.
-  const loader = new URL("../../../../../../packages/prototype-kit/test/feedback-cases.ts", import.meta.url).href;
-  const { feedbackTable, feedbackBatch } = (await import(loader)) as FeedbackTableModule;
-  assert.ok(feedbackTable.cases.length > 10);
-  for (const row of feedbackTable.cases) {
-    const batch = feedbackBatch(row);
-    if (row.valid) {
-      assert.equal(prototypeFeedbackOf("/prototype", false, batch).prototypeFeedback?.requests.length, (batch.requests as unknown[]).length, row.name);
-    } else {
-      assert.throws(() => prototypeFeedbackOf("/prototype", false, batch), (err: unknown) => err instanceof InputError && err.status === 400, row.name);
-    }
+    await edge.close();
   }
 });

@@ -292,9 +292,10 @@ test("walker: Read and Write stay inside walk/", () => {
 });
 
 test("save: a case leaves out the compiled renderings, keeps their sources", () => {
-  assert.equal(isRendering("specs/design/components/web/wireframes.excalidraw"), true);
+  assert.equal(isRendering("specs/design/cell-diagram.excalidraw"), true);
   assert.equal(isRendering("specs/design/cell-diagram.gen.json"), true);
-  assert.equal(isRendering("specs/design/components/web/wireframes.dsl"), false);
+  assert.equal(isRendering("specs/design/components/web/prototype.json"), false);
+  assert.equal(isRendering("specs/design/components/web/prototype.tsx"), false);
   assert.equal(isRendering("specs/design/design.cell"), false);
   assert.equal(isRendering("specs/design/components/api/design.json"), false);
 });
@@ -546,7 +547,9 @@ test("prompts: planner and walker both carry the wired-mode auth semantics; the 
   assert.ok(planner.includes(WIRED_AUTH_SEMANTICS));
   assert.match(planner, /READ-ONLY/);
   assert.match(planner, /the prototype wins for the walk/);
-  assert.doesNotMatch(planner, /wireframes\.dsl —/, "the walk is derived from the prototype, not the wireframes");
+  assert.match(planner, /prototype\.json/);
+  assert.match(planner, /features\/F<n>-\*\.md/);
+  assert.doesNotMatch(planner, /wireframe/i);
   const walker = walkerPrompt({ baseUrl: "http://localhost:5173/", roles: ["Employee"], items: [], mustNot: [] });
   assert.ok(walker.includes(WIRED_AUTH_SEMANTICS));
 });

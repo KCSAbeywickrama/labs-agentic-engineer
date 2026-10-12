@@ -19,11 +19,11 @@
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import type * as Y from "yjs";
-import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
+import { updateYFragment } from "y-prosemirror";
 import { parseLine } from "../model/ids";
-import { blockingEntries } from "../model/questions";
+import { openEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
-import { specSchema } from "./specSchema";
+import { readFragment } from "./readFragment";
 
 // The edits the user makes to the spec by acting on what the agent left in it
 // (a line to confirm, a question answered), as steps on a
@@ -123,6 +123,10 @@ export function fileFragment(doc: Y.Doc, path: string): Y.XmlFragment | null {
  * collaborator's concurrent typing survives. False when the file is not in the
  * doc or the edit changed nothing. The transaction carries `origin`: the
  * user's, unless the edit is someone else's.
+ *
+ * A file holding a block the schema rejects is not edited (false, with a
+ * warning): its read leaves that block out or reads it without its marks, and
+ * writing that read back would delete from the file what the read dropped.
  */
 export function editFile(
   doc: Y.Doc,
@@ -132,7 +136,12 @@ export function editFile(
 ): boolean {
   const fragment = fileFragment(doc, path);
   if (!fragment) return false;
-  const tr = new Transform(yXmlFragmentToProseMirrorRootNode(fragment, specSchema));
+  const read = readFragment(fragment);
+  if (!read.lossless) {
+    console.warn(`[spec] ${path} holds content the spec schema rejects; the edit is not applied`);
+    return false;
+  }
+  const tr = new Transform(read.doc);
   edit(tr);
   if (!tr.docChanged) return false;
   doc.transact(() => {
@@ -160,17 +169,18 @@ export function settleAssumedLine(doc: Y.Doc, path: string, text: string, action
 }
 
 /**
- * Answer a feature's blocking question, in one Yjs transaction: its entry
- * (with the options nested under it) leaves Open Questions, and the answer is
- * a settled line in the feature's Decisions. The entry is found by its words;
- * false when no blocking question in the file has them any more (it was
- * answered or edited meanwhile), and then nothing is written.
+ * Answer an open question of a file (a feature's blocking question, or one
+ * the design's gap check left), in one Yjs transaction: its entry (with the
+ * options nested under it) leaves Open Questions, and the answer is a settled
+ * line in the file's Decisions. The entry is found by its words; false when
+ * no open question in the file has them any more (it was answered or edited
+ * meanwhile), and then nothing is written.
  */
-export function answerBlockingQuestion(doc: Y.Doc, path: string, question: string, answer: string): boolean {
+export function answerOpenQuestion(doc: Y.Doc, path: string, question: string, answer: string): boolean {
   const words = answer.trim();
   if (!words) return false;
   return editFile(doc, path, (tr) => {
-    const entry = blockingEntries(docLines(tr.doc)).find((e) => e.question === question);
+    const entry = openEntries(docLines(tr.doc)).find((e) => e.question === question);
     if (!entry) return;
     deleteLine(tr, entry.line);
     appendToSection(tr, "Decisions", words);

@@ -18,18 +18,17 @@
 
 import { useEffect, useState } from "react";
 import type * as Y from "yjs";
-import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { isMarkdownPath, listDocPaths } from "@aep/collab-doc";
 import type { LineBlock } from "../model/ids";
 import { docLines } from "./docLines";
-import { specSchema } from "./specSchema";
+import { readFragment } from "./readFragment";
 
-/** Every markdown file's lines, by room path, read from the doc as it is now. */
+/** Every markdown file's lines, by room path, read from the doc as it is now (never writing to it). */
 export function readSpecLines(doc: Y.Doc): Map<string, LineBlock[]> {
   const lines = new Map<string, LineBlock[]>();
   for (const path of listDocPaths(doc)) {
     if (!isMarkdownPath(path)) continue;
-    lines.set(path, docLines(yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment(path), specSchema)));
+    lines.set(path, docLines(readFragment(doc.getXmlFragment(path)).doc));
   }
   return lines;
 }

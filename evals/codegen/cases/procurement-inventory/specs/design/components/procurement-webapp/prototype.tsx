@@ -116,7 +116,6 @@ function Shell({ children }: { children: ReactNode }) {
       user={users[role] ?? users["Requester"]!}
       nav={nav}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -702,21 +701,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const navigate = useNav();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.home")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.compact" label="Compact tables" type="switch" defaultValue="off" />
-      </Form>
-    </Shell>
-  );
-}
 
 function SignedOut() {
   return (
@@ -743,7 +727,6 @@ export default defineApp({
     "screen.order-detail": OrderDetail,
     "screen.ledger": LedgerScreen,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { items, requests, ledger, receipts },

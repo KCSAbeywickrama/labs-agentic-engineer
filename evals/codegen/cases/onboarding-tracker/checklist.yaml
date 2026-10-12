@@ -13,7 +13,6 @@
 #  - The Start-onboarding screen draws no way to edit a new hire's details later, though the API has an edit operation; no edit item is written.
 #  - The coordinator is shown no refusal item: its grants reach every screen the app draws. Team roles get one refusal item each, using a different coordinator-only screen.
 #  - Team members' Reopen and Notes controls are drawn only on the team home screen; coordinators have no note or reopen control on the screens drawn.
-#  - The 'Compact task lists' switch has no stated visible effect, so the settings item expects only the save and return to Home.
 #  - The spec does not say what happens to a closed or cancelled onboarding's tasks in team lists, so no item checks that; the close and cancel items are last for that reason.
 #  - The PRD says completing all tasks completes an onboarding, but the prototype draws no completion indicator beyond counts; not checked.
 #  - The due-soon item depends on the tester's today matching the start date entered for Nadia Fernando; entering a different date can make the due-soon and overdue figures differ.
@@ -312,13 +311,6 @@ items:
     flow: Account screen
     steps: Open the user menu and choose the account entry.
     expect: The 'Account' screen shows the user's name, email and department.
-    weight: 1
-  - id: coordinator-settings
-    role: HRCoordinator
-    screen: Home (onboardings or my department's tasks)
-    flow: Settings screen
-    steps: Open the user menu and choose settings. Switch on 'Compact task lists' and click 'Save settings'.
-    expect: The 'Settings' screen shows the 'Compact task lists' switch; after saving, the Home screen with the onboardings list shows.
     weight: 1
   - id: coordinator-close-onboarding
     role: HRCoordinator

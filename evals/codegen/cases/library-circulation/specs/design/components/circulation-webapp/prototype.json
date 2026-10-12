@@ -22,7 +22,6 @@
     { "id": "screen.holds-queue", "name": "Holds queue", "roleIds": ["Librarian"] },
     { "id": "screen.fees", "name": "Fees", "roleIds": ["Librarian"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Member", "Librarian"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Member", "Librarian"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Member", "Librarian"] }
   ],
   "flows": [

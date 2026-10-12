@@ -28,7 +28,7 @@
  * lines carry neither and are skipped.
  */
 
-import { SSE_DONE, type PrototypeFeedback, type TurnAimIntent, type TurnAnchor, type TurnScope } from "./contracts/sse-events.js";
+import { SSE_DONE, type TurnAimIntent, type TurnAnchor, type TurnScope } from "./contracts/sse-events.js";
 import type { StreamPart } from "./stream-types.js";
 
 /** A `/v1` turn start body (the design agent's `CreateTurnRequest`, JSON form). */
@@ -40,8 +40,6 @@ export interface TurnStartBody {
   /** An aimed turn (#666): both `anchor` and `intent`, or neither. */
   anchor?: TurnAnchor;
   intent?: TurnAimIntent;
-  /** A review batch on one prototype, on a `/prototype` instruction only. */
-  prototypeFeedback?: PrototypeFeedback;
 }
 
 /**

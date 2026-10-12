@@ -45,13 +45,13 @@ export function plannerPrompt(roles: string[]): string {
 Write the acceptance checklist a tester will walk against the finished app.
 
 READ (Glob/Grep/Read), in roughly this order:
-- specs/requirements/prd.md and specs/requirements/features/*.md when present — the user stories and the assumptions.
-- specs/design/components/*/prototype.json — each web application's manifest: its roles, its display \`states\`, its \`screens\` (with the roles that reach each) and its \`flows\` (per role, the screens that role walks in order, entry screen first).
-- specs/design/components/*/prototype.tsx — what each screen draws, written with @wso2/prototype-kit components. A \`to="screen.<id>"\` on a Button, Link, navigation item, breadcrumb, table row or row action is where it navigates. The AppShell's user menu opens its \`account\` and \`settings\` screens and signs out.
+- specs/requirements/prd.md, features/F<n>-*.md and product-wide.md — the product page (actors, out of scope), each feature's user stories (\`F2.3\`), decisions and open questions, and the rules that span features. Lines tagged *assumed* are assumptions.
+- specs/design/components/*/prototype.json — the reviewed prototype's manifest: its \`roles\`, its display \`states\`, its \`screens\` (each with its \`name\` and the \`roleIds\` that reach it) and its \`flows\` (one role's walk through screens, entry screen first, in \`screenIds\` order).
+- specs/design/components/*/prototype.tsx — what each screen draws, written with \`@wso2/prototype-kit\` components keyed by screen id in \`defineApp({ screens })\`. A \`to="screen.<id>"\` on a Button, Link, navigation item, breadcrumb, table row or row action, or a \`useNav().go(...)\` after an action, is where it navigates. The AppShell's user menu opens its \`account\` screen, its \`settings\` screen when it names one, and signs out. Its \`data\` is the reviewer's sample records: the app under test does NOT have them.
 - specs/design/security.json — the roles and their grants.
 - specs/design/components/*/openapi.yaml — the API contract, to learn what data the app can create and what it cannot.
 - specs/design/flows/*.md and specs/design/domain-model.md — the key flows and the data model.
-Skip *.excalidraw, *.gen.json, design.cell and any wireframes.dsl: they are renderings or an older sketch of the files above.
+Skip *.excalidraw, *.gen.json and design.cell: they are renderings of the files above.
 
 THE TESTER, and what that rules out:
 - They walk the RUNNING app in a real browser and never see source code.
@@ -71,7 +71,7 @@ RULES
 8. \`expect\` holds only what the spec states, or what any working app must do (no crash, no blank page, the new row is listed). Never invent a message, a status name or a behaviour the spec does not describe — when the spec is silent on an edge, leave that edge out. Expect the outcome, not the means: how the app shows, allows or blocks something is open unless the spec states it. A list with a filter shows only the rows the filter lets through: expect a row in it only when the item's steps set the filter to include that row, or when the spec states the filter's first value.
 9. \`steps\`: concrete UI actions with concrete sample values ("Amount 42.50, Date 2026-03-01, Category Travel, Description 'Taxi to client'"). \`expect\`: what the tester can SEE — text, a row, a status badge, arriving on a named screen. Never mention source code, files, components, endpoints, status codes, or database state.
 10. \`id\`: short, kebab-case, unique. \`screen\`: the manifest \`name\` of the screen the item ends on. \`flow\`: the flow or story it belongs to, a few words. \`weight\`: 1, or 2 for the central action of a user story (the create, the approve, the export).
-11. Cover every flow in every prototype.json, every user story that has a UI, and the AppShell's account and settings screens (one item each, reached through the user menu). Nothing beyond them.
+11. Cover every flow in every prototype.json, every user story that has a UI, and the AppShell's account screen and its settings screen when it has one (one item each, reached through the user menu). Nothing beyond them.
 12. Display states. A manifest \`state\` other than the default is a way a screen can look (empty, a validation error, a failure). Write an item for one only when the walk can bring it about through the UI from an empty database (a list before anything is created, a required field left blank on submit), and name the state in \`expect\`. A state that needs the backend to fail, or data the UI cannot create, is not walkable: name it in \`gaps\`.`;
 }
 

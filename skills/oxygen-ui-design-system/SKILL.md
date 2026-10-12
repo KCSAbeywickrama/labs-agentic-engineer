@@ -20,10 +20,11 @@ whole of it is yours — theming included. The organization's colors are settled
 in Brand colors below; nobody is interviewed about them, at design time or any
 other time.
 
-On a `/prototype` turn you are here for one thing: how an Oxygen screen is
-composed (page anatomy, listing pages, forms, status colors), so the prototype
-you write reads as one. The kit draws its components; the setup, packages and
-code below are the build's concern, not that turn's.
+When you write a prototype (in a design run or on `/prototype`) you are here
+for one thing: how an Oxygen screen is composed (page anatomy, listing pages,
+forms, status colors), so the prototype you write reads as one. The kit draws
+its components; the setup, packages and code below are the build's concern,
+not that turn's.
 
 `react-webapp` owns the app: layout, config, verify sequence, Dockerfile, nginx.
 This skill owns what goes **inside** `src/` — the UI. Where the two appear to
@@ -178,8 +179,9 @@ the account cluster in the header, the app's navigation in the **sidebar**,
 the routed page in `AppShell.Main`, and a `Footer`. A generated app never
 moves navigation into the header, never drops the sidebar, and never invents a
 second shell. The prototype's `AppShell` lines up with this shell one to one:
-its `nav` entries are the sidebar items, and its Account, Settings and Sign
-out are items of the header's `UserMenu`. What the sample's sidebar shows for
+its `nav` entries are the sidebar items, and its Account, Settings (only when
+the prototype's shell names a `settings` screen) and Sign out are items of the
+header's `UserMenu`. What the sample's sidebar shows for
 its console (organisations, projects, analytics) becomes the prototype's `nav`
 entries for this app; the categories, icons and footer items (Settings, Help)
 keep the sample's arrangement.
@@ -355,7 +357,7 @@ specifies. "Install no other library" above is about UI and styling.
 ## Implementing a prototype with Oxygen
 
 For the coding run only: this is what the BUILT application's pages are made
-of. The `/prototype` flow's review renderer draws only the prototype's own
+of. The prototype's review renderer draws only the prototype's own
 components (the prototype skill's **What the reviewer sees**): no
 `ColorSchemeToggle`, `Footer` or notification panel. A design turn reads this
 skill for how an Oxygen screen is composed, and never cites this table as what
@@ -369,7 +371,7 @@ component holds, follow the row rather than improvising around the component:
 | Kit | Oxygen |
 |---|---|
 | a bare `Screen` root (Signed out, a landing page) | the sample's `GateLayout` (`Layout.Content` + `ParticleBackground`), the content inside it; every signed-in screen is under `AppLayout` |
-| `AppShell` | the sample's `AppLayout`: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (`product`), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per `nav` entry in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. The user menu is `UserMenu.Trigger`, `UserMenu.Header` (`user`), a `UserMenu.Item` for Account, Settings and each `menu` entry, `UserMenu.Divider`, then `UserMenu.Logout`, which calls `signOut()`. The header never carries navigation |
+| `AppShell` | the sample's `AppLayout`: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (`product`), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per `nav` entry in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. The user menu is `UserMenu.Trigger`, `UserMenu.Header` (`user`), a `UserMenu.Item` for Account, for Settings only when the prototype's shell names a `settings` screen, and for each `menu` entry, `UserMenu.Divider`, then `UserMenu.Logout`, which calls `signOut()`. The header never carries navigation |
 | `Heading` (page) + `actions` | one `PageTitle`: `text` in `PageTitle.Header`, `actions` in `PageTitle.Actions`. Never a `Stack` around `PageTitle`: it squeezes the button until its label wraps onto two lines |
 | `Section`, `Heading level="section"` | a header row: the `title` as a `Typography` heading, `count` as a small `Chip` beside it, `subtitle` as `Typography variant="body2" color="text.secondary"`, `actions` as `Button`s at the right; the children under it |
 | `Stat` | `Card variant="outlined"` > `CardContent` > `Typography variant="overline"` (`label`, with the `icon` beside it in the `tone`'s color), `Typography variant="h4"` (`value`), `Typography variant="caption" color="text.secondary"` (`hint`). `StatCard` holds only `label`, `value` and `icon`, and discards children: never park the `hint` outside it. Use one tile for every Stat of a group |

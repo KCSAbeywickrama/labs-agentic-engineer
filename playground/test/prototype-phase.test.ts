@@ -18,8 +18,9 @@
 
 /**
  * The prototype verb: its gate, the fold of a prototype write (it lands only
- * when the design agent's render check passed it), and the review batch the
- * preview saved going back as a revision turn.
+ * when the design agent's render check passed it), the review the preview
+ * saved becoming draft comments in specs/design/review.json, and
+ * address-comments sending them.
  */
 
 import { test } from "node:test";
@@ -29,7 +30,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mockModel } from "@aep/ae-design-agent/shared/mock-model";
 import { prototypeHash } from "@wso2/prototype-kit/feedback";
-import { prototypeCommand } from "../src/commands.js";
+import { addressCommentsCommand, prototypeCommand } from "../src/commands.js";
+import { foldSavedReview } from "../src/engine/prototype.js";
+import { readReviewFile } from "../src/engine/review-file.js";
 
 const WEB = "web";
 const DIR = `specs/design/components/${WEB}`;
@@ -130,7 +133,40 @@ function saveReview(projectDir: string, hash: string): string {
   return file;
 }
 
-test("--feedback sends the saved review as a revision turn and clears it", async () => {
+const PROTOTYPE_PATH = `${DIR}/prototype.json`;
+
+test("a saved review becomes drafts on the prototype; a later save of the session replaces them", () => {
+  const projectDir = seedProject();
+  try {
+    writeFileSync(join(projectDir, DIR, "prototype.json"), MANIFEST);
+    writeFileSync(join(projectDir, DIR, "prototype.tsx"), SOURCE);
+    assert.deepEqual(foldSavedReview(projectDir, WEB, [], "2026-10-11T10:00:00.000Z"), { ok: true, ids: [], count: 0 }, "nothing saved, nothing folded");
+
+    const file = saveReview(projectDir, prototypeHash(MANIFEST, SOURCE));
+    const first = foldSavedReview(projectDir, WEB, [], "2026-10-11T10:00:00.000Z");
+    assert.ok(first.ok && first.count === 1, JSON.stringify(first));
+    assert.equal(existsSync(file), false, "the saved file is folded and removed");
+    const read = readReviewFile(projectDir);
+    assert.ok(read.ok);
+    const [entry] = read.review.artifacts;
+    assert.equal(entry?.path, PROTOTYPE_PATH);
+    assert.deepEqual(
+      entry?.comments?.map((c) => ({ text: c.text, status: c.status, anchor: c.anchor })),
+      [{ text: "Call it Start", status: "draft", anchor: { screenId: "screen.home", roleId: "user", stateId: "state.default", elementIds: ["heading.home"] } }],
+    );
+
+    saveReview(projectDir, prototypeHash(MANIFEST, SOURCE));
+    const second = foldSavedReview(projectDir, WEB, first.ok ? first.ids : [], "2026-10-11T10:05:00.000Z");
+    assert.ok(second.ok && second.count === 1);
+    const again = readReviewFile(projectDir);
+    assert.ok(again.ok);
+    assert.equal(again.review.artifacts[0]?.comments?.length, 1, "the session's queue replaces its earlier save, never doubles it");
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
+test("address-comments marks the drafts sent and runs /address-comments on the design review", async () => {
   const projectDir = seedProject();
   const skillsDir = emptySkills();
   try {
@@ -138,23 +174,26 @@ test("--feedback sends the saved review as a revision turn and clears it", async
     writeFileSync(join(projectDir, DIR, "prototype.tsx"), SOURCE);
     const model = mockModel([{ kind: "text", text: "Renamed." }]);
 
-    assert.match((await prototypeCommand(projectDir, { silent: true, model, skillsDir, feedback: true })).detail ?? "", /no saved review/);
+    assert.match((await addressCommentsCommand(projectDir, { silent: true, model, skillsDir })).detail ?? "", /review\.json is missing/);
 
-    const stale = saveReview(projectDir, "0".repeat(64));
-    assert.match((await prototypeCommand(projectDir, { silent: true, model, skillsDir, feedback: true })).detail ?? "", /earlier revision/);
-    assert.ok(existsSync(stale), "a refused review is kept");
-
-    const file = saveReview(projectDir, prototypeHash(MANIFEST, SOURCE));
-    const outcome = await prototypeCommand(projectDir, { silent: true, model, skillsDir, feedback: true });
+    saveReview(projectDir, prototypeHash(MANIFEST, SOURCE));
+    foldSavedReview(projectDir, WEB, [], "2026-10-11T10:00:00.000Z");
+    const outcome = await addressCommentsCommand(projectDir, { silent: true, model, skillsDir });
     assert.equal(outcome.ok, true, outcome.detail);
-    assert.equal(existsSync(file), false, "a sent review is cleared");
+    const read = readReviewFile(projectDir);
+    assert.ok(read.ok);
+    const [comment] = read.review.artifacts[0]?.comments ?? [];
+    assert.equal(comment?.status, "sent");
+    assert.ok(comment?.sentAt);
 
-    // The service journaled the batch on the project's thread, as it does for the console.
+    // The service journaled the bare command on the project's thread, as the console sends it.
     const conversations = join(projectDir, ".aep-playground/conversations");
     const journal = readdirSync(conversations)
       .map((f) => readFileSync(join(conversations, f), "utf8"))
-      .find((t) => t.includes("Call it Start"));
-    assert.ok(journal, "the revision turn carried the review batch");
+      .find((t) => t.includes('"text": "/address-comments"'));
+    assert.ok(journal, "the turn was /address-comments");
+
+    assert.match((await addressCommentsCommand(projectDir, { silent: true, model, skillsDir })).detail ?? "", /no comment waits/);
   } finally {
     cleanup(projectDir, skillsDir);
   }

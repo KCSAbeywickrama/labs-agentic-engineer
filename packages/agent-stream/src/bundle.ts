@@ -42,11 +42,11 @@ import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "./component-design-schema.js";
 import { checkSecurityDesign } from "./security-design-schema.js";
 import { checkOpenapiSpec } from "./openapi-spec.js";
-import { checkWireframeLayout } from "./wireframe-layout.js";
 import { checkDesignDiagram } from "./design-diagrams.js";
 import { checkPrototype } from "./prototype-gate.js";
 import { checkComponentDependencies } from "./component-dependencies.js";
 import { checkDependencyDesign, preservePlatformFields } from "./dependency-design-schema.js";
+import { checkDesignReview } from "./design-review-schema.js";
 import type {
   Op,
   ErrCode,
@@ -240,10 +240,9 @@ export class FileBundle {
   /**
    * Judge `content` for `path` through the write-gate ladder: YAML reparse, then
    * each artifact-specific gate that claims the path (component `design.json`
-   * schema, `security.json` schema, `wireframes.dsl` syntax, `openapi.yaml`
-   * structure, a prototype's manifest and screens, the design diagrams' shape
-   * and participants). The first
-   * problem aborts with its own code and NO write, leaving the bundle
+   * schema, `security.json` schema, `openapi.yaml` structure, a prototype's
+   * manifest and screens, the design diagrams' shape and participants). The
+   * first problem aborts with its own code and NO write, leaving the bundle
    * byte-for-byte unchanged — the safe in-memory contract; a write that
    * passes is returned for `make` to store. Every gate is a pure
    * (path, content) => problem | null function, so a new artifact kind is one
@@ -296,12 +295,12 @@ export class FileBundle {
     if (securityProblem) {
       return err(path, op, securityProblem.code, securityProblem.message);
     }
-    // Wireframes .dsl is layout-gated the same way: out-of-frame or
-    // partially-overlapping elements abort the write with the coordinates the
-    // model needs to fix them (the compiler would render them verbatim).
-    const layoutProblem = checkWireframeLayout(path, content);
-    if (layoutProblem) {
-      return err(path, op, layoutProblem.code, layoutProblem.message);
+    // The review file holds the user's comments and checks, which the agent
+    // edits when it addresses comments; a malformed write would lose them for
+    // the console, so it is refused here like any design document.
+    const reviewProblem = checkDesignReview(path, content);
+    if (reviewProblem) {
+      return err(path, op, reviewProblem.code, reviewProblem.message);
     }
     // A web-application's prototype is gated as a pair: prototype.json on the
     // manifest's shape, version and references, and against the source beside

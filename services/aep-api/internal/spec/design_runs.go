@@ -17,9 +17,13 @@
 package spec
 
 import (
+	"context"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 )
 
 // A design run's feature scope in the finished-turn ledger (#878 E1). The pod
@@ -31,6 +35,14 @@ import (
 // FlowDesign is the flow of a design turn (AgentTurn.Flow): the only flow
 // whose Summary holds feature IDs.
 const FlowDesign = "design"
+
+// FlowAddressComments is the flow of an Address comments turn (L18): the
+// design review's comments, addressed in the design's own order. It counts as
+// a design run for the features its own requirement edits reached (DesignRun).
+const FlowAddressComments = "address-comments"
+
+// DesignRunFlows are the flows whose completed runs are design runs.
+var DesignRunFlows = []string{FlowDesign, FlowAddressComments}
 
 // designFeatureID matches one feature ID inside a stored Summary.
 var designFeatureID = regexp.MustCompile(`\bF[0-9]+\b`)
@@ -64,4 +76,57 @@ func DesignedFeatures(summary string) []string {
 		}
 	}
 	return ids
+}
+
+// designRunsConsidered bounds how far back the build gate looks for the run
+// that last designed each feature: the latest-finished runs, newest first. A
+// feature last designed further back than this many runs reads as never
+// designed, which the coverage check reports instead of a stale verdict.
+const designRunsConsidered = 50
+
+// DesignLedger is what the artifact service reads from the finished-turn
+// ledger (TurnRepository): the design runs, for the staleness check (#575,
+// E1, L30), and each design artifact's revision number (L18).
+type DesignLedger interface {
+	// DesignRuns lists the project's completed design runs, the
+	// latest-finished first.
+	DesignRuns(ctx context.Context, orgID, projectID string) ([]DesignRun, error)
+	// ArtifactRevisions maps each design artifact a completed turn changed to
+	// how many did (artifactRevisions).
+	ArtifactRevisions(ctx context.Context, orgID, projectID string) (map[string]int, error)
+}
+
+// artifactRevisions counts, per design artifact, the turns that changed it:
+// its revision number, so the first design that writes it makes revision 1
+// and each later run that changes it the next. A design artifact is a file
+// under specs/design/ as the review file keys it: a prototype by its manifest,
+// so a change to its screens (prototype.tsx) is a change to the prototype.
+// The review file is not an artifact. changed holds each turn's changed paths;
+// a turn counts once per artifact however many of its files it changed.
+func artifactRevisions(changed [][]string) map[string]int {
+	out := map[string]int{}
+	for _, paths := range changed {
+		seen := map[string]bool{}
+		for _, p := range paths {
+			key, ok := designArtifact(p)
+			if !ok || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out[key]++
+		}
+	}
+	return out
+}
+
+// designArtifact is the review file's key for the design artifact path
+// belongs to, and whether it belongs to one.
+func designArtifact(p string) (string, bool) {
+	if !strings.HasPrefix(p, "specs/design/") || p == designspec.ReviewPath {
+		return "", false
+	}
+	if path.Base(p) == "prototype.tsx" {
+		return path.Join(path.Dir(p), "prototype.json"), true
+	}
+	return p, true
 }

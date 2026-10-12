@@ -102,7 +102,6 @@ function Shell({ children }: { children: ReactNode }) {
         { id: "nav.queue", label: "Queue", to: "screen.queue" },
       ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -457,22 +456,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const navigate = useNav();
-  const role = useRole();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go(role === "Employee" ? "screen.my-tickets" : "screen.queue")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.compact" label="Compact tables" type="switch" defaultValue="off" />
-      </Form>
-    </Shell>
-  );
-}
 
 function SignedOut() {
   const role = useRole();
@@ -492,7 +475,6 @@ export default defineApp({
     "screen.queue": Queue,
     "screen.ticket": TicketDetail,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { tickets, comments, agents },

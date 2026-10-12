@@ -1,9 +1,10 @@
 # @aep/spec-agent-evals
 
 Evaluation framework for the spec-flow agents: each SDLC section —
-**requirements**, **design**, **task generation** — evaluable separately and in
-combination (a **chain**), against the *real* design agent (`@aep/ae-design-agent`) booted in-process
-through the playground's production-parity waist.
+**requirements**, **design**, **Address comments**, **task generation** —
+evaluable separately and in combination (a **chain**), against the *real*
+design agent (`@aep/ae-design-agent`) booted in-process through the
+playground's production-parity waist.
 
 ## How a run works
 
@@ -24,10 +25,16 @@ through the playground's production-parity waist.
 3. **Scoring** (`src/scoring/`) — runs inside the task, not in evalite
    scorers, so chains can band a section before deciding to continue:
    - *structural*: deterministic checks binding the LIVE workspace validators
-     (`checkComponentDesign`, the DSL compilers, the issue fold). A validator
-     tightening is an explainable score shift, not drift.
-   - *rubric judge*: one sonnet call at temperature 0, seeing the artifact,
-     the rubric, and the sim's decisions digest — user-decided scope is never
+     (`checkComponentDesign`, the design.cell compiler, the prototype kit's check,
+     the review file's validator, the issue fold). A validator tightening is
+     an explainable score shift, not drift. The design section also checks
+     the lineup itself (`src/scoring/design-lineup.ts`): the artifacts' write
+     order with the acceptance tests last, `decisions.md`'s tagged lines, the
+     gap check adding only `*assumed*` lines and open questions, no form
+     question asked, and a closing that points at the Design card.
+   - *rubric judge*: one sonnet call, seeing the artifact, the rubric, the
+     sim's decisions digest and the organization skill's settled sections —
+     user-decided scope and an org default the agent followed are never
      penalized as invention.
    - *bands*: combined score → **pass ≥75 / review 50–75 / fail <50**; a
      `mustNot` violation forces at least review.
@@ -46,6 +53,7 @@ through the playground's production-parity waist.
 ```bash
 make eval                                  # everything (real model calls)
 make eval EVAL=evals/requirements.eval.ts  # one section
+make eval EVAL=evals/address-comments.eval.ts
 make eval-ui                               # run once + local results UI
 EVAL_REPEATS=3 make eval EVAL=...          # score-spread mode (#355)
 ```
@@ -60,5 +68,11 @@ Add a YAML under `scenarios/<section>/` — no code changes. Capture a fixture
 by running the upstream section once, reviewing/hand-tuning the produced
 `specs/`, and freezing it under `scenarios/fixtures/<name>/` (refresh
 deliberately; it's a conscious event, not silent drift). The models for the
-sim and judge are pinned in `src/config.ts` (sonnet, temperature 0) so score
-variance attributes to the agent under eval.
+sim and judge are pinned in `src/config.ts` (sonnet) so score variance
+attributes to the agent under eval.
+
+An `address-comments` scenario names a designed fixture, the `review` file
+the console flushes before it sends `/address-comments`, and the expected
+outcome of each comment: `act` (where its change must start, and what it must
+reach), `ask` (ambiguous: a question on the comment, nothing changed) or
+`wait` (a draft: untouched).

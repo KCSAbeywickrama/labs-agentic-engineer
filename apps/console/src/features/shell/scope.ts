@@ -40,7 +40,6 @@ export type ProjectPage = "overview" | "builds" | "validations" | "deploy" | "is
 export type ProjectCard =
   | "spec"
   | "design"
-  | "prototype"
   | "questions"
   | "build"
   | "validation"
@@ -92,7 +91,6 @@ const PAGE_ROUTES: Record<string, ProjectPage> = {
 const CARD_ROUTES: Record<string, ProjectCard> = {
   "/projects/$projectName/_overview/spec": "spec",
   "/projects/$projectName/_overview/design": "design",
-  "/projects/$projectName/_overview/prototype": "prototype",
   "/projects/$projectName/_overview/questions": "questions",
   "/projects/$projectName/builds/$version": "build",
   "/projects/$projectName/validations/$version": "validation",
@@ -104,7 +102,6 @@ const CARD_ROUTES: Record<string, ProjectCard> = {
 const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
   spec: "overview",
   design: "overview",
-  prototype: "overview",
   questions: "overview",
   build: "builds",
   validation: "validations",
@@ -162,7 +159,6 @@ export function pageTitle(page: ProjectPage): string {
 const CARD_TITLE: Record<ProjectCard, string> = {
   spec: "Spec",
   design: "Design",
-  prototype: "Prototype",
   questions: "Questions",
   build: "Build",
   validation: "Validation",
@@ -188,7 +184,7 @@ export function chatTopic(
   card: ProjectCard | null,
   openFeature: string | null,
 ): { topic: string; note: string | null } {
-  if (card === "design" || card === "prototype") return { topic: "the design review", note: null };
+  if (card === "design") return { topic: "the design review", note: null };
   if (card === "spec" && openFeature) {
     return { topic: openFeature, note: "A change that reaches other features is made there too." };
   }

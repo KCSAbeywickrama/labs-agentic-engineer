@@ -159,13 +159,6 @@ items:
     steps: Open the user menu in the shell and choose the account entry.
     expect: The Account screen shows the signed-in user's name and email.
     weight: 1
-  - id: clerk-settings
-    role: WarehouseClerk
-    screen: Home
-    flow: Settings
-    steps: Open the user menu and choose settings. Switch 'Compact tables' on and press 'Save settings'.
-    expect: The Settings screen shows the Compact tables switch; after saving the app arrives on Home without error.
-    weight: 1
   - id: requester-lands-home
     role: Requester
     screen: Home

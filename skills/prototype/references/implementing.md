@@ -24,7 +24,8 @@ screen holds. The prototype wins over the issue text when the two differ.
   `name` is its label in the rail and in reports. The visible title is the
   screen's own `Heading`.
 - **No invented screens, no dropped screens.** Build every screen in the
-  manifest, including the shell screens Account, Settings and Signed out. If
+  manifest, including the shell screens Account, Settings (only when the
+  manifest has one) and Signed out. If
   a screen cannot be built as drawn (its data has no API, its action has no
   endpoint), build the rest of it, leave the gap explicit in the UI, and name
   it in your report. Never fold it into another page.
@@ -68,7 +69,9 @@ screen as drawn.
   Navigation stays in the rail; the header holds none.
 - `user` is the signed-in user from the session, in the header's user menu.
 - `account` and `settings` are user menu items that open the Account and
-  Settings routes. `menu` entries are more user menu items, after Settings.
+  Settings routes. A prototype without a `settings` screen has no Settings
+  item and no Settings route: never add one. `menu` entries are more user
+  menu items, after Settings.
 - `signOut` is the last user menu item, outside any `Can`. It calls
   `signOut()`.
 
@@ -93,8 +96,13 @@ names the exact component: for Oxygen, see `oxygen-ui-design-system`'s
 | `Button` | `emphasis="primary"` is primary on the page, and only those; `"danger"` is destructive; any other is outlined |
 | `Split`, `Grid`, `Stack` | the same arrangement: side by side in that ratio, equal columns, a row or a column |
 
-Labels are **copy**, not hints: they appear on the page as written. Rename one
-only when the wording is wrong for the data the API returns, and say so in
+Labels are **copy**, not hints: use the prototype's text exactly as it is
+written, letter case included: the screen titles (the `Heading` text), the
+navigation entries (the `nav` labels), the back links (the target screen's
+`name`), the buttons, the column headers and the field labels. The prototype
+writes them in sentence case, and the app does too: "My claims" stays "My
+claims", never "My Claims", and "Submit claim" stays "Submit claim". Rename
+one only when the wording is wrong for the data the API returns, and say so in
 your report. Element ids (`<kind>.<slug>`) name things in reports. They need
 not be in the DOM.
 

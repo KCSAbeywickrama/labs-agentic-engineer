@@ -20,7 +20,6 @@
     { "id": "screen.queue", "name": "Queue", "roleIds": ["Support Agent", "Team Lead"] },
     { "id": "screen.ticket", "name": "Ticket", "roleIds": ["Support Agent", "Team Lead"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
-    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Support Agent", "Team Lead"] }
   ],
   "flows": [

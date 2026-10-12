@@ -1,26 +1,37 @@
-# Domain Model
+# Data model
 
-One entity carries the whole product: an expense claim, filed by an employee
-and decided once by an approver.
+An Employee submits Claims; an Approver decides each one. A claim's status and
+decision reason are on the claim itself, never in a separate record.
 
 ```mermaid
 erDiagram
-    EXPENSE_CLAIM {
+    EMPLOYEE ||--o{ CLAIM : submits
+    EMPLOYEE ||--o{ CLAIM : decides
+
+    EMPLOYEE {
         string id
-        string employeeId
+        string name
+        string email
+    }
+    CLAIM {
+        string id
         string description
-        decimal amount
-        date claimDate
+        decimal amountCents
+        date expenseDate
         string status
-        string reason
+        string employeeId
+        datetime submittedAt
+        string decidedBy
         datetime decidedAt
+        string decisionReason
     }
 ```
 
-- `status` is one of `submitted`, `approved`, `rejected`; there is no draft
-  state and no multi-step chain.
-- `reason` is set only when `status` is `rejected`; `decidedAt` is set the
-  moment a decision is made and never changes after.
-- `employeeId` ties a claim to the Employee who filed it. An Employee's own
-  claims and the Approver's queue of every claim are the same records, read
-  through different permissions — not two copies of the data.
+- `EMPLOYEE` is any signed-in person — the identity the gateway asserts, not a
+  record this app seeds; its `id` is the caller's identity subject.
+- `CLAIM.status` is one of `submitted`, `approved`, `rejected` (product-wide
+  decision — no draft state, no multi-step chain).
+- `decidedBy`, `decidedAt` and `decisionReason` are set once, at the decision,
+  and never change afterwards (a decision is final).
+- `amountCents` stores the amount in whole cents to avoid floating-point
+  rounding; it must be greater than zero. `expenseDate` cannot be in the future.

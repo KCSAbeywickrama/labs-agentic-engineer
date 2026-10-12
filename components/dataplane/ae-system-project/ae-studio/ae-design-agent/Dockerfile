@@ -17,9 +17,8 @@
 # The design agent (components/dataplane/ae-system-project/ae-studio/ae-design-agent). Built from the REPO ROOT
 # context (docker-compose sets `context: ..`) because @aep/ae-design-agent imports the
 # workspace package @aep/agent-stream — pnpm must see the whole workspace to
-# resolve it. @aep/agent-stream in turn depends on @aep/excalidraw-dsl (the
-# wireframes layout write-gate) and @wso2/prototype-kit (the prototype
-# write-gate), so those packages must be installed AND built too.
+# resolve it. @aep/agent-stream in turn depends on @wso2/prototype-kit (the
+# prototype write-gate), so that package must be installed AND built too.
 # (@aep/design-projection stays a playground/evals-only devDependency —
 # never imported by src/main.ts, so not built here.)
 FROM node:22-bookworm-slim
@@ -60,9 +59,9 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # @aep/platform-idp-auth (the pod-mode /v1 gate) as packages whose `exports`
 # resolve to ./dist — all MUST be compiled before the service can start, in
 # either mode: main.ts imports the pod listeners unconditionally.
-# @aep/excalidraw-dsl and @wso2/prototype-kit build FIRST: @aep/agent-stream
-# imports them (the layout and prototype write-gates), so their dist must exist
-# for agent-stream's tsc to resolve them. @aep/ae-design-agent imports the kit's
+# @wso2/prototype-kit builds FIRST: @aep/agent-stream imports it (the
+# prototype write-gate), so its dist must exist for agent-stream's tsc to
+# resolve it. @aep/ae-design-agent imports the kit's
 # isolated render check (@wso2/prototype-kit/check) and runs it on the Oxygen
 # theme's prebuilt check runtime, which the theme's build writes to
 # dist/check-runtime.js; the theme builds after the kit and @aep/ui-theme (the
@@ -71,7 +70,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # Without this step the container crashes at boot with "Cannot find module
 # .../@aep/agent-stream/dist" (or the collab-doc analog). These depend only on
 # packages/, so a design-agent source edit doesn't rerun them.
-RUN pnpm --filter @aep/excalidraw-dsl build && pnpm --filter @wso2/prototype-kit build \
+RUN pnpm --filter @wso2/prototype-kit build \
     && pnpm --filter @aep/ui-theme build && pnpm --filter @wso2/prototype-theme-oxygen build \
     && pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build \
     && pnpm --filter @aep/web-search build && pnpm --filter @aep/platform-idp-auth build

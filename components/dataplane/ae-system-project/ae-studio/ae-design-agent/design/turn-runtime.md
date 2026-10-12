@@ -51,13 +51,15 @@ text ([ADR-0003](ADR-0003-turn-composition-lives-here.md)).
 
 A `/v1` turn body (`src/edge/turn-input.ts`) carries the instruction and,
 optionally, `scope` (the feature or the design review the user was looking
-at), an aim (`anchor` + `intent`) and, JSON only, `prototypeFeedback`. A
-review batch rides only a `/prototype` turn (bare or naming the batch's
-component), never with an aim, and only in the Room or when the host saves
-the turn's edits itself (`TurnStarterDeps.callerSavesEdits`, set by the
-playground; the pod never sets it). The retired `target` is
-`400` in both body forms. The pod composes the scope into the instruction
-after the snapshot read and journals scope and batch on the message.
+at) and an aim (`anchor` + `intent`). The retired `target` is `400` in both
+body forms, and the retired `prototypeFeedback` is an unknown field: review
+comments live in `specs/design/review.json` and go to the agent with
+`/address-comments`, a branch of the `design` skill. The pod composes the
+scope into the instruction after the snapshot read and journals it on the
+message. The composer gives
+each turn its start time (`now`); only the Address comments brief uses it, as
+the comments' `addressedAt`. A journal entry written before the field was
+retired still loads: its chat row reads "Prototype feedback (N comments)".
 
 ## Start and watch are separate
 
@@ -128,6 +130,21 @@ turn's record has no `project`. A `design` turn's record carries
 `designFeatures`, the feature IDs its `/design F1 F2` line named (IDs only,
 never the line; `start-spec.ts` `designFeaturesOf`); a bare `/design` sends
 none, which `aep-api` reads as every feature.
+
+- **A design run records where it ended** (L30). A `design` or
+  `address-comments` turn (`savesItsEnd`) asks the Room for a forced save
+  before it leaves (`RoomPeer.flush`: the `{type:"flush", id}` the console's
+  flush-before-build sends, answered `flushed` or `flush-error`), then reads
+  the project's head through the tools socket's lookup and sends it as
+  `endRef`. `aep-api` reads a designed feature's basis there, so the run's own
+  requirement edits (the gap check's assumed lines and questions) never read
+  as out of date. A save that does not land within 60 s, or a lookup that
+  fails (`turn_end_unread`), sends no `endRef`; the turn still completes.
+- **Every record names the files the turn changed** (L18): `changedPaths`,
+  what the turn's own writes left different from the bundle it started with
+  (`runConversationTurn`; a file written and put back is not one), sorted,
+  within the schema (at most 200, each at most 512 characters). `aep-api`
+  numbers each design artifact's revisions from them.
 
 - The record's tokens are the run's whole-turn usage. A turn the desk ends
   itself (shutdown on a roll, the 30-minute cap) or whose run reports none

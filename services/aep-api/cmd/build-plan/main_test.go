@@ -38,13 +38,30 @@ var requirements = map[string]string{
 
 // design is a design of both features that passes the build gate: each
 // component enriched, claiming its feature's story, the service with its
-// openapi.yaml.
+// openapi.yaml and the web application with its prototype.
 var design = map[string]string{
-	"design.cell":                         "component hello-api service\ncomponent hello-webapp web-application\n",
-	"components/hello-api/design.json":    enriched("hello-api", "service", "F2.1"),
-	"components/hello-api/openapi.yaml":   "openapi: 3.0.3\n",
-	"components/hello-webapp/design.json": enriched("hello-webapp", "web-application", "F1.1"),
+	"design.cell":                            "component hello-api service\ncomponent hello-webapp web-application\n",
+	"components/hello-api/design.json":       enriched("hello-api", "service", "F2.1"),
+	"components/hello-api/openapi.yaml":      "openapi: 3.0.3\n",
+	"components/hello-webapp/design.json":    enriched("hello-webapp", "web-application", "F1.1"),
+	"components/hello-webapp/prototype.json": helloPrototypeManifest,
+	"components/hello-webapp/prototype.tsx":  helloPrototypeSource,
 }
+
+const (
+	helloPrototypeManifest = `{
+  "schemaVersion": 3,
+  "name": "Hello",
+  "entryScreen": "home",
+  "roles": [{ "id": "user", "name": "User" }],
+  "states": [{ "id": "default", "name": "Default" }],
+  "screens": [{ "id": "home", "name": "Home", "roleIds": ["user"] }],
+  "flows": []
+}`
+	helloPrototypeSource = `import { defineApp } from "@wso2/prototype-kit";
+export default defineApp({ screens: {}, data: {} });
+`
+)
 
 func enriched(id, typ, story string) string {
 	return `{"name":"` + id + `","type":"` + typ + `","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"` + id +
@@ -136,7 +153,7 @@ func TestScope_TheBuildGateRefusesAnUnbuildableDesign(t *testing.T) {
 		files[path] = body
 	}
 	files["components/hello-webapp/design.json"] = enriched("hello-webapp", "web-application", "F2.1")
-	files["components/hello-webapp/prototype.tsx"] = "export default function App() { return null; }\n"
+	delete(files, "components/hello-webapp/prototype.json")
 	code, out, errOut := runCmd(t, "", "scope", "--requirements-dir", writeRequirements(t), "--design-dir", writeTree(t, files),
 		"--version", "v1", "--features", "F1,F9")
 	if code != 1 || out != "" {
@@ -145,7 +162,7 @@ func TestScope_TheBuildGateRefusesAnUnbuildableDesign(t *testing.T) {
 	for _, want := range []string{
 		"F9 is not a feature of the requirements",
 		"specs/design/design.cell: story F1.1 is in the requirements but no component's design.json lists it",
-		"specs/design/components/hello-webapp/prototype.json: component \"hello-webapp\" has prototype.tsx but no prototype.json",
+		"specs/design/components/hello-webapp/prototype.json: hello-webapp's prototype has no manifest (prototype.json): run Design again",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errOut)

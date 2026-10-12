@@ -14,7 +14,6 @@
 #  - Member and Librarian refusal items for Catalogue and Title: both roles reach them, so no refusal item is written. Member's refusal items assume the screens are not shown; the spec does not say what the app displays instead.
 #  - The Account screen in the prototype shows fixed names and emails per role; the real values for the Name and Email fields are not stated by the spec and are not checked.
 #  - The PRD says librarians see a member's open loans (F2.3) and fees (F4.4) by member; the prototype draws only a status filter on Loans and a member filter on Fees, so per-member open-loan lookup is checked only via the visible Member column.
-#  - Settings (Rows per page) has no stated effect; only the save-and-return behaviour drawn in the prototype is checked.
 #  - The PRD story F3.4 asks for a holds queue per title, oldest first; the prototype draws a title filter on one combined queue, which the holds-queue-filter-title item follows.
 
 items:
@@ -402,13 +401,6 @@ items:
     flow: Account
     steps: Open the user menu and choose the account entry.
     expect: The Account screen shows Name, Email and Role, with Role Member.
-    weight: 1
-  - id: librarian-settings
-    role: Librarian
-    screen: Settings
-    flow: Settings
-    steps: Open the user menu and choose settings. Leave Rows per page at 20 and press Save settings.
-    expect: The Settings screen shows a Rows per page choice; after saving, the app arrives on the Catalogue.
     weight: 1
   - id: member-refused-loans
     role: Member

@@ -154,26 +154,40 @@ type AEStudioTurnRecord struct {
 	Author *AEStudioTurnRecordAuthor `json:"author,omitempty"`
 
 	// BaseRef The repo snapshot sha the turn read.
-	BaseRef             string             `json:"baseRef"`
-	CacheCreationTokens int64              `json:"cacheCreationTokens"`
-	CacheReadTokens     int64              `json:"cacheReadTokens"`
-	Code                string             `json:"code,omitempty"`
-	ContextTokens       int64              `json:"contextTokens,omitempty"`
-	ConversationID      openapi_types.UUID `json:"conversationId"`
+	BaseRef             string `json:"baseRef"`
+	CacheCreationTokens int64  `json:"cacheCreationTokens"`
+	CacheReadTokens     int64  `json:"cacheReadTokens"`
+
+	// ChangedPaths The project files the turn changed: what its own writes left
+	// different from what it started with, repo-relative. Each design
+	// artifact's revision number counts the completed turns that changed
+	// it. Absent when the turn changed nothing.
+	ChangedPaths   []string           `json:"changedPaths,omitempty"`
+	Code           string             `json:"code,omitempty"`
+	ContextTokens  int64              `json:"contextTokens,omitempty"`
+	ConversationID openapi_types.UUID `json:"conversationId"`
 
 	// DesignFeatures The features a `design` turn designed, as the `/design F1 F2`
 	// line named them. Absent or empty means every feature designable
 	// at baseRef (a bare `/design`). Send it only on a `design` turn:
 	// on any other flow it is ignored, not refused, so one record never
 	// costs the batch. The ledger stores the IDs only, never the line.
-	DesignFeatures []string               `json:"designFeatures,omitempty"`
-	FinishedAt     time.Time              `json:"finishedAt"`
-	Flow           string                 `json:"flow"`
-	InputTokens    int64                  `json:"inputTokens"`
-	Kind           AEStudioTurnRecordKind `json:"kind"`
-	Model          string                 `json:"model"`
-	ModelHost      string                 `json:"modelHost"`
-	OutputTokens   int64                  `json:"outputTokens"`
+	DesignFeatures []string `json:"designFeatures,omitempty"`
+
+	// EndRef The commit a design or address-comments turn's Room work was
+	// saved at when it finished (the turn's forced flush, then the
+	// project's head). The requirements at this commit are the basis of
+	// the features the turn designed, so the turn's own edits never read
+	// as out of date. Absent when the flush did not land, and on every
+	// other flow; the basis then falls back to baseRef.
+	EndRef       string                 `json:"endRef,omitempty"`
+	FinishedAt   time.Time              `json:"finishedAt"`
+	Flow         string                 `json:"flow"`
+	InputTokens  int64                  `json:"inputTokens"`
+	Kind         AEStudioTurnRecordKind `json:"kind"`
+	Model        string                 `json:"model"`
+	ModelHost    string                 `json:"modelHost"`
+	OutputTokens int64                  `json:"outputTokens"`
 
 	// Project Absent on a marketplace turn.
 	Project string                   `json:"project,omitempty"`

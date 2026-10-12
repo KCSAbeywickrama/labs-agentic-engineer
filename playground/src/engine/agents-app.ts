@@ -102,7 +102,6 @@ export async function bootAgentsApp(opts: BootOptions): Promise<AgentsApp> {
     connection: opts.connection,
     buildModel: opts.model ? () => opts.model! : (conn, ctx) => createModel(conn, ctx),
     ...(opts.headless ? { headless: true } : {}),
-    callerSavesEdits: true,
   });
   const auth = devAuth();
 

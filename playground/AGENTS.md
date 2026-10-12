@@ -16,6 +16,11 @@ Use this procedure for steps 1 and 3 of the `writing-skills` verify loop.
 ### Before the first run
 
 - Docker mode is the default. It needs a running Docker daemon (`colima start`).
+- On a Linux host, a docker-mode run starts the container as root only to
+  give the image's `aep` user your uid and gid (`runners/remote-worker/local/adopt-host-user.sh`),
+  then runs as `aep`. Thus the run can write the project and run directories,
+  and you own each file that it writes. This step adds about 3 s to a Claude
+  Code run and about 35 s to an OpenCode run. macOS runs do not use it.
 - `code` and `tasks` need `go` on the PATH. Both first derive each
   dependency's `wiring` and `exposesAPI.auth` with aep-api's own derivation, as
   POST /build does before its gate (ADR-0003). `tasks` then runs
@@ -141,7 +146,9 @@ with `requirements`, `interview`, `design`, `prototype` or `tasks`. Load a skill
 verb with `pnpm play <dir> chat "/<skill> <message>"`.
 
 `prototype` writes each web-application's `prototype.json` and `prototype.tsx`.
-To review one and send the comments back, see `pnpm play --help`.
+`prototype --preview` reviews one in the browser: each Save feedback writes the
+comments as drafts in `specs/design/review.json`. `address-comments` sends the
+drafts and runs the `/address-comments` turn (ADR-0006).
 
 A spec verb has no `--restore`. Before each run, copy the fixture to a new
 directory in `playground/.projects/`. Add `--fresh` to start a new
@@ -200,9 +207,8 @@ ae-studio-tools does in production), and the design agent puts it on the
 | spec-turn snapshots exclude `issues/` | production spec turns never see tasks (they are in GitHub) | none needed: this is parity |
 | MCP is the catalog stubs: the design tools are listed, every call answers "no platform catalog" | no cluster, no ae-studio-tools (`engine/tools-fake.ts`) | none locally; the pod's tools socket serves the org's catalog |
 | no Room: a turn's edits stream back and the playground folds them to disk | no ae-collab locally; the folder is the source of truth | the pod joins the Room (`collab/local-room.ts`) |
-| the design agent is booted with `callerSavesEdits`, so a roomless `/prototype` turn takes a review batch | the folder saves the turn, as the Room's committer does in the pod | the pod refuses a batch without a Room |
 | a prototype write is folded on its `tool-result`, not its `tool-call` | the render check that can refuse it runs only in the design agent | none needed: the folder gets what the agent's bundle got |
-| the prototype review page is served by `@wso2/prototype-cli` preview, not the console | no console locally; the preview uses the same kit and Oxygen theme, has no Room, and saves the comments to `<component>/.prototype/feedback.json` | the console's prototype review |
+| the prototype review page is served by `@wso2/prototype-cli` preview, not the console | no console locally; the preview uses the same kit and Oxygen theme, has no Room, and saves the comments to `<component>/.prototype/feedback.json`, which the playground folds into `specs/design/review.json` as drafts | the console's prototype review, whose queue is the drafts |
 | `/v1` admits the session's dev bearer secret (`kit/auth.ts`), on loopback | no Platform IdP locally | the pod's `idpAuthenticate` |
 | `filesChangedExternally` follows the pod's rule (the last turn's snapshot differs), so it is set after any writing turn and resets with each session | the design agent keeps the last turn's facts in memory | the pod's behaviour, per pod lifetime |
 | `code` and `tasks` derive `wiring` and `exposesAPI.auth` from the repo's resource-type manifests, not from the cluster's catalog | there is no cluster; the derivation code is production's (`services/aep-api/cmd/design-derive`, ADR-0003) | a cluster with other resource types derives differently |

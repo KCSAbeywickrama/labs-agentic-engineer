@@ -22,9 +22,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { AeStudioUnavailableNotice } from "../../ae-studio/components/AeStudioUnavailableNotice";
 import { aeStudioUnavailable } from "../../ae-studio/model/unavailable";
 import { PHONE } from "../../shell/layout";
-import { useSeeDesignChanges } from "../api/specModel";
 import { useSpecSaveWarnings } from "../collab/specDoc";
-import { specTabDot } from "../model/designChanges";
 import { openFile } from "../model/files";
 import { useOpenSpecTarget, useSpecWorkspace } from "../useSpecWorkspace";
 import { FilePicker, FileRail } from "./FileRail";
@@ -101,15 +99,6 @@ export function SpecWorkspace({
   const open = model.data ? openFile(model.data, file) : null;
   useReveal(scroller, open?.key ?? "", workspace ? at : undefined);
 
-  // Opening the spec is seeing what design feedback changed in it: the Spec
-  // tab's dot goes. The changed lines stay marked until their comments are resolved.
-  const seeChanges = useSeeDesignChanges(projectName);
-  const unseen = model.data ? specTabDot(model.data.design.specChanges) : false;
-  const { mutate: markSeen, isPending: marking, isError: markFailed } = seeChanges;
-  useEffect(() => {
-    if (unseen && !marking && !markFailed) markSeen();
-  }, [unseen, marking, markFailed, markSeen]);
-
   const unavailable = aeStudioUnavailable(model.error);
   if (unavailable) {
     return (
@@ -169,7 +158,6 @@ export function SpecWorkspace({
             />
             <SpecFilePane
               projectName={projectName}
-              model={data}
               workspace={workspace}
               doc={doc}
               lines={lines}

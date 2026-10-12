@@ -37,6 +37,7 @@ import * as Y from "yjs";
 import { updateYFragment } from "y-prosemirror";
 import { AGENT_INSERTION } from "./agent-mark.js";
 import {
+  allowsAgentInsertion,
   fragmentToMarkdown,
   isMarkdownPath,
   markdownToFragment,
@@ -313,13 +314,15 @@ export function setDocFileAsAgent(
         const start = Y.createAbsolutePositionFromRelativePosition(run.start, doc);
         const end = Y.createAbsolutePositionFromRelativePosition(run.end, doc);
         if (!start || !end || start.type !== end.type) continue;
-        if (!(start.type instanceof Y.XmlText)) continue;
+        if (!(start.type instanceof Y.XmlText) || !markable(start.type)) continue;
         const length = end.index - start.index;
         if (length <= 0) continue;
         start.type.format(start.index, length, { [AGENT_INSERTION]: run.attrs });
       }
       for (const run of inserted) {
-        if (run.length === 0) continue;
+        // An insertion where the schema allows no mark (inside a code
+        // block) stays unmarked: it is written, just not held for review.
+        if (run.length === 0 || !markable(run.text)) continue;
         run.text.format(run.index, run.length, {
           [AGENT_INSERTION]: { agent: meta.agent, at: meta.at },
         });
@@ -333,6 +336,12 @@ export function setDocFileAsAgent(
     );
   }
   return { caret };
+}
+
+/** Whether a text node's parent lets it carry the agentInsertion mark. */
+function markable(text: Y.XmlText): boolean {
+  const parent = text.parent;
+  return parent instanceof Y.XmlElement && allowsAgentInsertion(parent.nodeName);
 }
 
 function collectAllText(

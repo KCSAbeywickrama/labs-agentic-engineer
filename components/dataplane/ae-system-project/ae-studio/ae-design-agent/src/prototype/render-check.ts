@@ -23,6 +23,12 @@
  * permission model, no network, no filesystem, a timeout), because the module
  * being drawn is model output.
  *
+ * Before drawing, the kit's check type-checks the source in this process, so a
+ * read of a field its record type no longer has is refused with its line
+ * (`TYPE_ERROR`). Nothing runs there; the compiler and the declarations it
+ * parses stay resident (about 80 MB of heap), and a warm check holds the event
+ * loop for about a tenth of a second.
+ *
  * Both packages are workspace dependencies whose `dist` the image builds; the
  * theme is resolved once, at import, so an image without its runtimes fails to
  * boot instead of failing every prototype write.

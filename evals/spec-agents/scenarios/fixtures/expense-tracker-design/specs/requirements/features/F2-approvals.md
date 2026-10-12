@@ -15,3 +15,4 @@ Needs: F1.
 ## Decisions
 
 - A decision is final: an approved or rejected claim cannot be decided again. *assumed*
+- The queue lists submitted claims oldest-first, so nothing waits unseen. *assumed*

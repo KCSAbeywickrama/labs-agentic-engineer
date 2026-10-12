@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 )
@@ -74,6 +75,8 @@ func completeDesignFiles() map[string]string {
 		"components/lunch-api/design.json":       enriched("lunch-api", "service", "F1.1", "F1.2", "F1.4"),
 		"components/lunch-api/openapi.yaml":      "openapi: 3.0.3\n",
 		"components/lunch-web/design.json":       enriched("lunch-web", "web-application", "F1.1", "F1.2"),
+		"components/lunch-web/prototype.json":    validPrototypeManifest,
+		"components/lunch-web/prototype.tsx":     validPrototypeSource,
 		"components/slack-notifier/design.json":  enriched("slack-notifier", "service", "F2.1"),
 		"components/slack-notifier/openapi.yaml": "openapi: 3.0.3\n",
 	}
@@ -142,6 +145,76 @@ func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T
 	}
 }
 
+// A web-application's type-mandated artifact is its prototype, both halves: a
+// half missing or blank is refused with the step that writes it, and the whole
+// prototype passes.
+func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
+	const (
+		manifest = "components/lunch-web/prototype.json"
+		source   = "components/lunch-web/prototype.tsx"
+	)
+	for _, tc := range []struct {
+		name     string
+		drop     []string
+		add      map[string]string
+		wantPath string
+		wantMsg  string
+	}{
+		{name: "no design for the app at all", drop: []string{manifest, source},
+			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
+		{name: "no prototype.tsx", drop: []string{source},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "no prototype.json", drop: []string{manifest},
+			wantPath: manifest, wantMsg: "lunch-web's prototype has no manifest (prototype.json): run Design again"},
+		{name: "blank prototype.tsx", add: map[string]string{source: "  \n"},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "the whole prototype"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := completeDesignFiles()
+			for _, k := range tc.drop {
+				delete(files, k)
+			}
+			for k, v := range tc.add {
+				files[k] = v
+			}
+			got := gateErrors(t, files)
+			var want []FileValidationError
+			if tc.wantMsg != "" {
+				want = []FileValidationError{{Path: tc.wantPath, Code: codeMissingComponentArtifact, Message: tc.wantMsg}}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("gate =\n%+v\nwant\n%+v", got, want)
+			}
+		})
+	}
+}
+
+// review.json (the Design step's comments and checks) never refuses a build:
+// unsent drafts and open comments are the console's to show, and a malformed
+// file is the save gate's to refuse when it is written.
+func TestBuildGate_ReviewNeverRefuses(t *testing.T) {
+	for name, review := range map[string]string{
+		"an unsent draft and a sent comment": `{"version":1,"artifacts":[{"path":"specs/design/components/lunch-web/prototype.json","comments":[` +
+			`{"id":"c1","author":{"id":"u-1","name":"Mark"},"text":"Move the total up.","createdAt":"2026-10-10T09:00:00Z","status":"draft"},` +
+			`{"id":"c2","author":{"id":"u-1","name":"Mark"},"text":"Name it Expense.","createdAt":"2026-10-10T09:00:00Z","status":"sent","sentAt":"2026-10-10T09:05:00Z"}]}]}`,
+		"malformed": "{nope",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name != "malformed" {
+				if err := designspec.ValidateDesignReview([]byte(review)); err != nil {
+					t.Fatalf("fixture must be a sound review.json: %v", err)
+				}
+			}
+			files := completeDesignFiles()
+			files["review.json"] = review
+			if errs := gateErrors(t, files); len(errs) != 0 {
+				t.Errorf("review.json must never refuse the build gate, got %+v", errs)
+			}
+		})
+	}
+}
+
 // lunchWebPrototype is a sound prototype for lunch-web whose one role is the
 // rolesDoc's "Member".
 func lunchWebPrototype(files map[string]string, roleID string) map[string]string {
@@ -150,30 +223,11 @@ func lunchWebPrototype(files map[string]string, roleID string) map[string]string
 	return files
 }
 
-// A prototype is not mandatory yet: a web-application without one builds.
-func TestBuildGate_WebApplicationWithoutAPrototypePasses(t *testing.T) {
-	if errs := gateErrors(t, completeDesignFiles()); len(errs) != 0 {
-		t.Fatalf("a web-application with no prototype must pass, got %+v", errs)
-	}
-}
-
 func TestBuildGate_SoundPrototypePasses(t *testing.T) {
 	files := signInDesignFiles()
 	files["security.json"] = rolesDoc("F1.1", "F1.2")
 	if errs := gateErrors(t, lunchWebPrototype(files, "Member")); len(errs) != 0 {
 		t.Fatalf("a sound, current prototype must pass, got %+v", errs)
-	}
-}
-
-// Half a prototype renders nothing: whichever file is missing is named.
-func TestBuildGate_HalfAPrototypeFails(t *testing.T) {
-	for _, drop := range []string{prototypespec.ManifestPath("lunch-web"), prototypespec.SourcePath("lunch-web")} {
-		files := lunchWebPrototype(completeDesignFiles(), "user")
-		delete(files, drop)
-		errs := gateErrors(t, files)
-		if len(errs) != 1 || errs[0].Code != codeMissingComponentArtifact || errs[0].Path != drop {
-			t.Errorf("dropping %s: want one %s row naming it, got %+v", drop, codeMissingComponentArtifact, errs)
-		}
 	}
 }
 
@@ -366,7 +420,9 @@ func signInDesignFiles() map[string]string {
 	files := completeDesignFiles()
 	files["components/lunch-api/design.json"] = authService("lunch-api", "F1.1", "F1.2", "F1.4")
 	files["components/lunch-api/openapi.yaml"] = protectedStubSpec
-	return files
+	// The prototype offers the role the rolesDoc declares, as a sign-in
+	// design's prototype must once security.json exists.
+	return lunchWebPrototype(files, "Member")
 }
 
 // A design with no sign-in needs no roles document — most designs are this.

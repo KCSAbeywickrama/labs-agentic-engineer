@@ -5,17 +5,17 @@
 ## Context
 
 The prototype is a web-application's UI contract (root ADR-0042, amendment
-2026-10-11): the design agent writes it, a reviewer comments on it in the
-console, and the coding run builds against it. The playground had no verb for
-it, so a change to the `prototype` skill or its review loop could be tried
-only on a cluster.
+2026-10-11): the design agent writes it in the Design run, a reviewer comments
+on it in the console, and the coding run builds against it. The review's
+comments are drafts in `specs/design/review.json`, and Address comments sends
+them (root ADR-0051, ADR-0052). The playground had no verb for any of it, so a
+change to the `prototype` or `design` skill's review loop could be tried only
+on a cluster.
 
 Two production facts stood in the way:
 
-- A review batch (`prototypeFeedback`) rides only a `/prototype` turn that runs
-  in a Room. The design agent refuses it otherwise
-  (`ae-design-agent/src/turns/start-turn.ts`): a revision applied to a
-  throwaway bundle would read as done and be lost. The playground has no Room.
+- The console writes the review's drafts into the Room and sends the bare
+  `/address-comments` line. The playground has no console and no Room.
 - The design agent draws each prototype write before it lands and refuses one
   whose screens fail to render. That render check runs only in the design
   agent. The playground folded a write on its `tool-call`, so a refused write
@@ -24,25 +24,27 @@ Two production facts stood in the way:
 ## Decision
 
 **`play <dir> prototype [component]` sends `/prototype [component]`, as the
-console does.** The instruction, the flow's skill lineup and brief, the write
-gate and the render check are the design agent's, unchanged. The verb is gated
-on a design with a `web-application` (`prototypeGate`).
+console's command line does.** The instruction, the flow's skill lineup and
+brief, the write gate and the render check are the design agent's, unchanged.
+The verb is gated on a design with a `web-application` (`prototypeGate`). It
+only (re)generates the prototypes; it sends no comments.
 
 **`--preview` serves `@wso2/prototype-cli`'s preview** on
 `@wso2/prototype-theme-oxygen`, the theme the console's review frame and the
-render check draw with. Its Save feedback writes the batch to
-`<component>/.prototype/feedback.json` (`@wso2/prototype-cli/feedback`).
+render check draw with. Its Save feedback writes the session's queue to
+`<component>/.prototype/feedback.json` (`@wso2/prototype-cli/feedback`). The
+playground folds each save, as it lands, into `specs/design/review.json`: one
+`draft` comment per request on the prototype's manifest path, with the
+request's screen, flow, role, state and elements as its `anchor`
+(`engine/prototype.ts`, `engine/review-file.ts`). A save holds the session's
+whole queue, so it replaces the drafts the session saved before. The folded
+file is removed.
 
-**`--feedback` sends that batch as `prototypeFeedback`** on a `/prototype`
-turn, as the console's Send to agent does, and deletes the file after the
-send. A batch whose `prototypeHash` differs from the pair on disk is refused:
-its element ids can name what a later revision removed.
-
-**A roomless turn takes a batch when its caller saves the edits.** The design
-agent's `TurnStarterDeps.callerSavesEdits` says so, and the playground boots the
-agent with it set. The folder saves the turn, as the Room's committer does in
-the pod. The pod never sets the flag, so production still refuses a batch
-without a Room.
+**`play <dir> address-comments` is the Overview's Address comments.** It marks
+every waiting comment (a draft, or one reopened by an answer) `sent`, then
+runs the bare `/address-comments` turn scoped to the design review, as the
+console does. A turn that fails before the agent wrote the review file puts
+the comments back as they were.
 
 **A prototype write folds on its ok `tool-result`.** The playground holds a
 write to a prototype path by its `toolCallId` and applies it only when its
@@ -53,18 +55,26 @@ fold on their `tool-call`.
 
 ## Alternatives considered
 
-**A folder-backed Room adapter**, so production's Room-only path runs
-unchanged. Rejected: a second Room implementation to keep in step with
-`ae-collab` for one verb. The flag is one boolean whose only effect is the
-refusal it lifts.
+**Send the saved batch on a `/prototype` turn** (`--feedback`, the typed
+`prototypeFeedback`). Retired with the field (root ADR-0051): comments go
+only through the review file, so a revision runs the design skill's
+Addressing comments, which carries a change downstream from the earliest
+artifact it touches.
+
+**Make the CLI's preview write `review.json` itself.** Rejected: the preview
+is the kit's generic tool and knows nothing of AEP's review file. The fold is
+the playground's, beside the one console write it stands in for.
 
 **No review in the playground**, reviewing only on a cluster. Rejected: the
-comment-and-revise loop is what tuning the `prototype` skill iterates on.
+comment-and-address loop is what tuning the `design` and `prototype` skills
+iterates on.
 
 ## Consequences
 
-- `playground/AGENTS.md` lists both divergences (`callerSavesEdits`, the
-  fold on `tool-result`) and the verb under Spec-side skills.
-- The review page is the CLI's preview, not the console's review UI. The batch
-  it saves has the shape the console sends, so the revision turn is the same.
+- `playground/AGENTS.md` lists the divergences (the fold on `tool-result`, the
+  preview in place of the console's review) and the verbs under Spec-side
+  skills.
+- The review page is the CLI's preview, not the console's review UI. The
+  drafts it leaves have the shape the console writes, so Address comments is
+  the same turn.
 - `evals/codegen` cases get their prototypes from this verb (evals ADR-0006).

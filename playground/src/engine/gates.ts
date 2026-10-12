@@ -90,6 +90,17 @@ export function prototypeGate(projectDir: string, component?: string): GateResul
   return ok;
 }
 
+/** Address comments revises a design: there must be one, and its review file. */
+export function addressCommentsGate(projectDir: string): GateResult {
+  if (!existsSync(join(projectDir, "specs/design/design.cell"))) {
+    return blocked("specs/design/design.cell is missing — run the design phase first");
+  }
+  if (!existsSync(join(projectDir, "specs/design/review.json"))) {
+    return blocked("specs/design/review.json is missing — review a prototype with prototype --preview first");
+  }
+  return ok;
+}
+
 /**
  * Key-flow files under specs/design/flows/ — one `.md` per flow, regular
  * files only, non-blank (an empty placeholder is not a flow). The single

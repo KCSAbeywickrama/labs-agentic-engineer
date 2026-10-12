@@ -20,11 +20,20 @@ import { Button } from "@wso2/oxygen-ui";
 import { useBuildAction } from "../buildPicker";
 
 /** "Build v1", where a build is offered: it opens the picker. Nothing while nothing is designed or a build runs. */
-export function BuildButton({ projectName, size = "medium" }: { projectName: string; size?: "small" | "medium" }) {
+export function BuildButton({
+  projectName,
+  size = "medium",
+  variant = "contained",
+}: {
+  projectName: string;
+  size?: "small" | "medium";
+  /** Outlined where another action is the page's primary. */
+  variant?: "contained" | "outlined";
+}) {
   const build = useBuildAction(projectName);
   if (!build.label) return null;
   return (
-    <Button size={size} variant="contained" onClick={build.open}>
+    <Button size={size} variant={variant} onClick={build.open}>
       {build.label}
     </Button>
   );

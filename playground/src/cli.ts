@@ -23,7 +23,8 @@
  *   pnpm play menu                           → project picker → phase menu
  *   pnpm play <dir>                          → chat home (slash commands run phases; /menu for the dashboard)
  *   pnpm play <dir> requirements|interview|design|chat → run one phase; exit code = result
- *   pnpm play <dir> prototype [component]    → `/prototype`; --preview reviews, --feedback revises
+ *   pnpm play <dir> prototype [component]    → `/prototype`; --preview reviews (comments become drafts)
+ *   pnpm play <dir> address-comments         → send the review's drafts with `/address-comments`
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
  * Flags: --idea "<text>", --scope F<n>|design-review, --fresh, --silent, --restore, --yes,
@@ -40,6 +41,7 @@ import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
 import { loadDotenv } from "@aep/ae-design-agent/shared/env";
 import {
+  addressCommentsCommand,
   chatTurn,
   codeCommand,
   evalSaveCommand,
@@ -76,6 +78,7 @@ const COMMANDS = new Set([
   "interview",
   "design",
   "prototype",
+  "address-comments",
   "tasks",
   "code",
   "wire",
@@ -106,9 +109,10 @@ function printUsage(): void {
       "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
       "  pnpm play <dir> requirements|design       generate or refine the spec",
       "  pnpm play <dir> interview F<n>            write one feature's stories (headless /interview)",
-      "  pnpm play <dir> prototype [component]     generate or revise the web-application prototypes",
-      "  pnpm play <dir> prototype [c] --preview   review one in the browser; Save feedback keeps the comments",
-      "  pnpm play <dir> prototype [c] --feedback  send the saved comments as a revision turn",
+      "  pnpm play <dir> prototype [component]     generate or regenerate the web-application prototypes",
+      "  pnpm play <dir> prototype [c] --preview   review one in the browser; Save feedback writes draft comments",
+      "                                            to specs/design/review.json",
+      "  pnpm play <dir> address-comments          send the review's drafts and run /address-comments",
       "  pnpm play <dir> tasks [--features F1,F3]  plan a version's build: one issues/<n>.md checklist",
       "  pnpm play <dir> code|check|undo           run a later step of the impl plan",
       "  pnpm play <dir> wire                      run the generated app locally, as a role, in a browser",
@@ -131,7 +135,6 @@ function printUsage(): void {
       "  --features <ids>  (tasks) the features this version builds, comma-separated; none = every feature",
       "  --product-wide <ids>  (tasks) the product-wide items it builds, comma-separated",
       "  --preview         (prototype) serve the review page until Ctrl-C",
-      "  --feedback        (prototype) send the review the preview saved, then clear it",
       "  --no-triage       (wire) do not ask a model to read the logs when a service fails",
       "  --skip <dep>      (wire) start anyway with an unsupported dependency's env unset",
       "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
@@ -208,7 +211,7 @@ async function runHeadless(
   opts: CodeOptions,
   wireOptions: WireOptions,
   commandArg?: string,
-  prototypeOptions: Pick<PrototypeOptions, "preview" | "feedback" | "noOpen"> = {},
+  prototypeOptions: Pick<PrototypeOptions, "preview" | "noOpen"> = {},
   selection: Pick<TasksOptions, "features" | "productWide"> = {},
 ): Promise<number> {
   let outcome: PhaseOutcome;
@@ -228,6 +231,9 @@ async function runHeadless(
       break;
     case "prototype":
       outcome = await prototypeCommand(projectDir, { ...opts, ...prototypeOptions }, commandArg);
+      break;
+    case "address-comments":
+      outcome = await addressCommentsCommand(projectDir, opts);
       break;
     case "tasks":
       outcome = await tasksCommand(projectDir, { ...opts, ...selection });
@@ -365,7 +371,6 @@ async function main(): Promise<number> {
       "no-open": { type: "boolean" },
       "no-triage": { type: "boolean" },
       preview: { type: "boolean" },
-      feedback: { type: "boolean" },
       features: { type: "string" },
       "product-wide": { type: "string" },
       skip: { type: "string", multiple: true },
@@ -407,13 +412,8 @@ async function main(): Promise<number> {
     ...(values.yes ? { yes: true } : {}),
   };
 
-  if (values.preview && values.feedback) {
-    output.write("--preview and --feedback are separate steps: review first, then send\n");
-    return 1;
-  }
   const prototypeOptions = {
     ...(values.preview ? { preview: true } : {}),
-    ...(values.feedback ? { feedback: true } : {}),
     ...(values["no-open"] ? { noOpen: true } : {}),
   };
 

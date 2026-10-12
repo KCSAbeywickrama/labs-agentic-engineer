@@ -36,7 +36,6 @@
 
 import type {
   PlanScope,
-  PrototypeFeedback,
   Toolset,
   TurnAim,
   TurnScope,
@@ -145,6 +144,35 @@ const PLAN_INSTRUCTION =
 /** A plan turn without a scope, or with one that names no features. */
 const WHOLE_SPEC_SCOPE = '\n\n## Version scope\n\nThis version names no features: the checklist is one item, "spec", for the whole design.\n';
 
+/** The facts a command's branch wording may use, beyond the user's trailing text. */
+interface FlowFacts {
+  /** The turn's start time, ISO 8601 (`TurnModifiers.now`). */
+  now?: string | undefined;
+}
+
+/** A command that names a branch of a skill, and how its branch is said. */
+interface CommandFlow {
+  skill: string;
+  scope: (subject: string, facts: FlowFacts) => string;
+}
+
+/**
+ * The Address comments brief (`/address-comments`): which file holds the
+ * comments and which of them this turn acts on (a comment the agent asked
+ * about waits until the user answers). What the agent then does is
+ * the `design` skill's "Addressing comments". The turn's time rides along
+ * because the agent has no clock and each addressed comment records when.
+ */
+function addressCommentsBrief(now: string | undefined): string {
+  const stamp = now ? ` The time now is ${now}: write it as the addressedAt of each comment you address.` : "";
+  return (
+    "Address the review comments in specs/design/review.json (Addressing comments). Act on every comment " +
+    "whose status is sent or reopened, except a sent one whose question has no answer yet, and leave each " +
+    "draft comment exactly as it is." +
+    stamp
+  );
+}
+
 /**
  * Commands whose token is NOT the skill they load (#579).
  *
@@ -166,7 +194,7 @@ const WHOLE_SPEC_SCOPE = '\n\n## Version scope\n\nThis version names no features
  * user typed, and `/constructor` reaching `Object.prototype` would turn a
  * skill-not-found — which the agent reports cleanly — into a thrown turn.
  */
-const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) => string }> = {
+const COMMAND_FLOWS: Record<string, CommandFlow> = {
   feature: { skill: "refine", scope: (s) => (s ? `Add a feature: ${s}` : "Add a feature.") },
   actor: { skill: "refine", scope: (s) => (s ? `Add an actor: ${s}` : "Add an actor.") },
   amend: { skill: "refine", scope: (s) => s },
@@ -174,6 +202,11 @@ const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) =>
   // `/design F1 F2` names the features this run designs (E1); bare, it designs
   // every designable feature, and the skill says so.
   design: { skill: "design", scope: (s) => (s ? `Design these features: ${s}` : "") },
+  // The review's Address comments is a branch of the design playbook: it
+  // regenerates in the design's own order, so it inlines the same lineup and
+  // shares the cached prefix of a `/design` turn. The comments ride the
+  // review file, never the line.
+  "address-comments": { skill: "design", scope: (_s, facts) => addressCommentsBrief(facts.now) },
   // The plural walks every open dependency; the singular's token IS its skill.
   "resolve-dependencies": {
     skill: "resolve-dependency",
@@ -196,7 +229,16 @@ const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) =>
  * instructions on EVERY turn (see `buildOrgDefaultsBlock`), so listing it as a
  * per-flow eager skill would inline the same body twice.
  */
-const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
+/**
+ * Where a flow's lineup takes the org's design-system skill. Which skill that
+ * is, the org decides (the `organization` skill's `## UI design system`
+ * section, read by `orgDesignSystem`), so the lineup holds this place and
+ * `eagerSkillsFor` fills it from the name it is given, or drops it when the
+ * org names none.
+ */
+const DESIGN_SYSTEM = Symbol("the org's design system");
+
+const FLOW_SUPPORTING_SKILLS: Record<string, (string | typeof DESIGN_SYSTEM)[]> = {
   // The interview mechanics both playbooks defer to, plus the shape of the
   // document they both write. `prd-contract` is a sibling skill rather than a
   // `start` reference so an amend turn can hold the contract without also
@@ -210,31 +252,43 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // `/resolve-dependency` asks (grilling) and writes a dependency file whose
   // shape and research playbook the architecture skill owns.
   "resolve-dependency": ["grilling", "architecture"],
-  // `grilling` first: the design flow interviews too (#578 removed the
-  // "do not interview the user again" clause), and the question mechanics are
-  // no more optional here than on a start turn. Then the rest of the design
-  // lineup, in the order the `design` skill walks it.
-  // `design` names every one, so the model's first act was always to batch-load
-  // the set: one model step, and ~70KB arriving as a tool RESULT — landing AFTER
+  // The design lineup, in the order the `design` skill walks it. `design`
+  // names every one, so the model's first act was always to batch-load the
+  // set: one model step, and ~70KB arriving as a tool RESULT — landing AFTER
   // the turn prompt's cache breakpoint, where it is re-prefilled per step rather
   // than read. Inlined, the same bytes sit INSIDE the marked prompt, cached from
   // the first step and again on the next turn.
   //
-  // Two of them are conditional (a design with no sign-in writes no
-  // security.json, one with no `ai-agent` needs no agent-building), but which
-  // components exist is decided DURING the turn — there is nothing to
-  // condition on when the prompt is composed, and a cached read costs a tenth
-  // of a re-prefill. Org-authored design skills stay
-  // lazy: this map is flow wording and cannot know a given org's catalog.
+  // `grilling` is not here: a design run asks with no form. A question only
+  // the user can answer becomes an open question in the requirements and a
+  // line in the closing, and the run goes on.
   //
-  // `acceptance-criteria` writes the Gherkin features a validation run drives
-  // (ADR-0029), authored from the PRD alone.
-  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "agent-building", "acceptance-criteria"],
-  // `/prototype` derives from the finished design, so it reads what that design
-  // wrote: the cell, the roles and the API. The design-system skill says how an
-  // Oxygen screen is composed from the kit's components; the kit itself is in
-  // the `prototype` skill.
-  prototype: ["cell-design", "security-design", "openapi-conventions", "oxygen-ui-design-system"],
+  // Some are conditional (a project with no `web-application` writes no
+  // prototype), but which components exist is decided DURING the turn — there
+  // is nothing to condition on when the prompt is composed, and a cached read
+  // costs a tenth of a re-prefill. Org-authored design skills stay lazy: this
+  // map is flow wording and cannot know a given org's catalog.
+  //
+  // `prototype` writes each web application's prototype inside the run, after
+  // the data model and the roles; the org's design-system skill says how its
+  // screens are composed. `acceptance-criteria` writes the Gherkin features a
+  // validation run drives (ADR-0029), last, from the requirements and the
+  // prototypes.
+  design: [
+    "cell-design",
+    "architecture",
+    "security-design",
+    "prototype",
+    DESIGN_SYSTEM,
+    "openapi-conventions",
+    "agent-building",
+    "acceptance-criteria",
+  ],
+  // `/prototype` writes the prototypes on their own, from a design that has
+  // its cell, data model and roles: it reads the cell and the roles. The
+  // org's design-system skill says how a screen is composed from the kit's
+  // components; the kit itself is in the `prototype` skill.
+  prototype: ["cell-design", "security-design", DESIGN_SYSTEM],
 };
 
 /**
@@ -251,16 +305,15 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
  */
 const FLOW_BRIEFS: Record<string, string> = {
   prototype:
-    "Generate the prototype of each web-application the design declares. The design is the input: read " +
-    "specs/design/design.cell for the web-application components, the roles in specs/design/security.json, " +
-    "each web-application's API (the openapi.yaml of every component it depends on), the user stories in " +
-    "specs/requirements/features/F<n>-*.md, the product-wide requirements in specs/requirements/product-wide.md, " +
-    "and the key flows in specs/design/flows/*.md. Cover them: every " +
-    "design flow a web-application's users walk becomes a flow of its prototype, and every user story gets at " +
-    "least one screen, unless the product gives it no view (a platform sign-in, a backend job, a machine-facing " +
-    "endpoint); name any story you set aside in your closing. Per web-application write " +
-    "specs/design/components/<component>/prototype.json (the manifest) first and then prototype.tsx beside it " +
-    "(the screens), and change no other file. When component names follow this brief, write only those " +
+    "Generate the prototype of each web-application the design declares. Read specs/design/design.cell for the " +
+    "web-application components, the records in specs/design/domain-model.md, the roles in " +
+    "specs/design/security.json, and each web-application's design.json for the stories it serves; those " +
+    "stories (F<n>.<m>) and their decisions are in the feature files under specs/requirements/features/, the " +
+    "product-wide requirements in specs/requirements/product-wide.md. Every " +
+    "story a web-application serves gets at least one screen and a flow, unless the product gives it no view " +
+    "(a platform sign-in, a machine-facing endpoint); name any story you set aside in your closing. Per " +
+    "web-application write specs/design/components/<component>/prototype.json (the manifest) first and then " +
+    "prototype.tsx beside it (the screens), and change no other file. When component names follow this brief, write only those " +
     "prototypes; otherwise write one for every web-application. Where a prototype already exists, revise it " +
     "with edits and keep its ids stable.",
 };
@@ -270,45 +323,15 @@ function flowBrief(skill: string): string | undefined {
   return Object.hasOwn(FLOW_BRIEFS, skill) ? FLOW_BRIEFS[skill] : undefined;
 }
 
-/**
- * The revision brief of a `/prototype` turn that carries a reviewer's feedback
- * batch. It replaces the generation brief: the turn revises ONE prototype, not
- * every one the design declares. The reviewer's words are quoted verbatim, one
- * quote line per text line, so a request can never read as instruction text
- * and nothing the reviewer wrote is paraphrased.
- */
-function feedbackBrief(feedback: PrototypeFeedback): string {
-  const dir = `specs/design/components/${feedback.component}`;
-  const n = feedback.requests.length;
-  const requests = feedback.requests.map((r, i) => {
-    const where = [`screen "${r.screenId}"`, ...(r.flowId ? [`flow "${r.flowId}"`] : []), `role "${r.roleId}"`, `display state "${r.stateId}"`];
-    const about = r.elementIds.length > 0 ? `Elements (ids): ${r.elementIds.join(", ")}` : "Elements: none selected, so the request is about the whole screen";
-    const quoted = r.text.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
-    return `Request ${i + 1}\nWhere: ${where.join(", ")}\n${about}\nThe reviewer wrote:\n${quoted}`;
-  });
-  return (
-    `Revise the prototype of the web-application "${feedback.component}" from a reviewer's feedback. This is a revision, ` +
-    `not a generation: do not write any other component's prototype. The reviewer looked at the revision with hash ` +
-    `${feedback.prototypeHash} and made ${n === 1 ? "one request" : `${n} requests`} below, each pointing at the ` +
-    `ids shown on the screen, in the role and in the display state named. Read ${dir}/prototype.json and ` +
-    `${dir}/prototype.tsx first and change only those two files, with edits; if they no longer match what the ` +
-    `request describes, apply what still makes sense and say what differs. Apply every request you can. Keep every ` +
-    `manifest key and element id you do not need to change, so the next round of feedback still lines up. Decline a ` +
-    `request only when it conflicts with the design (the cell, the security roles, the API or the stories), and ` +
-    `say which part of the design it conflicts with. A request that names no element is about the whole screen. ` +
-    `Finish by answering each request by its number, as applied (with what you changed) or declined (with why).\n\n` +
-    requests.join("\n\n")
-  );
-}
-
 /** The branch a command names, or undefined for a token that IS its skill. */
-function commandFlow(token: string): { skill: string; scope: (subject: string) => string } | undefined {
+function commandFlow(token: string): CommandFlow | undefined {
   return Object.hasOwn(COMMAND_FLOWS, token) ? COMMAND_FLOWS[token] : undefined;
 }
 
-/** The extras a flow inlines beyond its own skill. */
-function supportingSkills(skill: string): string[] {
-  return Object.hasOwn(FLOW_SUPPORTING_SKILLS, skill) ? (FLOW_SUPPORTING_SKILLS[skill] ?? []) : [];
+/** The extras a flow inlines beyond its own skill, with the org's design system in its place. */
+function supportingSkills(skill: string, designSystem: string | undefined): string[] {
+  const lineup = Object.hasOwn(FLOW_SUPPORTING_SKILLS, skill) ? (FLOW_SUPPORTING_SKILLS[skill] ?? []) : [];
+  return lineup.flatMap((name) => (name !== DESIGN_SYSTEM ? [name] : designSystem !== undefined ? [designSystem] : []));
 }
 
 // --- Composition -------------------------------------------------------------
@@ -353,6 +376,12 @@ export interface TurnModifiers {
    * something the user said and did not.
    */
   aim?: TurnAim | undefined;
+  /**
+   * When the turn starts, ISO 8601. The model has no clock, so a turn that
+   * stamps a time into a file is given it (Address comments' `addressedAt`);
+   * every other turn's text leaves it out, so it stays byte-identical.
+   */
+  now?: string | undefined;
 }
 
 /**
@@ -364,7 +393,7 @@ export interface TurnModifiers {
  * turn has no scope either: it plans from the whole design.
  */
 export function composeInstruction(turn: TurnSpec, mods: TurnModifiers = {}): string {
-  const body = turn.kind === "plan" ? planBody(turn) : specBody(turn) + SPEC_PATHS_RULE;
+  const body = turn.kind === "plan" ? planBody(turn) : specBody(turn, mods.now) + SPEC_PATHS_RULE;
   const lead = mods.previousTurnFailed ? PREVIOUS_TURN_FAILED_NOTE + "\n\n" : "";
   const scope = turn.kind === "plan" ? "" : scopeNote(mods.scope);
   return lead + scope + aimNote(mods.aim) + body + (mods.headless ? HEADLESS_NOTE : "");
@@ -405,7 +434,7 @@ export function aimNote(aim: TurnAim | undefined): string {
 }
 
 /** The instruction head for every kind that edits the spec bundle. */
-function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
+function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>, now: string | undefined): string {
   switch (turn.kind) {
     case "chat":
       // Ordinary chat rides verbatim — the user's words are the instruction.
@@ -417,12 +446,12 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       // allowlist that goes stale against the org's catalog.
       const command = commandFlow(turn.skill);
       const skill = command?.skill ?? turn.skill;
-      const brief = turn.prototypeFeedback ? feedbackBrief(turn.prototypeFeedback) : flowBrief(skill);
+      const brief = flowBrief(skill);
       const base = `Load the ${skill} skill and follow it.` + (brief ? `\n\n${brief}` : "");
       // A command that names a BRANCH says which one, and carries whatever the
       // user clicked as the branch's subject; everything else passes the user's
       // trailing text through untouched.
-      const scoped = command ? command.scope(turn.text?.trim() ?? "") : turn.text?.trim();
+      const scoped = command ? command.scope(turn.text?.trim() ?? "", { now }) : turn.text?.trim();
       const withText = scoped ? `${base}\n\n${scoped}` : base;
       // Reference documents ride flows the same way they ride start turns:
       // a flow generates artifacts, and an attached sketch IS the brief for
@@ -586,10 +615,16 @@ export function imageLeftOutOfHistory(filename: string | undefined): string {
   return `[${filename ? `The image ${filename}` : "An image"} was left out here: the model on this connection does not read images.]`;
 }
 
-export function eagerSkillsFor(turn: TurnSpec, scope?: TurnScope): string[] {
+/**
+ * The skills a turn inlines: its flow's own skill, then that flow's lineup.
+ * `designSystem` is the skill the org names as its design system
+ * (`orgDesignSystem`); a flow that composes screens inlines it, and none does
+ * when it is undefined.
+ */
+export function eagerSkillsFor(turn: TurnSpec, scope?: TurnScope, designSystem?: string): string[] {
   const instructed = instructedSkill(turn, scope);
   if (instructed === undefined) return [];
-  return [instructed, ...supportingSkills(instructed)];
+  return [instructed, ...supportingSkills(instructed, designSystem)];
 }
 
 

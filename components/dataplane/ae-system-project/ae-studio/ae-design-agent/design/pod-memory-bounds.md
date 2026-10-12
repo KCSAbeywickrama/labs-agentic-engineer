@@ -20,6 +20,7 @@ bound, and each bound is a named constant beside the code that applies it.
 | Turn statuses | The last 20 per scope, or 1 h. | `turns/turn-desk.ts` |
 | Usage outbox | 200 records. Past the cap, the oldest is dropped. | `usage/outbox.ts` |
 | Prototype render checks | `MAX_RENDER_CHECKS` (1) at once in the pod, each a Node child with a 384 MiB heap (the kit's `RENDER_HEAP_MB`) and a 15 s limit. Later checks wait in call order; a turn's own writes already queue behind its pending verdict, so at most one check waits per running turn. | `prototype/render-check.ts` |
+| Prototype type check | One resident copy: the TypeScript compiler and the declarations it reads (the standard library, React's types, the kit's), parsed on the first check and kept, about 80 MB of heap. Each check's program is dropped when it returns, and checks run one at a time behind `MAX_RENDER_CHECKS`. | `@wso2/prototype-kit/check` (`check/types.ts`) |
 
 ## Choices
 

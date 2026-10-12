@@ -836,6 +836,9 @@ test("mcp + collabPeer coexist: the discovered tool is still merged and callable
     delete(path: string): void {
       delete this.doc[path];
     }
+    flush(): Promise<boolean> {
+      return Promise.resolve(true);
+    }
     leave(): Promise<number> {
       return Promise.resolve(0);
     }

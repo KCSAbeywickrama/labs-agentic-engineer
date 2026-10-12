@@ -16,7 +16,6 @@
     "@aep/agent-stream": "workspace:*",
     "@aep/ae-design-agent": "workspace:*",
     "@aep/design-projection": "workspace:*",
-    "@aep/excalidraw-dsl": "workspace:*",
     "@aep/progress-view": "workspace:*",
     "@wso2/prototype-cli": "workspace:*",
     "@wso2/prototype-kit": "workspace:*",

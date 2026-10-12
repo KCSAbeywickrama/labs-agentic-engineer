@@ -18,24 +18,29 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { designCommand } from "@aep/contracts/commands";
+import { ADDRESS_COMMENTS_COMMAND, designCommand } from "@aep/contracts/commands";
 import { canSend, chatStore, useProjectChat } from "../agent-chat/useProjectChat";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useChatPanel } from "../shell/chatPanel";
 import { designKey } from "./api/designModel";
+import type { DesignReviewActions } from "./useDesignReview";
 
 /**
  * The design review's two agent turns, from wherever they are offered: the
- * design (Next up, the Design tab, the design card's header) and Address
- * comments. Each is a turn in the project's chat, scoped to the design
- * review: the design card opens (that is where the work shows), the chat
- * opens (that is where the agent says what it does), and the message goes.
- * While a turn runs they wait, as the composer does.
+ * design (Next up, the Design card) and Address comments (the Overview).
+ * Each is a turn in the project's chat, scoped to the design review: the
+ * chat opens (that is where the agent says what it does), and the message
+ * goes. While a turn runs they wait, as the composer does.
+ *
+ * Address comments sends the review, not words: every waiting comment is
+ * marked sent in review.json (one write), then the bare `/address-comments`
+ * line goes; the room is flushed before every turn, so the agent reads them.
+ * Should the turn not start, the comments are put back as they were.
  */
 export function useDesignTurns(projectName: string): {
   /** Send the design turn for the features that need it: `/design F1 F2`. */
   design: () => void;
-  addressComments: (count: number) => void;
+  addressComments: (review: DesignReviewActions) => Promise<void>;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
 } {
@@ -45,11 +50,12 @@ export function useDesignTurns(projectName: string): {
   const queryClient = useQueryClient();
   const toDesign = useSpecWorkspace(projectName).workspace?.design.toDesign ?? [];
 
-  const send = async (text: string) => {
+  const send = async (text: string): Promise<boolean> => {
     panel.open();
     const sent = await chatStore.send(projectName, text, { kind: "design" });
     // The design card shows the turn running as soon as the server has it.
     if (sent) void queryClient.invalidateQueries({ queryKey: designKey(projectName) });
+    return sent;
   };
 
   return {
@@ -58,6 +64,11 @@ export function useDesignTurns(projectName: string): {
       void navigate({ to: "/projects/$projectName/design", params: { projectName } });
       void send(designCommand(toDesign));
     },
-    addressComments: (count) => void send(`Address comments · ${count}`),
+    addressComments: async (review) => {
+      if (!canSend(chat)) return;
+      const sent = review.sendWaiting();
+      if (!sent || sent.length === 0) return;
+      if (!(await send(ADDRESS_COMMENTS_COMMAND))) review.unsend(sent);
+    },
   };
 }

@@ -1,6 +1,8 @@
 # Design section, standalone: starts from the captured-then-curated
-# requirements fixture (#356). The brief still matters — design turns can ask
-# questions, and the sim answers them.
+# requirements fixture (#356). Design asks no form question (a call only the
+# user can make becomes an open question for the Design card), so the brief
+# answers only a question the run should not have asked; the structural
+# checks count it.
 
 brief:
   name: lunch-coordinator
@@ -29,10 +31,15 @@ rubric:
   mustCover:
     - item: A web frontend component and a backend/API component are both designed
       weight: 2
-    - Google-workspace (OAuth/SSO) sign-in appears in the design, not a custom credential store
+    - Sign-in is single sign-on through the platform identity provider (the organization's settled default), with the team's existing company accounts; no local accounts, passwords or credential store
     - The API models the order-round lifecycle including the cutoff lock
-    - Slack notification integration appears in the design
+    - Slack is an external dependency with its own definition, and the design notifies the team's channel when a round opens and at the cutoff
     - Consolidated/grouped order view with per-person totals is designed
+    - item: "The web app's prototype (prototype.json + prototype.tsx) draws opening a round (restaurant, cutoff), a teammate adding, editing and removing their own items before the cutoff, the round locked after the cutoff, and the opener's consolidated order grouped by menu item with per-person totals"
+      weight: 2
+    - "specs/design/decisions.md holds only technical choices a product user would not notice (storage, paging, where a check runs), one line each, tagged with the artifact it shapes (architecture, data-model, security, flows) or a component's name, and naming the features it serves (or all); it restates no requirement line and lists no organization default (the stack, the sign-in provider) as a decision"
   mustNot:
     - A native mobile app component
     - Payment processing or money-movement integration
+    - A requirements line the run added that widens the PRD's scope (a new feature, a new actor, or an integration the PRD does not have)
+    - A wireframes.dsl file, or screens described anywhere but the prototype

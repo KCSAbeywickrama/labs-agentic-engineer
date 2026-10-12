@@ -47,8 +47,21 @@ async function until(cond: () => boolean, what: string, ms = 10_000): Promise<vo
   }
 }
 
+/** How the server answers a `flush`: as the collab committer does, or not at all. */
+let flushAnswer: "flushed" | "flush-error" | "silent" = "flushed";
+/** The flush requests the server got, with the doc's PRD as it stood then. */
+const flushes: { id: unknown; prd: string | undefined }[] = [];
+
 before(async () => {
   server = new Server({
+    onStateless: async ({ connection, document, payload }) => {
+      const msg = JSON.parse(payload) as { type?: string; id?: unknown };
+      if (msg.type !== "flush") return;
+      flushes.push({ id: msg.id, prd: readDocFile(document, "requirements/prd.md") });
+      // Another peer's answer first: only the asker's id settles the flush.
+      connection.sendStateless(JSON.stringify({ type: "flushed", id: "someone-else" }));
+      if (flushAnswer !== "silent") connection.sendStateless(JSON.stringify({ type: flushAnswer, id: msg.id }));
+    },
     onLoadDocument: ({ document, documentName }) => {
       serverDocs.set(documentName, document);
       setDocFile(document, "requirements/prd.md", "# PRD\n\nSeeded body.");
@@ -97,6 +110,28 @@ test("joins, snapshots the doc, mirrors bundle ops live, leaves", async () => {
   } finally {
     peer.leave();
   }
+});
+
+// L30: a design run saves its Room work before it leaves. The save is the
+// committer's forced flush, asked after the run's writes, so it sees them,
+// and answered by its own id; an error, silence or a peer that left is
+// "not landed", never a throw.
+test("flush asks the Room to save after the writes and reports whether it landed", async () => {
+  const peer = await joinRoom({ url, roomId: "spec-acme-flush", rejoin: { flushWaitMs: 300 } });
+  try {
+    peer.set("requirements/prd.md", "# PRD\n\nSaved by the run.", false);
+    flushAnswer = "flushed";
+    assert.equal(await peer.flush(), true);
+    assert.equal(flushes.at(-1)?.prd, "# PRD\n\nSaved by the run.", "the save sees the run's writes");
+    flushAnswer = "flush-error";
+    assert.equal(await peer.flush(), false);
+    flushAnswer = "silent";
+    assert.equal(await peer.flush(), false, "no answer in time");
+  } finally {
+    flushAnswer = "flushed";
+    await peer.leave();
+  }
+  assert.equal(await peer.flush(), false, "a peer that left saves nothing");
 });
 
 test("a failed-op does not touch the doc", async () => {

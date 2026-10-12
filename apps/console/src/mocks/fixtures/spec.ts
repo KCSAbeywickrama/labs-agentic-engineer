@@ -96,7 +96,7 @@ export const acmeExpensesSpec: MockSpecModel = {
       ],
     },
   ],
-  design: { designedFrom: {}, openComments: 0, specChanges: [] },
+  design: { designedFrom: {} },
   files: {
     "specs/requirements/prd.md": acmePrd,
     [featurePath("F1-submit-expenses")]: acmeF1,
@@ -193,7 +193,7 @@ export const triageAgentSpec: MockSpecModel = {
     },
   ],
   documents: [],
-  design: { designedFrom: {}, openComments: 0, specChanges: [] },
+  design: { designedFrom: {} },
   files: {
     "specs/requirements/prd.md": triagePrd,
     [featurePath("F1-classify-tickets")]: triageF1,
@@ -207,7 +207,7 @@ export function freshSpec(productName: string): MockSpecModel {
   return {
     features: [],
     documents: [],
-    design: { designedFrom: {}, openComments: 0, specChanges: [] },
+    design: { designedFrom: {} },
     files: {
       "specs/requirements/prd.md": `# ${productName}\n\n## Features\n\nThe agent proposes features once it has read your brief.\n`,
       "specs/requirements/product-wide.md": "# Product-wide\n\nRules that apply to more than one feature.\n",

@@ -99,7 +99,6 @@ function Shell({ children }: { children: ReactNode }) {
         { id: "nav.event-registrations", label: "Registrations", to: "screen.event-registrations" },
       ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -758,17 +757,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const nav = useNav();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form id="form.settings" onSubmit={() => nav.go("screen.events")} actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}>
-        <Field id="field.zone-pref" label="Show times in the event's time zone" type="switch" defaultValue="on" />
-      </Form>
-    </Shell>
-  );
-}
 
 function SignedOut() {
   return (
@@ -793,7 +781,6 @@ export default defineApp({
     "screen.my-registrations": MyRegistrations,
     "screen.event-registrations": EventRegistrations,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { events, rooms, sessions, proposals, reviews, registrations, reviewers },

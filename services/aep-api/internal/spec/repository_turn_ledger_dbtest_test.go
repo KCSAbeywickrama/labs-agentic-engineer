@@ -24,6 +24,7 @@ package spec_test
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -198,8 +199,8 @@ func TestRecordFinished_StampsCost(t *testing.T) {
 }
 
 // The status poll and kickoff idempotency read Newest; the build gate's
-// design baseline reads NewestCompletedFlow. Both see ledger rows unchanged:
-// a failed record reads failed, and a completed design turn is the baseline.
+// design baseline reads DesignRuns. Both see ledger rows unchanged: a failed
+// record reads failed, and a completed design turn is the baseline.
 func TestRecordFinished_ReadersSeeTheLedger(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
@@ -227,9 +228,9 @@ func TestRecordFinished_ReadersSeeTheLedger(t *testing.T) {
 	if err != nil || newest == nil || newest.ID != failed.TurnID || newest.Status != spec.TurnStatusFailed {
 		t.Fatalf("Newest = (%+v, %v), want the failed record", newest, err)
 	}
-	baseline, err := repo.NewestCompletedFlow(ctx, "o1", "p1", "design")
-	if err != nil || baseline == nil || baseline.ID != design.TurnID {
-		t.Fatalf("NewestCompletedFlow(design) = (%+v, %v), want the design record", baseline, err)
+	runs, err := repo.DesignRuns(ctx, "o1", "p1")
+	if err != nil || len(runs) != 1 || runs[0].BaseRef != design.BaseRef {
+		t.Fatalf("DesignRuns = (%+v, %v), want the design record", runs, err)
 	}
 	if other, _ := repo.Newest(ctx, "o2", "p1"); other != nil {
 		t.Fatalf("Newest for another org = %+v, want nil", other)
@@ -379,7 +380,7 @@ func TestRecordFinished_StoresADesignTurnsFeatures(t *testing.T) {
 	}
 }
 
-// CompletedFlows lists one project's completed runs of one flow, the
+// CompletedFlows lists one project's completed runs of the flows, the
 // latest-FINISHED first: the run that last designed a feature is the one whose
 // work landed last, whatever order the runs started in or arrived. Failed
 // runs, other flows and other projects are left out, and limit caps the list.
@@ -415,7 +416,7 @@ func TestCompletedFlows_LatestFinishedFirst(t *testing.T) {
 	if err := db.Create(&legacy).Error; err != nil {
 		t.Fatalf("insert legacy row: %v", err)
 	}
-	runs, err := repo.CompletedFlows(ctx, "o1", "p1", "design", 10)
+	runs, err := repo.CompletedFlows(ctx, "o1", "p1", []string{spec.FlowDesign}, 10)
 	if err != nil {
 		t.Fatalf("CompletedFlows: %v", err)
 	}
@@ -426,44 +427,70 @@ func TestCompletedFlows_LatestFinishedFirst(t *testing.T) {
 	if want := []string{long.TurnID, legacy.ID, short.TurnID, oldest.TurnID}; !slices.Equal(ids, want) {
 		t.Fatalf("CompletedFlows = %v, want %v (long, legacy, short, oldest)", ids, want)
 	}
-	if runs, err := repo.CompletedFlows(ctx, "o1", "p1", "design", 1); err != nil || len(runs) != 1 || runs[0].ID != long.TurnID {
+	if runs, err := repo.CompletedFlows(ctx, "o1", "p1", []string{spec.FlowDesign}, 1); err != nil || len(runs) != 1 || runs[0].ID != long.TurnID {
 		t.Fatalf("CompletedFlows limit 1 = (%v, %v), want the latest-finished run", runs, err)
+	}
+	if runs, err := repo.CompletedFlows(ctx, "o1", "p1", []string{spec.FlowDesign, "start"}, 1); err != nil || len(runs) != 1 || runs[0].ID != other.TurnID {
+		t.Fatalf("CompletedFlows of two flows = (%v, %v), want the start run, which finished last", runs, err)
 	}
 }
 
-// NewestCompletedFlow is the head of CompletedFlows: the run that finished
-// last, so the status poll's design baseline is the build gate's. A run that
-// started later but finished first is not it, and a row with no finished_at
-// sorts by created_at.
-func TestNewestCompletedFlow_IsTheLatestFinishedRun(t *testing.T) {
+// A design run's end and every turn's changed paths round-trip (L30, L18):
+// DesignRuns reads both design flows with their ends, and ArtifactRevisions
+// counts the completed turns that changed each design artifact, the review
+// file and requirements left out and a prototype's screens counted as the
+// prototype.
+func TestDesignLedger_EndsAndRevisions(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	repo := spec.NewTurnRepository(db, nil)
 	ctx := context.Background()
 	base := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
-	at := func(rec spec.TurnRecord, start, finish time.Duration) spec.TurnRecord {
-		rec.StartedAt, rec.FinishedAt = base.Add(start), base.Add(finish)
+	at := func(rec spec.TurnRecord, start time.Duration) spec.TurnRecord {
+		rec.StartedAt, rec.FinishedAt = base.Add(start), base.Add(start+time.Minute)
 		return rec
 	}
-	long := at(finishedTurn("p1"), 0, 30*time.Minute)              // started first, finished last
-	short := at(finishedTurn("p1"), 5*time.Minute, 10*time.Minute) // started later, finished first
-	if err := repo.RecordFinished(ctx, "o1", []spec.TurnRecord{short, long}); err != nil {
+	design := at(finishedTurn("p1"), 0)
+	design.EndRef = "dddddddddddddddddddddddddddddddddddddddd"
+	design.ChangedPaths = []string{
+		"specs/requirements/features/F1-core.md",
+		"specs/design/domain-model.md",
+		"specs/design/components/web/prototype.json",
+		"specs/design/components/web/prototype.tsx",
+	}
+	addressed := at(finishedTurn("p1"), time.Hour)
+	addressed.Flow = spec.FlowAddressComments
+	addressed.EndRef = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	addressed.ChangedPaths = []string{"specs/design/components/web/prototype.tsx", "specs/design/review.json"}
+	failed := at(finishedTurn("p1"), 2*time.Hour)
+	failed.Status = "failed"
+	failed.ChangedPaths = []string{"specs/design/domain-model.md"}
+	chat := at(finishedTurn("p1"), 3*time.Hour)
+	chat.Flow = ""
+	chat.ChangedPaths = []string{"specs/design/domain-model.md"}
+	if err := repo.RecordFinished(ctx, "o1", []spec.TurnRecord{design, addressed, failed, chat}); err != nil {
 		t.Fatalf("RecordFinished: %v", err)
 	}
-	newest, err := repo.NewestCompletedFlow(ctx, "o1", "p1", spec.FlowDesign)
-	if err != nil || newest == nil || newest.ID != long.TurnID {
-		t.Fatalf("NewestCompletedFlow = (%+v, %v), want the latest-finished run %s", newest, err, long.TurnID)
-	}
 
-	legacy := spec.AgentTurn{
-		ID: uuid.NewString(), OrgID: "o1", ProjectID: "p1", ConversationID: uuid.NewString(),
-		Flow: spec.FlowDesign, BaseRef: "cccccccccccccccccccccccccccccccccccccccc", Status: "completed",
-		StartedAt: base.Add(40 * time.Minute), CreatedAt: base.Add(40 * time.Minute),
+	runs, err := repo.DesignRuns(ctx, "o1", "p1")
+	if err != nil {
+		t.Fatalf("DesignRuns: %v", err)
 	}
-	if err := db.Create(&legacy).Error; err != nil {
-		t.Fatalf("insert legacy row: %v", err)
+	want := []spec.DesignRun{
+		{Flow: spec.FlowAddressComments, BaseRef: addressed.BaseRef, EndRef: addressed.EndRef},
+		{Flow: spec.FlowDesign, BaseRef: design.BaseRef, EndRef: design.EndRef},
 	}
-	if newest, err := repo.NewestCompletedFlow(ctx, "o1", "p1", spec.FlowDesign); err != nil || newest == nil || newest.ID != legacy.ID {
-		t.Fatalf("NewestCompletedFlow with a legacy row = (%+v, %v), want the legacy row (created after the long run finished)", newest, err)
+	if !reflect.DeepEqual(runs, want) {
+		t.Fatalf("DesignRuns = %+v, want %+v", runs, want)
+	}
+	revisions, err := repo.ArtifactRevisions(ctx, "o1", "p1")
+	if err != nil {
+		t.Fatalf("ArtifactRevisions: %v", err)
+	}
+	if want := map[string]int{
+		"specs/design/domain-model.md":               2,
+		"specs/design/components/web/prototype.json": 2,
+	}; !reflect.DeepEqual(revisions, want) {
+		t.Fatalf("ArtifactRevisions = %v, want %v", revisions, want)
 	}
 }

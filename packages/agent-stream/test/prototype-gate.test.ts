@@ -161,6 +161,30 @@ test("an editFile that breaks the source is refused and leaves it unchanged", ()
   assert.equal(b.read(SOURCE_PATH), SOURCE);
 });
 
+// The remedy names the move that works: a refused write leaves the bundle
+// unchanged, so a NEW file still does not exist and editFile would get
+// NO_SUCH_FILE; an existing one can take a local edit.
+const NEW_FILE_REMEDY = /the file still does not exist and editFile has nothing to edit\. .*resend the whole corrected file with ONE addFile\.$/;
+const EXISTING_FILE_REMEDY = /an editFile for a local fix, or removeFile then ONE addFile of the whole corrected file\.$/;
+
+test("a refused addFile of a new prototype.tsx says to resend it with addFile, never editFile", () => {
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST });
+  const r = refused(b.addFile(SOURCE_PATH, SOURCE + '\nfetch("/x");'));
+  assert.match(r.message, NEW_FILE_REMEDY);
+  assert.doesNotMatch(r.message, /an editFile for a local fix/);
+});
+
+test("a refused editFile of an existing prototype.tsx offers a local edit or a whole re-add", () => {
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST, [SOURCE_PATH]: SOURCE });
+  const r = refused(b.editFile(SOURCE_PATH, "<Screen>", '<Screen onClick={() => fetch("/x")}>'));
+  assert.match(r.message, EXISTING_FILE_REMEDY);
+});
+
+test("a refused addFile of a new prototype.json says to resend it with addFile", () => {
+  const b = new FileBundle({});
+  assert.match(refused(b.addFile(MANIFEST_PATH, manifestWith({ entryScreen: "screen.gone" }))).message, NEW_FILE_REMEDY);
+});
+
 test("a listing over eight findings is summarized in the message but complete in findings", () => {
   const b = new FileBundle({});
   const states = Array.from({ length: 10 }, (_, i) => ({ id: "user", name: `Clash ${i}` }));
@@ -197,6 +221,15 @@ test("the render check runs after the static stages, with the manifest and sourc
   assert.match(r.message, /RENDER_FAILED in prototype\.tsx at screen\.home as user in state\.default: boom/);
   assert.deepEqual(seen, [{ manifest: MANIFEST, source: SOURCE }]);
   assert.equal(b.has(SOURCE_PATH), false);
+});
+
+test("a render refusal's remedy depends on whether the file existed before the write", async () => {
+  const { render } = stubRender([RENDER_FINDING]);
+  const fresh = new FileBundle({ [MANIFEST_PATH]: MANIFEST });
+  assert.match(refused(await writeWithRenderCheck(fresh, { op: "add", path: SOURCE_PATH, content: SOURCE }, render)).message, NEW_FILE_REMEDY);
+  const existing = new FileBundle({ [MANIFEST_PATH]: MANIFEST, [SOURCE_PATH]: SOURCE });
+  const edit = { op: "edit" as const, path: SOURCE_PATH, oldString: 'text="Home"', newString: 'text="Start"' };
+  assert.match(refused(await writeWithRenderCheck(existing, edit, render)).message, EXISTING_FILE_REMEDY);
 });
 
 test("the render check is not asked when a static stage already refused, nor for a manifest with no source beside it", async () => {

@@ -140,7 +140,6 @@ function Shell({ children }: { children: ReactNode }) {
         { id: "nav.fees", label: "Fees", to: "screen.fees" },
       ]}
       account="screen.account"
-      settings="screen.settings"
       signOut="screen.signed-out"
     >
       {children}
@@ -663,21 +662,6 @@ function Account() {
   );
 }
 
-function Settings() {
-  const navigate = useNav();
-  return (
-    <Shell>
-      <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.catalogue")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.page-size" label="Rows per page" type="select" options={["20", "50", "100"]} defaultValue="20" />
-      </Form>
-    </Shell>
-  );
-}
 
 function SignedOut() {
   return (
@@ -699,7 +683,6 @@ export default defineApp({
     "screen.holds-queue": HoldsQueue,
     "screen.fees": FeesDesk,
     "screen.account": Account,
-    "screen.settings": Settings,
     "screen.signed-out": SignedOut,
   },
   data: { titles, copies, loans, holds, fees },

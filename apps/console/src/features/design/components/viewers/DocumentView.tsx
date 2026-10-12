@@ -74,6 +74,9 @@ function blocksOf(markdown: string): Block[] {
   return out;
 }
 
+/** Markdown's backslash escapes, as the room writes a file back out (`\[data-model\]`), read as the characters they stand for. */
+const ESCAPED = /\\([\\`*_{}[\]()#+\-.!|>~])/g;
+
 /** `code` spans as code; the rest as text. */
 function inline(text: string): ReactNode[] {
   return text.split(/(`[^`]+`)/).map((part, i) =>
@@ -82,7 +85,7 @@ function inline(text: string): ReactNode[] {
         {part.slice(1, -1)}
       </Box>
     ) : (
-      part
+      part.replace(ESCAPED, "$1")
     ),
   );
 }

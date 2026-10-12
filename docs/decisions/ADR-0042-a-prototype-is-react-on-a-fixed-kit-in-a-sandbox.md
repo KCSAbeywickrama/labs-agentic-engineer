@@ -1,6 +1,9 @@
 # ADR-0042 — A prototype is React on a fixed kit, run in a sandbox
 
-**Status:** Accepted · 2026-10-02 · Amended 2026-10-07 (the agent's gate runs in the org's AE Studio)
+**Status:** Accepted · 2026-10-02 · Amended 2026-10-07 (the agent's gate runs in the org's AE Studio) ·
+Amended 2026-10-11 by [ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md)
+(Design makes the prototype and Build reads it; review comments live in
+`specs/design/review.json`, not on a `/prototype` turn)
 **Supersedes:** the json-render prototype decision, "ADR-0035 — The prototype
 is a json-render spec over a closed catalog", which exists only on the unmerged
 v2 branch `feat/813-prototype-json-render` (on main, ADR-0035 is the agent
@@ -29,11 +32,12 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
    registry is a mapped type, so a theme missing a component does not compile.
 3. **Checked before anyone sees it.** `prototype check` runs, in order: the
    manifest's shape and references, static source rules (a name bound anywhere
-   in the module is not a global), literal navigation targets, then every
-   screen x role x state rendered in an isolated child (empty environment, Node
-   permission model with no grants, heap and time caps, a `vm` context created
-   from `Object.create(null)` without string code generation or wasm, frozen
-   shared prototypes). Findings are a stable, documented code enum.
+   in the module is not a global), literal navigation targets, the source's
+   types (the TypeScript compiler in-process, non-strict, against the kit's
+   declarations), then every screen x role x state rendered in an isolated
+   child (empty environment, Node permission model with no grants, heap and
+   time caps, a `vm` context created from `Object.create(null)` without
+   string code generation or wasm, frozen shared prototypes). Findings are a stable, documented code enum.
 4. **Played in a sandbox.** The frame is `<iframe sandbox="allow-scripts">`
    from `srcdoc` with a no-network CSP (`'unsafe-eval'` only for the module
    loader); host and frame speak a validated message bridge. The host ignores
@@ -122,22 +126,36 @@ Where this ADR says "the agents service", read the org's `ae-design-agent`:
 - The Go save gate is unchanged and stays in aep-api: it runs when a build cuts
   the version (`internal/spec/save_gate.go`).
 
-## Amendment 2026-10-11 — the prototype is the UI contract Build reads
+## Amendment 2026-10-11 — the prototype is the UI contract: Design makes it, Build reads it, comments live in the review file
 
-The prototype replaces `wireframes.dsl` as a web-application's UI contract.
-It is what Build and the coding run read:
+[ADR-0051](ADR-0051-design-is-a-review-loop-and-build-reads-the-prototype.md),
+[ADR-0052](ADR-0052-a-designs-review-state-is-a-file-in-the-spec-repo.md)
+and [ADR-0050](ADR-0050-a-version-builds-as-one-issue-with-an-ordered-checklist.md)
+change these consequences above:
 
-- `/design` no longer writes wireframes; `/prototype` is its own flow after it.
-  The `wireframes` skill is retired, and the `prototype` skill is
-  `[design, coding]`: the coding run builds against
+- **The prototype is the UI contract, and it is no longer optional.** A design
+  run writes it after the data model and the roles; `/prototype` stays as a
+  command that only regenerates it. The wireframes are retired, and the
+  prototype is what Build and the coding run read: the `prototype` skill is
+  `[design, coding]`, and the coding run builds against
   `references/implementing.md`.
-- The build gate (`services/aep-api/internal/spec/build_gate.go`) no longer asks
-  a web-application for `wireframes.dsl`. It validates a prototype that is
-  present: the prototype must be whole (both files), pass the save gate's
-  rules, and offer only roles that `specs/design/security.json` declares when
-  that file exists.
-- A web-application without a prototype is built from its `design.json`, the
-  stories and the `openapi.yaml` of the components it depends on.
-- Projects that carry only wireframes are not migrated. The `.dsl` write gate,
-  the console's wireframe viewer and `@aep/excalidraw-dsl` stay so those
-  projects still open.
+- **The build gate requires it.** For a web application the gate
+  (`services/aep-api/internal/spec/build_gate.go`) asks for `prototype.json`
+  and `prototype.tsx`, and checks them: each passes the save gate's rules, and
+  the prototype offers only roles that `specs/design/security.json` declares
+  when that file exists. Read "the build gate, which is unchanged" and "The
+  prototype stays optional beside wireframes" as superseded.
+- **Projects that carry only wireframes are not supported.** They are not
+  migrated: the gate refuses them as having no prototype, and the `.dsl` write
+  gate, the console's wireframe viewer and `@aep/excalidraw-dsl` are gone.
+  Running Design again writes the prototype.
+- **No feedback rides a turn.** The review's comments are drafts in
+  `specs/design/review.json`, sent by Address comments. The typed
+  `prototypeFeedback` on a `/prototype` turn is retired, together with its
+  validation in `ae-design-agent` (the 2026-10-07 amendment's second bullet):
+  a turn body that still carries it is refused as an unknown field.
+- **`@wso2/prototype-kit/feedback` keeps one definition** of a comment's
+  shape, its limits and the revision hash. The CLI, the console and
+  `@aep/agent-stream` import it: the review file takes its text and id limits
+  from it, and a prototype's Checked hash is its `prototypeHash`. The design
+  agent and its contract no longer mirror it.

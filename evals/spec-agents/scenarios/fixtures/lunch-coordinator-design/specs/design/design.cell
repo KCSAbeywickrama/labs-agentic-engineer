@@ -1,16 +1,17 @@
 title Team Lunch Ordering
 
-component lunch-webapp as "Lunch Webapp" web-application
+component lunch-webapp as "Team Lunch Webapp" web-application
 component lunch-api as "Lunch API" service
-component lunch-db as "Lunch DB" database
+component lunch-db as "Lunch Database" database
 
-east team-auth as "Thunder Auth (Google Workspace SSO)" identity-server
+east user-auth as "Thunder Auth" identity-server
 south slack as "Slack" service
 
 north -> lunch-webapp
+north -> lunch-api
 
 lunch-webapp -> lunch-api
-lunch-webapp -> team-auth
-lunch-api -> team-auth
+lunch-webapp -> user-auth
+lunch-api -> user-auth
 lunch-api -> lunch-db
 lunch-api -> slack

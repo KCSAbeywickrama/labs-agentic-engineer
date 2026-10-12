@@ -69,10 +69,6 @@ Reacting to tool results (each result tells you the next move):
   paths or no operations. Fix what the message names and re-emit the WHOLE corrected document with
   removeFile + addFile. Every write to an openapi.yaml is checked this way as it lands, so a spec that
   applied cleanly is already valid — never spend a tool call asking something else to validate it.
-- INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
-  keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
-  re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
-  from coordinates.
 - INVALID_PROTOTYPE — a components/<name>/prototype.json or prototype.tsx write was rejected. The message
   and the findings list every problem as CODE, file and location (a JSON path in prototype.json, a source
   line in prototype.tsx, or a screen/role/state for a render failure). The write did NOT land. Fix every
@@ -193,6 +189,21 @@ export function buildOrgDefaultsBlock(skills: SkillSource | undefined): string {
 # Organization defaults
 
 ${content}`;
+}
+
+/**
+ * The skill the org's defaults name as its web-app design system, or undefined
+ * when the org names none. The `## UI design system` section of the
+ * `organization` skill is the single place a design system is named: its first
+ * line is the skill name, bare or in backticks. Anything else there (an empty
+ * section, prose where the name was) names no design system.
+ */
+export function orgDesignSystem(skills: SkillSource | undefined): string | undefined {
+  const body = (skills ?? EMPTY_SKILL_SOURCE).load(ORG_DEFAULTS_SKILL);
+  if (body === undefined || !("content" in body)) return undefined;
+  const section = /^## UI design system[ \t]*\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body.content)?.[1];
+  const first = section?.split(/\r?\n/).find((line) => line.trim() !== "")?.trim();
+  return first === undefined ? undefined : /^`?([a-z0-9][a-z0-9-]*)`?$/.exec(first)?.[1];
 }
 
 /**

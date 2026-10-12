@@ -19,7 +19,7 @@
 import type { ProjectBuild } from "../../builds/api/builds";
 import type { ValidationOutcome } from "../../builds/model/validation";
 import type { BuildOffer } from "../../builds/model/picker";
-import type { DesignComment, DesignModel } from "../../design/api/designModel";
+import type { DesignModel } from "../../design/api/designModel";
 import type { DesignQueue, FeatureView } from "../../spec/model/workspace";
 import type { DeployStage } from "../../deploy/api/deploy";
 
@@ -52,7 +52,8 @@ export interface TrackInput {
   design: Pick<DesignQueue, "toDesign" | "outOfDate">;
   /** Each designed feature, and the spec it was designed from. */
   designedFrom: Readonly<Record<string, string>>;
-  review: { running: DesignModel["running"]; comments: Pick<DesignComment, "status">[] };
+  /** The design run under way, and how many design comments wait for Address comments (review.json). */
+  review: { running: DesignModel["running"]; waitingComments: number };
   /** Oldest first. */
   builds: Pick<ProjectBuild, "version" | "status">[];
   /** The newest build's validation, once it has finished; null before then or while it loads. */
@@ -88,8 +89,8 @@ export function specLeg(features: TrackInput["features"]): TrackLeg {
 
 /**
  * The design: a turn running, then what the design action would take (new
- * features, or designs behind their spec), then comments the user left or
- * has to check, else done once anything is designed.
+ * features, or designs behind their spec), then comments waiting to be
+ * addressed, else done once anything is designed.
  */
 export function designLeg(input: Pick<TrackInput, "design" | "designedFrom" | "review">): TrackLeg {
   const { design, designedFrom, review } = input;
@@ -104,10 +105,7 @@ export function designLeg(input: Pick<TrackInput, "design" | "designedFrom" | "r
       summary: allOutOfDate ? `${plural(toDesign.length, "feature")} out of date` : `${plural(toDesign.length, "feature")} to design`,
     };
   }
-  const open = review.comments.filter((c) => c.status === "open").length;
-  if (open > 0) return { state: "waiting", summary: `${plural(open, "comment")} to address` };
-  const addressed = review.comments.filter((c) => c.status === "addressed").length;
-  if (addressed > 0) return { state: "waiting", summary: `${plural(addressed, "comment")} to check` };
+  if (review.waitingComments > 0) return { state: "waiting", summary: `${plural(review.waitingComments, "comment")} to address` };
   const designed = Object.keys(designedFrom).length;
   return designed > 0 ? { state: "done", summary: `${plural(designed, "feature")} designed` } : NOT_YET;
 }

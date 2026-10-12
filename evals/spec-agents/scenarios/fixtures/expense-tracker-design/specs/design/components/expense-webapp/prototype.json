@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 3,
+  "name": "Expense Tracker",
+  "entryScreen": "screen.my-claims",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Approver", "name": "Approver" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" }
+  ],
+  "screens": [
+    { "id": "screen.my-claims", "name": "My claims", "roleIds": ["Employee"] },
+    { "id": "screen.new-claim", "name": "New claim", "roleIds": ["Employee"] },
+    { "id": "screen.claim-detail", "name": "Claim detail", "roleIds": ["Employee"] },
+    { "id": "screen.queue", "name": "Approval queue", "roleIds": ["Approver"] },
+    { "id": "screen.queue-detail", "name": "Review claim", "roleIds": ["Approver"] },
+    { "id": "screen.report", "name": "Monthly report", "roleIds": ["Approver"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Approver"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Approver"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Approver"] }
+  ],
+  "flows": [
+    { "id": "flow.submit-claim", "name": "Submit an expense claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.new-claim"] },
+    { "id": "flow.view-decision", "name": "See a claim's decision", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.claim-detail"] },
+    { "id": "flow.approve-claim", "name": "Approve a claim", "roleId": "Approver",
+      "screenIds": ["screen.queue", "screen.queue-detail"] },
+    { "id": "flow.reject-claim", "name": "Reject a claim with a reason", "roleId": "Approver",
+      "screenIds": ["screen.queue", "screen.queue-detail"] },
+    { "id": "flow.monthly-report", "name": "Read the monthly total", "roleId": "Approver",
+      "screenIds": ["screen.report"] }
+  ]
+}

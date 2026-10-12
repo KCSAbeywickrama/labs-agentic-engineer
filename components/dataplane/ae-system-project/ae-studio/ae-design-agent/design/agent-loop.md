@@ -51,16 +51,18 @@ reviewable change, and `applyToolCall` folds the streamed calls through the cano
 
 `FLOW_SUPPORTING_SKILLS` (`src/prompts/turn.ts`) names what each flow inlines.
 
-- **`/design`** inlines `grilling`, `cell-design`, `architecture`,
-  `security-design`, `openapi-conventions`, `agent-building` and
-  `acceptance-criteria`. It writes no wireframes: a web application's UI
-  contract is its prototype (ADR-0042, amendment 2026-10-11).
-- **`/prototype`** runs after it and inlines `cell-design`, `security-design`,
-  `openapi-conventions` and `oxygen-ui-design-system`. Its brief
-  (`FLOW_BRIEFS.prototype`) names the inputs: `design.cell`, the roles in
-  `security.json`, the API of each web application, the stories in
-  `specs/requirements/features/F<n>-*.md`, `product-wide.md` and the design's
-  flows. A turn that carries a review batch gets the revision brief instead.
+- **`/design`** inlines `cell-design`, `architecture`, `security-design`,
+  `prototype`, the organization's design system, `openapi-conventions`,
+  `agent-building` and `acceptance-criteria`. It writes each web
+  application's prototype in its own run, after the data model and the roles
+  (root ADR-0051); it writes no wireframes.
+- **`/prototype`** only regenerates the prototypes, with edits that keep their
+  ids, and inlines `cell-design`, `security-design` and the design system. Its
+  brief (`FLOW_BRIEFS.prototype`) names the inputs: `design.cell`, the records
+  in `domain-model.md`, the roles in `security.json`, each web application's
+  `design.json` and the stories and decisions of the feature files, and
+  `product-wide.md`. No review comment rides it: comments go through
+  `specs/design/review.json` and `/address-comments`.
 - **`prototype` is a `[design, coding]` skill.** This agent writes the
   prototype from its body; the coding run builds against its
   `references/implementing.md`.
@@ -84,3 +86,21 @@ static stages and the `INVALID_PROTOTYPE` code with its `findings` are in
 Each child runs with a 384 MiB heap cap (`RENDER_HEAP_MB` in the kit), and that
 memory counts against the pod container's 1 Gi limit, so the pod runs one check
 at a time (`MAX_RENDER_CHECKS`, [pod-memory-bounds.md](./pod-memory-bounds.md)).
+
+Before the render, `checkPrototypeFiles` type-checks `prototype.tsx` in the pod's
+own process (the kit's type stage, `TYPE_ERROR`). A write that leaves a renamed
+field at one stale use is refused with `INVALID_PROTOTYPE` and the line to fix,
+instead of landing a prototype that draws `$NaN`. Address comments runs make
+exactly that edit. The compiler and its declarations stay resident after the
+first check (pod-memory-bounds.md).
+
+## The design lineup and the org's design system
+
+`/design` and `/address-comments` resolve to the `design` skill (the second as
+a `COMMAND_FLOWS` branch with its own brief), so both inline the same lineup,
+byte for byte, and share the cached prefix. A design turn and a `/prototype`
+turn need the organization's design system, and the lineup holds a place for it
+(`DESIGN_SYSTEM` in `FLOW_SUPPORTING_SKILLS`). `eagerSkillsFor` fills that place
+with the skill named on the first line of the `## UI design system` section of
+the `organization` skill (`orgDesignSystem`). When the organization names none,
+nothing is inlined there. No design system skill is hard-coded.

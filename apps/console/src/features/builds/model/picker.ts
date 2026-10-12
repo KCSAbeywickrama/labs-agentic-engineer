@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { DesignArtifact, DesignComment, DesignDependency } from "../../design/api/designModel";
+import type { DesignDependency } from "../../design/api/designModel";
 import type { ProductWideItem } from "../../spec/api/specModel";
 import { PRODUCT_WIDE_PATH } from "../../spec/model/files";
 import { parseLine, type LineBlock } from "../../spec/model/ids";
@@ -34,8 +34,9 @@ import { builtLines, changeWords, lastBuildOf, lineChanges } from "./changes";
 // outside the product (Payroll export on Xero), shows disabled with the
 // reason; one not interviewed yet, or held by a question, shows why without a
 // box to tick. Each pickable row says what changed since the feature was last
-// built ("new" before its first), how many lines still build as assumed, and
-// how many design comments are not resolved: those warn, never block.
+// built ("new" before its first) and how many lines still build as assumed,
+// which warns, never blocks. Design comments still waiting to be sent warn on
+// the whole build, in the summary.
 //
 // A product-wide item added since the last build gets a row of its own:
 // ticking it pulls in every built or pickable feature it applies to, and it
@@ -51,7 +52,7 @@ export interface FeaturePickRow {
   state: PickState;
   /** The row's second line, in parts: what changed, what warns, or why it is held. */
   detail: string[];
-  /** The detail warns (amber): held, lines to confirm, or comments open. */
+  /** The detail warns (amber): held, or lines to confirm. */
   warn: boolean;
 }
 
@@ -75,8 +76,8 @@ export interface PickerInput {
   productWide: ProductWideItem[];
   lines: ReadonlyMap<string, LineBlock[]>;
   dependencies: Pick<DesignDependency, "featureId" | "needs" | "answer">[];
-  comments: Pick<DesignComment, "artifactId" | "status">[];
-  artifacts: Pick<DesignArtifact, "id" | "features">[];
+  /** Design comments waiting to be sent with Address comments (review.json). */
+  waitingComments: number;
   /** Oldest first. */
   builds: ProjectBuild[];
 }
@@ -93,8 +94,8 @@ export interface BuildOffer {
   foundation: string[];
   /** The version the foundation was built in; null before the first build. */
   foundationBuiltIn: string | null;
-  /** Design comments not resolved, over the whole design. */
-  unresolvedComments: number;
+  /** Design comments waiting to be sent, over the whole design. */
+  waitingComments: number;
 }
 
 function plural(n: number, word: string): string {
@@ -149,10 +150,6 @@ export function buildOffer(input: PickerInput): BuildOffer {
     ? []
     : productWide.filter((p) => !builtItems.has(p.id) && features.some((f) => builtIds.has(f.id) && applies(p, f.id)));
 
-  const unresolved = input.comments.filter((c) => c.status !== "resolved");
-  const commentsOn = (featureId: string) =>
-    unresolved.filter((c) => input.artifacts.some((a) => a.id === c.artifactId && a.features.includes(featureId))).length;
-
   const featureRows: FeaturePickRow[] = features.map((f) => {
     const held = heldBecause(input, f);
     if (held.reasons.length > 0) {
@@ -170,13 +167,8 @@ export function buildOffer(input: PickerInput): BuildOffer {
       }
       change = `changed since ${built.version}: ${parts.join("; ")}`;
     }
-    const comments = commentsOn(f.id);
-    const detail = [
-      change,
-      f.toConfirm ? `${f.toConfirm} to confirm, builds as assumed` : "",
-      comments ? `${plural(comments, "comment")} not resolved` : "",
-    ].filter(Boolean);
-    return { kind: "feature", id: f.id, name: f.name, state: "offered", detail, warn: f.toConfirm > 0 || comments > 0 };
+    const detail = [change, f.toConfirm ? `${f.toConfirm} to confirm, builds as assumed` : ""].filter(Boolean);
+    return { kind: "feature", id: f.id, name: f.name, state: "offered", detail, warn: f.toConfirm > 0 };
   });
 
   const itemRows: ProductWidePickRow[] = newItems.map((p) => {
@@ -204,13 +196,38 @@ export function buildOffer(input: PickerInput): BuildOffer {
     rows: [...itemRows, ...featureRows],
     foundation,
     foundationBuiltIn: builds.find((b) => foundation.some((id) => b.productWide.includes(id)))?.version ?? null,
-    unresolvedComments: unresolved.length,
+    waitingComments: input.waitingComments,
   };
 }
 
 /** The rows that can be picked now. */
 export function offeredRows(offer: BuildOffer): PickRow[] {
   return offer.rows.filter((r) => r.state === "offered");
+}
+
+/**
+ * Why no build can start now, for the entry points that show Build held:
+ * the offer still loading, a build running (the picker does not open), the
+ * agent at work in the project's chat (a Design or Address comments turn
+ * may be half way through writing the design a build would freeze), each
+ * designed feature held with the picker's own reasons, or nothing new since
+ * the last build. Null when a build is offered.
+ */
+export type BuildHold =
+  | { kind: "loading" }
+  | { kind: "running"; version: string }
+  | { kind: "agent-working" }
+  | { kind: "held"; features: readonly { name: string; reasons: readonly string[] }[] }
+  | { kind: "nothing-new" };
+
+/** `agentWorking`: a turn is starting or running in the project's chat. */
+export function buildHold(offer: BuildOffer | null, agentWorking: boolean): BuildHold | null {
+  if (!offer) return { kind: "loading" };
+  if (offer.running) return { kind: "running", version: offer.running.version };
+  if (agentWorking) return { kind: "agent-working" };
+  if (offeredRows(offer).length > 0) return null;
+  const held = offer.rows.flatMap((r) => (r.kind === "feature" && r.state === "disabled" ? [{ name: r.name, reasons: r.detail }] : []));
+  return held.length > 0 ? { kind: "held", features: held } : { kind: "nothing-new" };
 }
 
 /** What the picker opens with: every pickable feature. A product-wide row is the user's to tick. */
@@ -252,9 +269,9 @@ export function pickerSummary(offer: BuildOffer): { label: string; text: string 
     { label: "Foundation", text: offer.foundation.length ? `${offer.foundation.join(" · ")}, ${when}` : "none" },
     {
       label: "Comments",
-      text: offer.unresolvedComments
-        ? `${offer.unresolvedComments} not resolved (this doesn't block the build)`
-        : "all resolved",
+      text: offer.waitingComments
+        ? `${plural(offer.waitingComments, "comment")} not sent with Address comments (this doesn't block the build)`
+        : "none waiting",
     },
     {
       label: "Validation",

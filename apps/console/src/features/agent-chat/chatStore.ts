@@ -443,7 +443,6 @@ export function createChatStore(options: ChatStoreOptions) {
           text: instruction,
           state: "sending",
           scope: scopeOfBody(body),
-          ...(scope.kind === "prototype" && scope.feedback ? { prototypeFeedback: scope.feedback } : {}),
         },
       ],
     }));

@@ -14,7 +14,6 @@
 #  - Typed-username binding on that person's first sign-in cannot be shown without that user acting; no item covers it.
 #  - The Employee, Support Agent and Team Lead are each refused only the screens whose operations they lack; Team Lead and Support Agent reach Queue and Ticket, so no refusal item exists for those. Employee is refused Queue and Ticket; only Queue is covered.
 #  - The prototype draws Edit ticket only while a ticket is open, and the PRD says edit is possible until triaged, so no item checks that a triaged ticket is read-only for the employee beyond what the prototype states; the employee-locked-after-triage item shows an untriaged ticket still editable. The step 'Edit ticket gone after triage' for a triaged ticket would need an employee ticket triaged by an agent after raising a third ticket.
-#  - Where the item expects a Settings 'Compact tables' effect, the spec describes none; only the save and landing are checked.
 #  - The queue pagination (default page of 20) is not walkable without more than 20 tickets.
 #  - The prototype does not show the Support Agent's Assign to me on a ticket already theirs, and Support Agent can start work only on tickets assigned to them; Team Lead reassigning a ticket after agents work is not covered.
 #  - Names shown in the prototype for users (Erin, Sam, Tara) may differ in the running app; items refer to roles' own names loosely.
@@ -89,13 +88,6 @@ items:
     flow: Account
     steps: Open the user menu and choose Account.
     expect: The Account screen shows Name, Email and Role (Employee).
-    weight: 1
-  - id: employee-settings
-    role: Employee
-    screen: My tickets
-    flow: Settings
-    steps: Open the user menu and choose Settings. Turn on Compact tables and press Save settings.
-    expect: The Settings screen shows the Compact tables switch; after saving you arrive on My tickets.
     weight: 1
   - id: employee-refused-queue
     role: Employee

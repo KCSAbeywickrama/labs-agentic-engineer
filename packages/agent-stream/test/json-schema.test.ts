@@ -29,6 +29,7 @@ import {
   componentDesignJsonSchema,
   dependencyDesignJsonSchema,
   securityDesignJsonSchema,
+  designReviewJsonSchema,
   buildPlanJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
@@ -36,6 +37,7 @@ import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
   DEPENDENCY_DESIGN_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_SCHEMA_ARTIFACT,
+  DESIGN_REVIEW_SCHEMA_ARTIFACT,
   BUILD_PLAN_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
   SECURITY_DESIGN_MESSAGES_ARTIFACT,
@@ -50,6 +52,7 @@ const artifacts: [string, string, () => Record<string, unknown>][] = [
   ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
   ["dependency-design.schema.json", DEPENDENCY_DESIGN_SCHEMA_ARTIFACT, dependencyDesignJsonSchema],
   ["security-design.schema.json", SECURITY_DESIGN_SCHEMA_ARTIFACT, securityDesignJsonSchema],
+  ["design-review.schema.json", DESIGN_REVIEW_SCHEMA_ARTIFACT, designReviewJsonSchema],
   ["build-plan.schema.json", BUILD_PLAN_SCHEMA_ARTIFACT, buildPlanJsonSchema],
   ["agent-afm.schema.json", AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema],
   // The security-gate message catalog is vendored by the BFF, which formats the

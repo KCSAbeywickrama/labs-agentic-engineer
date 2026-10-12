@@ -27,7 +27,7 @@
 import { runSpecTurn } from "@aep/playground/src/engine/turn.js";
 import { pendingQuestions } from "@aep/playground/src/engine/questions.js";
 import type { PlaygroundSession } from "@aep/playground/src/engine/session.js";
-import { buildAnswerInstruction, buildAnswersInstruction } from "@aep/agent-stream";
+import { buildAnswerInstruction, buildAnswersInstruction, type TurnScope } from "@aep/agent-stream";
 import { DEFAULT_MAX_TURNS } from "../config.js";
 import type { ScenarioBrief } from "../scenario.js";
 import { simAnswers, type SimAnswer } from "../sim-user.js";
@@ -49,10 +49,12 @@ export interface SectionRunResult {
  */
 export async function runConversationalSection(
   session: PlaygroundSession,
-  section: "requirements" | "design",
+  section: "requirements" | "design" | "address-comments",
   /** Sent verbatim, as a user types it (`/start <idea>`, `/design`, …). */
   firstInstruction: string,
   brief: ScenarioBrief,
+  /** What the user is looking at when they send it (the design review, for Address comments). */
+  scope?: TurnScope,
 ): Promise<SectionRunResult> {
   const maxTurns = brief.maxTurns ?? DEFAULT_MAX_TURNS;
   const records: TurnRecord[] = [];
@@ -66,6 +68,7 @@ export async function runConversationalSection(
     const rec = newTurnRecord(section, records.length + 1, instruction);
     const start = Date.now();
     const result = await runSpecTurn(session, instruction, {
+      ...(scope ? { scope } : {}),
       onPart: (part) => collectPart(rec, part),
     });
     rec.ms = Date.now() - start;

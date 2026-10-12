@@ -637,12 +637,50 @@ export function applyCodingCredential(env: NodeJS.ProcessEnv, cred: CodingCreden
   env[cred.envVar] = cred.value;
 }
 
+// The image's own entrypoint wrapper (`runners/remote-worker/docker-entrypoint.sh`).
+const IMAGE_ENTRYPOINT = "/usr/local/bin/aep-runner-entrypoint";
+// A Linux run's entrypoint: `aep` takes the host user's uid, then the image's own
+// entrypoint runs. Bind-mounted like local.ts, so the image never carries it. It
+// is the runner's local-run script, shared with `runners/remote-worker/local/run-local.sh`.
+const ADOPT_HOST_USER = join(REPO_ROOT, "runners", "remote-worker", "local", "adopt-host-user.sh");
+const IMAGE_ADOPT_HOST_USER = "/usr/local/bin/aep-adopt-host-user";
+
+/** The host user a docker run's `aep` takes the ids of. */
+export interface HostUser {
+  uid: number;
+  gid: number;
+}
+
+/**
+ * The host user a docker run adopts, or null to run as the image's `aep`
+ * (uid 999) unchanged.
+ *
+ * Linux only. A Linux bind mount keeps the host's numeric owners, so uid 999
+ * cannot write the project and run dirs (`EACCES mkdir /workspace/run/gh-config`
+ * at provisioning), and what it writes the host user cannot delete. Docker
+ * Desktop and colima on macOS map a mount's owner to the host user, so a macOS
+ * run stays exactly as it was.
+ */
+export function hostUserToAdopt(
+  platform: NodeJS.Platform = process.platform,
+  uid: number | undefined = process.getuid?.(),
+  gid: number | undefined = process.getgid?.(),
+): HostUser | null {
+  if (platform !== "linux" || uid === undefined || gid === undefined) return null;
+  return { uid, gid };
+}
+
 // Mounts local.ts + the library/project/run dirs over the unmodified production
 // image and overrides only the command (the image's CMD runs oneshot.ts) — the
 // image itself never gains playground-only bytes. The library is mounted over the
 // path the image already bakes it at, so the runner's own default resolves to the
 // working tree and there is ONE library in play rather than two.
-export function dockerInvocation(opts: CodingRunOptions, runDir: string, containerName: string): Invocation {
+export function dockerInvocation(
+  opts: CodingRunOptions,
+  runDir: string,
+  containerName: string,
+  hostUser: HostUser | null = hostUserToAdopt(),
+): Invocation {
   // Forward exactly ONE credential variable — the one this run will actually
   // authenticate with. Passing both names would hand the container a developer's
   // subscription token even on runs that bill the API key (which outranks it),
@@ -674,8 +712,21 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     // tree) and then execs its argv — which is what the three tokens after the
     // image name below become, exactly as the image's CMD does in a pod.
     // Overriding the entrypoint with `npx` skipped that, leaving the playground
-    // as the one run path without the limits.
-    "/usr/local/bin/aep-runner-entrypoint",
+    // as the one run path without the limits. On Linux the adopt step runs
+    // first, as root, and then execs that same wrapper as `aep`.
+    hostUser ? IMAGE_ADOPT_HOST_USER : IMAGE_ENTRYPOINT,
+    ...(hostUser
+      ? [
+          "--user",
+          "0:0",
+          "-e",
+          `AEP_HOST_UID=${hostUser.uid}`,
+          "-e",
+          `AEP_HOST_GID=${hostUser.gid}`,
+          "-v",
+          `${ADOPT_HOST_USER}:${IMAGE_ADOPT_HOST_USER}:ro`,
+        ]
+      : []),
     "--shm-size=1g",
     "-v",
     `${LOCAL_ENTRY}:/app/src/local.ts:ro`,

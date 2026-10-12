@@ -31,6 +31,7 @@ import { join } from "node:path";
 import { mockModel } from "../src/shared/mock-model.js";
 import type { RoomPeer } from "../src/collab/room-peer.js";
 import type { Credit } from "../src/turns/start-turn.js";
+import type { FakeToolsSocket } from "../src/tools-socket/fake.js";
 import { CONNECTION, HEAD, PROJECT, call, readSse, startEdge, startTurn, streamOf, type Edge } from "./helpers/edge.js";
 
 const text = (t: string) => mockModel([{ kind: "text", text: t }]);
@@ -330,6 +331,7 @@ test("a project turn joins the Room as the credited user, gets the MCP tools, an
       files: () => ({ "specs/requirements/prd.md": "# PRD from the Room\n" }),
       set: (path, content) => void (written[path] = content),
       delete: () => {},
+      flush: async () => true,
       leave: async () => {
         left++;
         return 0;
@@ -353,6 +355,62 @@ test("a project turn joins the Room as the credited user, gets the MCP tools, an
     assert.ok(tools.includes("web_search"), "and web search");
     const prompt = JSON.stringify(model.doStreamCalls[0]!.prompt);
     assert.ok(prompt.includes("# PRD from the Room"), "the Room's doc is the turn's file source");
+  });
+});
+
+// L30, L18: a design run (`/design`, `/address-comments`) saves its Room work
+// before it leaves and records the head that save left as its end; any other
+// turn saves nothing extra and records no end. Every turn records the files
+// its own writes changed.
+test("a design run records the commit its saved Room work ended at; every turn records the files it changed", async () => {
+  const SAVED = "e".repeat(40);
+  const order: string[] = [];
+  let tools: FakeToolsSocket | undefined;
+  let landed = true;
+  const room = async (): Promise<RoomPeer> => ({
+    files: () => ({ "specs/requirements/prd.md": "# PRD\n", "specs/design/kept.md": "same\n" }),
+    set: () => {},
+    delete: () => {},
+    flush: async () => {
+      order.push("flush");
+      if (landed) tools!.setHead(PROJECT, SAVED);
+      return landed;
+    },
+    leave: async () => (order.push("leave"), 0),
+  });
+  const writes = () =>
+    mockModel([
+      { kind: "toolCall", toolCallId: "w1", toolName: "addFile", input: { path: "specs/design/new.md", content: "n\n" } },
+      { kind: "toolCall", toolCallId: "w2", toolName: "removeFile", input: { path: "specs/design/kept.md" } },
+      { kind: "toolCall", toolCallId: "w3", toolName: "addFile", input: { path: "specs/design/kept.md", content: "same\n" } },
+      { kind: "text", text: "done" },
+    ]);
+  await withEdge({ models: [writes(), writes(), writes(), writes()], room }, async (edge) => {
+    tools = edge.tools;
+    const tok = await edge.token();
+    const run = async (instruction: string): Promise<void> => {
+      edge.tools.setHead(PROJECT, HEAD);
+      const res = await startTurn(edge, tok, { instruction });
+      await streamOf(edge, tok, ((await res.json()) as { turnId: string }).turnId);
+    };
+    await run("/design F1");
+    assert.deepEqual(order, ["flush", "leave"], "saved before it leaves");
+    await run("/address-comments");
+    await run("/refine F1");
+    landed = false;
+    await run("/design");
+    await until(() => edge.tools.usage.length === 4, "four usage records");
+    assert.deepEqual(
+      edge.tools.usage.map((r) => [r.flow, r.baseRef, r.endRef, r.changedPaths]),
+      [
+        ["design", HEAD, SAVED, ["specs/design/new.md"]],
+        ["address-comments", HEAD, SAVED, ["specs/design/new.md"]],
+        ["refine", HEAD, undefined, ["specs/design/new.md"]],
+        ["design", HEAD, undefined, ["specs/design/new.md"]],
+      ],
+      "a file put back as it was is not a change; a save that did not land names no end",
+    );
+    assert.equal(order.filter((o) => o === "flush").length, 3, "only design runs save");
   });
 });
 

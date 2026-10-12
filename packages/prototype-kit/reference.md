@@ -70,14 +70,14 @@ The fixed date every prototype treats as today (ISO `YYYY-MM-DD`).
 
 The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out).
 
-- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`.
+- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` (with `settings`) and `<id>.sign-out`.
 - `product?: string` — The product's name in the header; prototype.json's `name` by default.
 - `user: AppShellUser` — The signed-in user the header shows.
 - `nav: NavigationItem[]` — The side navigation's entries.
 - `account: string` — The screen the user menu's Account entry opens.
-- `settings: string` — The screen the user menu's Settings entry opens.
+- `settings?: string` — The screen the user menu's Settings entry opens. Leave it out when the application has nothing to set: the menu then has no Settings entry.
 - `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
-- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account (and Settings) and before Sign out.
 - `children?: ReactNode` — The screen's content.
 
 ### `AppShellUser`
@@ -434,5 +434,6 @@ A side panel.
 | `NO_APP` | prototype.tsx does not `export default defineApp({ screens, data })`. |
 | `SCREEN_MISMATCH` | defineApp's screens are not exactly the manifest's screens. |
 | `UNKNOWN_NAV_TARGET` | A `to` or `go()` names a screen that does not exist, or one the viewing role cannot reach. |
+| `TYPE_ERROR` | prototype.tsx does not type-check: it reads a property, prop or name its types do not have, or passes a value of the wrong type. |
 | `RENDER_FAILED` | The module, or a screen for some role and display state, throws or runs too long. |
 | `DUPLICATE_ELEMENT_ID` | Two elements on one screen share an id. |

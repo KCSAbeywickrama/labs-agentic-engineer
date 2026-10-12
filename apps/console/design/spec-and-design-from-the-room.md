@@ -29,12 +29,23 @@ from `GET /spec/state`; documents' coverage from `sources/*.md`
 index, design work — is derived from that (`model/workspace.ts`,
 `designWork.ts`). Stage "Interviewing" is the chat's running `/interview`.
 
+The spec card's header holds its step forward (`SpecActions`,
+`model/specActions.ts`, D07 rule 6): while a feature is a stub, Interview
+<next stub> is the primary and Design is secondary; once every feature is
+interviewed, Design is the primary while something waits to be designed;
+before any is interviewed, Design is disabled with the reason. A stub's own
+page (Start interview) and a blocking question's page (Answer) keep their own
+primary.
+
 ## The design
 
 `useDesignModel` (`features/design/useDesignModel.ts`): the catalog from the
 room's design files (`model/catalog.ts`), dependencies from the build
-preflight, the running design from the chat. Commenting is mock-only
-(`DesignModel.commenting`) until it ships.
+preflight, the running design-review turn from the chat (`/design`, or
+`/address-comments`). The Design card's rail and its review are read from the
+room too: the files (`model/designFiles.ts`) and `specs/design/review.json`
+(`useDesignReview`), which the card writes back through the room's doc; see
+[design-card.md](design-card.md).
 
 ## Builds
 
@@ -45,6 +56,6 @@ standing.
 
 ## Mock mode
 
-`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files and the
-mock's approved design review; the agent's writes are applied to the local doc
-from the turn's stream.
+`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files, and the
+mock's design model; the agent's writes, the design's files among them, are
+applied to the local doc from the turn's stream.
