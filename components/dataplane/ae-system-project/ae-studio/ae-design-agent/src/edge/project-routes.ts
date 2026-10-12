@@ -19,14 +19,14 @@
 /**
  * `/v1/projects/{p}/...`: a project chat's current conversation, its
  * messages, rotation, turn start, the active turn, a turn's status and its
- * stream. A project has a chat per view (`conversations/chat.ts`), named by
- * the `view` and `issueNumber` query on the reads that are not addressed by a
- * conversation id; a turn's scope is its chat: one running turn each, any
+ * stream. A project has a main chat and a chat per area, narrowed or not to
+ * a focus (`conversations/chat.ts`), named by the `area` and `focus` query on
+ * the reads that are not addressed by a conversation id; a turn's scope is its chat: one running turn each, any
  * kind. Only the main chat rotates.
  */
 
 import express, { type Request, type Response, type Router } from "express";
-import { ChatError, chatFromQuery, chatKey, type Chat } from "../conversations/chat.js";
+import { ChatError, chatFromQuery, chatKey, issueOf, type Chat } from "../conversations/chat.js";
 import { isProjectName, TurnStartError } from "../turns/start-turn.js";
 import { notFound, sendProblem, sendTurnStartError } from "./http.js";
 import { creditOf, userOf, type RouteContext } from "./routes.js";
@@ -45,7 +45,7 @@ export function projectRoutes(ctx: RouteContext): Router {
   /** The chat the query names, or `null` once a 400 invalid_chat is answered. */
   const chatOf = (req: Request, res: Response): Chat | null => {
     try {
-      return chatFromQuery(req.query.view, req.query.issueNumber);
+      return chatFromQuery(req.query);
     } catch (err) {
       if (!(err instanceof ChatError)) throw err;
       sendProblem(res, 400, "invalid_chat", err.message);
@@ -62,10 +62,11 @@ export function projectRoutes(ctx: RouteContext): Router {
   router.get("/conversations/current", async (req, res) => {
     const chat = chatOf(req, res);
     if (!chat) return;
-    if (chat.view === "issue") {
+    const issue = issueOf(chat);
+    if (issue !== undefined) {
       // A closed issue has no thread: none is opened for it.
       try {
-        await deps.turns.checkIssueOpen(projectOf(req), chat.issueNumber);
+        await deps.turns.checkIssueOpen(projectOf(req), issue);
       } catch (err) {
         if (!(err instanceof TurnStartError)) throw err;
         if (err.code === "issue_unknown") notFound(res, "issue_unknown");

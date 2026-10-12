@@ -17,7 +17,7 @@
  */
 
 import type { ShellScope } from "../shell/scope";
-import type { ChatView } from "./chatView";
+import { chatIssue, MAIN_CHAT, type ChatRef } from "./chatRef";
 
 /**
  * Whether questions a turn of this browser's asked in `projectName` open the
@@ -33,14 +33,10 @@ import type { ChatView } from "./chatView";
  * issue's chat's, only from that issue's own card (the card closes back to
  * it): the overview's rule is the main chat's.
  */
-export function opensQuestionsCard(
-  scope: ShellScope,
-  projectName: string,
-  view: ChatView = "main",
-  issueNumber?: number,
-): boolean {
+export function opensQuestionsCard(scope: ShellScope, projectName: string, chat: ChatRef = MAIN_CHAT): boolean {
   if (scope.kind !== "project" || scope.projectName !== projectName) return false;
-  if (view === "issues") return scope.page === "issues" && scope.card === null;
-  if (view === "issue") return scope.card === "issue" && scope.issueNumber === issueNumber;
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return scope.card === "issue" && scope.issueNumber === issue;
+  if (chat.area === "issues") return scope.page === "issues" && scope.card === null;
   return scope.page === "overview" && scope.card !== "questions";
 }

@@ -194,7 +194,7 @@ func turnRecord(r mcpsock.TurnRecord) usage.TurnRecord {
 		Project:             r.Project,
 		ConversationID:      r.ConversationID,
 		Kind:                aepapi.AEStudioTurnRecordKind(r.Kind),
-		View:                aepapi.AEStudioTurnRecordView(r.View),
+		Area:                aepapi.AEStudioTurnRecordArea(r.Area),
 		Flow:                r.Flow,
 		Status:              aepapi.AEStudioTurnRecordStatus(r.Status),
 		Reason:              aepapi.AEStudioTurnRecordReason(r.Reason),
@@ -216,6 +216,9 @@ func turnRecord(r mcpsock.TurnRecord) usage.TurnRecord {
 	}
 	if r.Author != nil {
 		out.Author = &aepapi.AEStudioTurnRecordAuthor{ID: r.Author.ID, Name: r.Author.Name}
+	}
+	if r.Focus != nil {
+		out.Focus = &aepapi.AEStudioTurnRecordFocus{Kind: aepapi.AEStudioTurnRecordFocusKind(r.Focus.Kind), ID: r.Focus.ID}
 	}
 	return out
 }

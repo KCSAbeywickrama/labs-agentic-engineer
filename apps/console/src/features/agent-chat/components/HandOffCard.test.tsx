@@ -152,7 +152,7 @@ describe("the hand-off announcement", () => {
     renderCard();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: OPEN })));
     expect(store.send).not.toHaveBeenCalled();
-    expect(compose).toHaveBeenCalledWith(`/issue ${REQUEST}`, { view: "issues", projectName: "acme" });
+    expect(compose).toHaveBeenCalledWith(`/issue ${REQUEST}`, { chat: { area: "issues" }, projectName: "acme" });
   });
 
   it("Stay here sends nothing and goes nowhere", () => {

@@ -26,7 +26,7 @@ import { usePrototypeNotes } from "../../prototype/usePrototypeNotes";
 import type { ProjectCard } from "../../shell/scope";
 import { useSpecModel } from "../../spec/useSpecWorkspace";
 import { interviewWriteUp, openQuestionId, userLineText, withFiledLast, type ChatItem, type NoteAction } from "../chatLog";
-import type { ChatView } from "../chatView";
+import { chatIssue, MAIN_CHAT, type ChatRef } from "../chatRef";
 import { useOpenIssueChat } from "../useOpenIssuesChat";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
 import { ActivityLine } from "./ActivityLine";
@@ -196,21 +196,18 @@ function actionsFor(actions: NoteAction[] | undefined, newestReopen: boolean): N
 export function Thread({
   projectName,
   card = null,
-  view = "main",
-  issueNumber,
+  chat = MAIN_CHAT,
 }: {
   projectName: string;
   card?: ProjectCard | null;
-  /** The view whose chat this is: its retries go to that view's agent. */
-  view?: ChatView;
-  /** The issue whose chat this is, in the issue view. */
-  issueNumber?: number;
+  /** The chat this is: its retries go to that chat's agent. */
+  chat?: ChatRef;
 }) {
-  const chat = useProjectChat(projectName, view, issueNumber);
-  const store = chatStoreFor(view, issueNumber);
+  const conversation = useProjectChat(projectName, chat);
+  const store = chatStoreFor(chat);
   const openIssueChat = useOpenIssueChat(projectName);
   const features = useSpecModel(projectName).data?.features;
-  const { items, turn } = chat;
+  const { items, turn } = conversation;
   const running = turn.phase !== "idle";
 
   const openQuestion = openQuestionId(items);
@@ -224,26 +221,26 @@ export function Thread({
   const questions = useDesignQuestions(projectName).length;
   // The design's questions are the main chat's to point at.
   const questionsNote =
-    view === "main" ? designQuestionsNote({ items, running, questions, designCardOpen: card === "design" }) : null;
+    chat.area === undefined ? designQuestionsNote({ items, running, questions, designCardOpen: card === "design" }) : null;
   // Nothing from the agent yet since the last message: say it is working.
   const lastItem = items.at(-1);
   const waitingForOutput = running && (!lastItem || lastItem.kind === "user");
 
   const log = useStickToBottom();
 
-  if (chat.status === "loading" && items.length === 0) {
+  if (conversation.status === "loading" && items.length === 0) {
     return (
       <Centered>
         <CircularProgress size={20} aria-label="Loading the conversation" />
       </Centered>
     );
   }
-  if (chat.status === "error") {
+  if (conversation.status === "error") {
     return (
       <Centered>
         <Box role="alert" sx={{ display: "contents" }}>
           <Typography variant="body2" color="text.secondary">
-            {chat.error}
+            {conversation.error}
           </Typography>
           <Button size="small" variant="outlined" onClick={() => store.retry(projectName)}>
             Try again
@@ -256,10 +253,10 @@ export function Thread({
     return (
       <Centered>
         <Typography variant="body2" color="text.secondary">
-          {view === "issues"
-            ? "Tell me what's broken or what you need, and I'll draft an issue."
-            : view === "issue"
-              ? "Ask me about this issue, or tell me what to do with it."
+          {chatIssue(chat) !== undefined
+            ? "Ask me about this issue, or tell me what to do with it."
+            : chat.area === "issues"
+              ? "Tell me what's broken or what you need, and I'll draft an issue."
               : "No messages yet. The conversation about this project shows here."}
         </Typography>
       </Centered>
@@ -306,8 +303,7 @@ export function Thread({
                   projectName={projectName}
                   item={item}
                   open={item.id === openQuestion}
-                  view={view}
-                  {...(issueNumber !== undefined ? { issueNumber } : {})}
+                  chat={chat}
                 />
               </Box>
             )}

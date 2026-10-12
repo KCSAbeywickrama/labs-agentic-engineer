@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { AskQuestionInput } from "@aep/agent-stream";
 import type { QuestionItem } from "../chatLog";
+import { ISSUES_CHAT, MAIN_CHAT, type ChatRef } from "../chatRef";
 
 // The chat's side of the agent's questions (ADR-0002 / #879): a pointer to
 // the Questions card while they are open, their texts once they are not.
@@ -41,7 +42,7 @@ const Q = (question: string): AskQuestionInput => ({ question, options: [{ label
 
 function show(
   questions: AskQuestionInput[],
-  opts: { open?: boolean; streaming?: boolean; answered?: boolean; view?: "main" | "issues" } = {},
+  opts: { open?: boolean; streaming?: boolean; answered?: boolean; chat?: ChatRef } = {},
 ) {
   const item: QuestionItem = {
     kind: "question",
@@ -54,7 +55,7 @@ function show(
   };
   render(
     <OxygenUIThemeProvider theme={OxygenTheme}>
-      <QuestionsPointer projectName="acme" item={item} open={opts.open ?? true} view={opts.view ?? "main"} />
+      <QuestionsPointer projectName="acme" item={item} open={opts.open ?? true} chat={opts.chat ?? MAIN_CHAT} />
     </OxygenUIThemeProvider>,
   );
 }
@@ -70,7 +71,7 @@ describe("QuestionsPointer", () => {
   });
 
   it("points the Issues chat's questions at the card over the Issues page", () => {
-    show([Q("What broke?")], { view: "issues" });
+    show([Q("What broke?")], { chat: ISSUES_CHAT });
     fireEvent.click(screen.getByRole("button", { name: /The agent has a question/ }));
     expect(navigate).toHaveBeenCalledWith({
       to: "/projects/$projectName/issues/questions",

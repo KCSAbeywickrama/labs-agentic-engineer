@@ -17,26 +17,50 @@
  */
 
 /**
- * A project's chats. Each view of the console that owns an agent has a chat
- * of its own: the project's main (spec) chat, the Issues page's, and one for
- * each open issue. Each chat has its own current thread (`thread-book.ts`) and
- * runs one turn at a time (`turns/turn-desk.ts`), apart from the others: an
- * Issues turn never waits on the spec chat, nor one issue's on another's.
+ * A project's chats. The project's main (spec) chat, and one per area (a
+ * main-panel page whose chat has a sub-agent of its own, `areas/profiles.ts`):
+ * the Issues area's, and that area narrowed to each open issue by a focus.
+ * Each chat has its own current thread (`thread-book.ts`) and runs one turn
+ * at a time (`turns/turn-desk.ts`), apart from the others: an Issues turn
+ * never waits on the spec chat, nor one issue's on another's.
  */
 
-/** The main chat, the Issues page's (`issues`), or one issue's. */
-export type Chat = { view?: undefined } | { view: "issues" } | { view: "issue"; issueNumber: number };
+import { isAreaId, type AreaId, type Focus, type FocusKind } from "@aep/agent-stream";
+import { AREAS, type AreaProfile } from "../areas/profiles.js";
+
+/** An area's chat, narrowed to a focus or not. */
+export interface AreaChat {
+  area: AreaId;
+  focus?: Focus;
+}
+
+/** The main chat (no area), or an area's. */
+export type Chat = { area?: undefined; focus?: undefined } | AreaChat;
 
 /** The project's main (spec) chat. */
 export const MAIN_CHAT: Chat = {};
 
-/** The chat's key within its project: `""` (main), `issues`, `issue-<n>`. */
-export function chatKey(chat: Chat): string {
-  if (chat.view === undefined) return "";
-  return chat.view === "issues" ? "issues" : `issue-${chat.issueNumber}`;
+/** The Issues area's chat focused on issue `number`. */
+export function issueChat(number: number): AreaChat {
+  return { area: "issues", focus: { kind: "issue", id: number } };
 }
 
-/** The view and issue number a request names no chat by (a 400 `invalid_chat`). */
+/** The issue a chat is focused on, if it is. */
+export function issueOf(chat: Chat): number | undefined {
+  return chat.focus?.kind === "issue" ? chat.focus.id : undefined;
+}
+
+/**
+ * The chat's key within its project, the thread's use case: `""` (main), the
+ * area's id for its own chat (`issues`), `<kind>-<id>` for a focused one
+ * (`issue-12`).
+ */
+export function chatKey(chat: Chat): string {
+  if (chat.area === undefined) return "";
+  return chat.focus === undefined ? chat.area : `${chat.focus.kind}-${chat.focus.id}`;
+}
+
+/** The query a request names no chat by (a 400 `invalid_chat`). */
 export class ChatError extends Error {
   constructor(message: string) {
     super(message);
@@ -44,23 +68,31 @@ export class ChatError extends Error {
   }
 }
 
-const ISSUE_NUMBER_RE = /^[1-9][0-9]{0,8}$/;
+const FOCUS_ID_RE = /^[1-9][0-9]{0,8}$/;
 
 /**
- * The chat a request's `view` and `issueNumber` query parameters name: none
- * is the main chat; `issues` the Issues page's; `issue` with a positive
- * `issueNumber` that issue's. A view outside those, an issue number without
- * `view=issue`, or `view=issue` without one throws `ChatError`.
+ * The chat a request's query names: no `area` is the main chat; `area` alone
+ * that area's own chat; `area` with `focus[kind]` and `focus[id]` (the
+ * contract's deepObject focus) the area narrowed to that entity. Refused
+ * (`ChatError`): an area outside `profiles`, a focus without an area, a focus
+ * of a kind the area's profile does not declare, and an id that is not a
+ * positive integer.
  */
-export function chatFromQuery(view: unknown, issueNumber: unknown): Chat {
-  if (view === "issue") {
-    if (typeof issueNumber !== "string" || !ISSUE_NUMBER_RE.test(issueNumber)) {
-      throw new ChatError("issueNumber must be a positive integer with view=issue");
-    }
-    return { view: "issue", issueNumber: Number(issueNumber) };
+export function chatFromQuery(query: Record<string, unknown>, profiles: Readonly<Record<AreaId, AreaProfile>> = AREAS): Chat {
+  const { area } = query;
+  const kind = query["focus[kind]"];
+  const id = query["focus[id]"];
+  if (query.focus !== undefined) throw new ChatError("focus is sent as focus[kind] and focus[id]");
+  const focused = kind !== undefined || id !== undefined;
+  if (area === undefined) {
+    if (focused) throw new ChatError("a focus is taken only with an area");
+    return MAIN_CHAT;
   }
-  if (issueNumber !== undefined) throw new ChatError("issueNumber is taken only with view=issue");
-  if (view === undefined) return MAIN_CHAT;
-  if (view === "issues") return { view: "issues" };
-  throw new ChatError("view must be issues or issue");
+  if (!isAreaId(area) || !Object.hasOwn(profiles, area)) throw new ChatError(`unknown area ${JSON.stringify(area)}`);
+  if (!focused) return { area };
+  if (typeof kind !== "string" || !Object.hasOwn(profiles[area].focus ?? {}, kind)) {
+    throw new ChatError(`the ${area} area takes no focus of kind ${JSON.stringify(kind)}`);
+  }
+  if (typeof id !== "string" || !FOCUS_ID_RE.test(id)) throw new ChatError("focus[id] must be a positive integer");
+  return { area, focus: { kind: kind as FocusKind, id: Number(id) } };
 }

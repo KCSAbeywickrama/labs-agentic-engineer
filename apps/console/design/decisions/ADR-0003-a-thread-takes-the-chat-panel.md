@@ -19,7 +19,7 @@ user is in.
 
 ## Decision
 
-1. **The panel holds one thread, the page's** (`chatViewFor`): the main chat
+1. **The panel holds one thread, the page's** (`chatFor`): the main chat
    on every project page; the Issues chat on the Issues Page; an open issue's
    chat on its card (and on the Questions card answering it). A closed issue,
    or one not read yet, has none: its card holds the main chat. There is no

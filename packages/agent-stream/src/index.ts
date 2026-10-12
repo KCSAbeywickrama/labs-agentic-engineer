@@ -72,8 +72,9 @@ export type {
   TurnUsage,
   Toolset,
   Surface,
-  View,
   AreaId,
+  FocusKind,
+  Focus,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
 export {
@@ -81,7 +82,6 @@ export {
   SSE_DONE,
   TOOLSETS,
   SURFACES,
-  VIEWS,
   TURN_KINDS,
   ASK_QUESTION_TOOL,
   isQuestionTool,
@@ -100,7 +100,6 @@ export {
   buildAnswersInstruction,
   isToolset,
   isSurface,
-  isView,
   isTurnSpec,
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,

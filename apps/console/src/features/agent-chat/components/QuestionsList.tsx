@@ -26,7 +26,7 @@ import { answerableQuestionId, openQuestionId, type QuestionItem } from "../chat
 import { applyNote, applySelection, isQuestionAnswered, normalizeAnswers } from "../questionCards";
 import { clearQuestionDraft, questionDraft, saveQuestionDraft } from "../questionDrafts";
 import { visuallyHidden } from "../../../components/visuallyHidden";
-import { homeLink, type ChatView } from "../chatView";
+import { homeLink, MAIN_CHAT, type ChatRef } from "../chatRef";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
 import { QuestionBlock } from "./QuestionBlock";
 
@@ -37,18 +37,16 @@ import { QuestionBlock } from "./QuestionBlock";
 
 export function QuestionsList({
   projectName,
-  view = "main",
-  issueNumber,
+  chat = MAIN_CHAT,
 }: {
   projectName: string;
-  view?: ChatView;
-  /** The issue whose chat's questions these are, in the issue view. */
-  issueNumber?: number;
+  /** The chat whose questions these are. */
+  chat?: ChatRef;
 }) {
-  const chat = useProjectChat(projectName, view, issueNumber);
-  const { items, turn } = chat;
+  const conversation = useProjectChat(projectName, chat);
+  const { items, turn } = conversation;
 
-  if (chat.status === "loading" && items.length === 0) {
+  if (conversation.status === "loading" && items.length === 0) {
     return (
       <Centered>
         <CircularProgress size={20} aria-label="Loading the questions" />
@@ -56,14 +54,14 @@ export function QuestionsList({
     );
   }
 
-  if (chat.status === "error") {
+  if (conversation.status === "error") {
     return (
       <Centered>
         <Box role="alert" sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            {chat.error}
+            {conversation.error}
           </Typography>
-          <Button size="small" variant="outlined" onClick={() => chatStoreFor(view, issueNumber).retry(projectName)}>
+          <Button size="small" variant="outlined" onClick={() => chatStoreFor(chat).retry(projectName)}>
             Try again
           </Button>
         </Box>
@@ -84,8 +82,7 @@ export function QuestionsList({
       <QuestionsForm
         key={shown.id}
         projectName={projectName}
-        view={view}
-        {...(issueNumber !== undefined ? { issueNumber } : {})}
+        chat={chat}
         item={shown}
         answerable={answerableQuestionId(items) === shown.id}
         sending={turn.phase === "starting"}
@@ -105,15 +102,13 @@ export function QuestionsList({
 
 function QuestionsForm({
   projectName,
-  view,
-  issueNumber,
+  chat,
   item,
   answerable,
   sending,
 }: {
   projectName: string;
-  view: ChatView;
-  issueNumber?: number;
+  chat: ChatRef;
   item: QuestionItem;
   /** Complete and still waiting: the batch can be sent. */
   answerable: boolean;
@@ -155,10 +150,10 @@ function QuestionsForm({
     // (the overview, the Issues page for the Issues chat, or the issue's card
     // for an issue's chat), and the draft
     // goes. A send that failed keeps it open, answers and all.
-    void chatStoreFor(view, issueNumber).answer(projectName, item.id, answers).then((sent) => {
+    void chatStoreFor(chat).answer(projectName, item.id, answers).then((sent) => {
       if (!sent) return;
       clearQuestionDraft(projectName, item.toolCallId);
-      void navigate(homeLink(projectName, view, issueNumber));
+      void navigate(homeLink(projectName, chat));
     });
   };
 

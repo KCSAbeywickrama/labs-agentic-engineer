@@ -25,7 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isToolset, isTurnSpec, isView, TOOLSETS, VIEWS } from "../src/contracts/sse-events.js";
+import { isToolset, isTurnSpec, TOOLSETS } from "../src/contracts/sse-events.js";
 
 test("accepts each well-formed kind", () => {
   assert.ok(isTurnSpec({ kind: "chat", text: "add a returns policy" }));
@@ -84,14 +84,7 @@ test("unknown extra keys are tolerated", () => {
   assert.ok(isTurnSpec({ kind: "start", idea: "x", futureField: true }));
 });
 
-test("isView accepts exactly the known views", () => {
-  assert.deepEqual([...VIEWS], ["issues", "issue"]);
-  assert.ok(isView("issues"));
-  assert.ok(isView("issue"));
-  for (const v of ["boards", "", "Issues", "Issue", undefined, null, 1, {}]) assert.equal(isView(v), false, String(v));
-});
-
-test("each view's agent has a tool set of its own", () => {
-  assert.deepEqual([...TOOLSETS], ["files", "task-plan", "issues", "issue"]);
-  for (const view of VIEWS) assert.ok(isToolset(view), view);
+test("the main agent's tool sets; an area's chat is none of them", () => {
+  assert.deepEqual([...TOOLSETS], ["files", "task-plan"]);
+  for (const area of ["issues", "issue"]) assert.equal(isToolset(area), false, area);
 });

@@ -80,7 +80,7 @@ const RULES = `
 
 /** How the area block names a focus. */
 const FOCUS_NAMES: Record<FocusKind, (focus: Focus) => string> = {
-  issue: (focus) => `issue #${focus.number}`,
+  issue: (focus) => `issue #${focus.id}`,
 };
 
 function areaBlock(scope: ResolvedScope, project: string | undefined): string {

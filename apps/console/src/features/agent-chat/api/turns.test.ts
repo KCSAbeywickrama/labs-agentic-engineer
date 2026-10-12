@@ -19,6 +19,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ISSUES_CHAT, issueChat } from "../chatRef";
 
 // The chat's turn transport on the org's design agent (`/v1` of the AE Studio
 // pod): what it puts on the wire and how it reads the pod's answers.
@@ -184,8 +185,8 @@ describe("openTurnStream", () => {
   });
 });
 
-describe("a view's chat", () => {
-  it("asks for a view's running turn by its query, and never puts the main chat on the wire", async () => {
+describe("an area's chat", () => {
+  it("asks for an area chat's running turn by its area and focus, and never puts the main chat on the wire", async () => {
     const seen: string[] = [];
     server.use(
       http.get(`${POD}/projects/shop/turns/active`, ({ request }) => {
@@ -194,9 +195,9 @@ describe("a view's chat", () => {
       }),
     );
     await getActiveTurn("shop");
-    await getActiveTurn("shop", "issues");
-    await getActiveTurn("shop", "issue", 7);
-    expect(seen).toEqual(["", "?view=issues", "?view=issue&issueNumber=7"]);
+    await getActiveTurn("shop", ISSUES_CHAT);
+    await getActiveTurn("shop", issueChat(7));
+    expect(seen).toEqual(["", "?area=issues", "?area=issues&focus[kind]=issue&focus[id]=7"]);
   });
 
   it("reads a 409 issue_closed as the issue being closed", async () => {

@@ -21,6 +21,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShellScope } from "./scope";
+import { ISSUES_CHAT, issueChat, MAIN_CHAT } from "../agent-chat/chatRef";
 
 // What the shell keeps for the chat panel: the compose request. It names the
 // chat it is for: the one the caller names, else the one in focus.
@@ -53,27 +54,27 @@ describe("useChatControls", () => {
   it("Create Issue (compose on the Issues page) puts the words in the Issues chat's composer, and opens the chat", () => {
     const { hook, openChat } = mount(scope("issues"));
     act(() => hook.result.current.controls.compose("/issue "));
-    expect(hook.result.current.composeRequest).toEqual({ text: "/issue ", view: "issues", projectName: "acme", nonce: 1 });
+    expect(hook.result.current.composeRequest).toEqual({ text: "/issue ", chat: ISSUES_CHAT, projectName: "acme", nonce: 1 });
     expect(openChat).toHaveBeenCalled();
   });
 
   it("on the main chat, a compose is for the main chat", () => {
     const { hook } = mount(scope("overview"));
     act(() => hook.result.current.controls.compose("Add approvals"));
-    expect(hook.result.current.composeRequest).toMatchObject({ view: "main", projectName: "acme" });
+    expect(hook.result.current.composeRequest).toMatchObject({ chat: MAIN_CHAT, projectName: "acme" });
   });
 
   it("on an issue's card, a compose is for that issue's chat", () => {
     const { hook } = mount(scope("issues", "issue"));
     act(() => hook.result.current.controls.compose("Close it"));
-    expect(hook.result.current.composeRequest).toMatchObject({ view: "issue", projectName: "acme", issueNumber: 7 });
+    expect(hook.result.current.composeRequest).toMatchObject({ chat: issueChat(7), projectName: "acme" });
   });
 
   it("a caller moving the user names the chat, before the move has rendered", () => {
     const { hook, go } = mount(scope("overview"));
-    act(() => hook.result.current.controls.compose("/issue x", { view: "issues", projectName: "acme" }));
+    act(() => hook.result.current.controls.compose("/issue x", { chat: ISSUES_CHAT, projectName: "acme" }));
     go(scope("issues"));
-    expect(hook.result.current.composeRequest).toMatchObject({ view: "issues", projectName: "acme", text: "/issue x" });
+    expect(hook.result.current.composeRequest).toMatchObject({ chat: ISSUES_CHAT, projectName: "acme", text: "/issue x" });
   });
 
   it("is cleared by its own nonce only", () => {

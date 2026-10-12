@@ -25,6 +25,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { designKey } from "../design/api/designModel";
 import { issueDetailKey, issuesListKey } from "../issues/api/issues";
 import { specKey } from "../spec/api/specModel";
+import { issueChat } from "./chatRef";
 
 // When a turn ends, the shell reads again what the agent may have changed:
 // the spec and the design. A `/prototype` turn is one of them: its prototype
@@ -87,7 +88,7 @@ describe("useRefreshOnTurnEnd", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
     renderHook(() => useRefreshOnTurnEnd(), { wrapper });
-    chatStoreFor("issue", 7);
+    chatStoreFor(issueChat(7));
     made.at(-1)!.ended!("acme-expenses", "completed");
     expect(invalidate).toHaveBeenCalledWith({ queryKey: issuesListKey("acme-expenses") });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: issueDetailKey("acme-expenses", 7) });

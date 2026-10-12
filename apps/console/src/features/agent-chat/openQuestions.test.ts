@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectCard, ProjectPage, ShellScope } from "../shell/scope";
 import { opensQuestionsCard } from "./openQuestions";
+import { ISSUES_CHAT, issueChat, MAIN_CHAT } from "./chatRef";
 
 const at = (page: ProjectPage, card: ProjectCard | null = null, projectName = "acme", issueNumber: number | null = null): ShellScope => ({
   kind: "project",
@@ -29,35 +30,35 @@ const at = (page: ProjectPage, card: ProjectCard | null = null, projectName = "a
   issueNumber,
 });
 
-describe("opensQuestionsCard in an issue's view", () => {
+describe("opensQuestionsCard in an issue's chat", () => {
   it("opens over that issue's own card only", () => {
-    expect(opensQuestionsCard(at("issues", "issue", "acme", 7), "acme", "issue", 7)).toBe(true);
+    expect(opensQuestionsCard(at("issues", "issue", "acme", 7), "acme", issueChat(7))).toBe(true);
   });
 
   it("leaves the user on another issue's card, the Issues Page, a Questions card already open, or another project", () => {
-    expect(opensQuestionsCard(at("issues", "issue", "acme", 8), "acme", "issue", 7)).toBe(false);
-    expect(opensQuestionsCard(at("issues"), "acme", "issue", 7)).toBe(false);
-    expect(opensQuestionsCard(at("issues", "questions", "acme", 7), "acme", "issue", 7)).toBe(false);
-    expect(opensQuestionsCard(at("issues", "issue", "other", 7), "acme", "issue", 7)).toBe(false);
+    expect(opensQuestionsCard(at("issues", "issue", "acme", 8), "acme", issueChat(7))).toBe(false);
+    expect(opensQuestionsCard(at("issues"), "acme", issueChat(7))).toBe(false);
+    expect(opensQuestionsCard(at("issues", "questions", "acme", 7), "acme", issueChat(7))).toBe(false);
+    expect(opensQuestionsCard(at("issues", "issue", "other", 7), "acme", issueChat(7))).toBe(false);
   });
 });
 
-describe("opensQuestionsCard in the issues view", () => {
+describe("opensQuestionsCard in the Issues area's chat", () => {
   it("opens over the Issues Page only", () => {
-    expect(opensQuestionsCard(at("issues"), "acme", "issues")).toBe(true);
+    expect(opensQuestionsCard(at("issues"), "acme", ISSUES_CHAT)).toBe(true);
   });
 
   it("leaves the user on an Issue card, the overview, or another page", () => {
-    expect(opensQuestionsCard(at("issues", "issue"), "acme", "issues")).toBe(false);
-    expect(opensQuestionsCard(at("issues", "questions"), "acme", "issues")).toBe(false);
-    expect(opensQuestionsCard(at("overview"), "acme", "issues")).toBe(false);
-    expect(opensQuestionsCard(at("builds"), "acme", "issues")).toBe(false);
-    expect(opensQuestionsCard(at("issues", null, "other"), "acme", "issues")).toBe(false);
+    expect(opensQuestionsCard(at("issues", "issue"), "acme", ISSUES_CHAT)).toBe(false);
+    expect(opensQuestionsCard(at("issues", "questions"), "acme", ISSUES_CHAT)).toBe(false);
+    expect(opensQuestionsCard(at("overview"), "acme", ISSUES_CHAT)).toBe(false);
+    expect(opensQuestionsCard(at("builds"), "acme", ISSUES_CHAT)).toBe(false);
+    expect(opensQuestionsCard(at("issues", null, "other"), "acme", ISSUES_CHAT)).toBe(false);
   });
 
   it("is not opened by the main chat's rule, and the main chat is not opened by the Issues page", () => {
-    expect(opensQuestionsCard(at("issues"), "acme", "main")).toBe(false);
-    expect(opensQuestionsCard(at("overview"), "acme", "main")).toBe(true);
+    expect(opensQuestionsCard(at("issues"), "acme", MAIN_CHAT)).toBe(false);
+    expect(opensQuestionsCard(at("overview"), "acme", MAIN_CHAT)).toBe(true);
   });
 });
 

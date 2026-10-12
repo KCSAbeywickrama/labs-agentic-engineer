@@ -18,7 +18,8 @@
 
 /**
  * A project's chats (`conversations/chat.ts`): the main chat, the Issues
- * page's and each open issue's have a thread and a turn slot of their own; an
+ * area's and the area's chat focused on each open issue have a thread and a
+ * turn slot of their own; an
  * issue's chat exists only while its issue is open, and goes when aep-api
  * says the issue closed or reopened; the main chat is told what the Issues
  * chat came to meanwhile.
@@ -28,7 +29,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Agent, fetch as undiciFetch } from "undici";
 import { mockModel } from "../src/shared/mock-model.js";
-import { ChatError, chatFromQuery, chatKey } from "../src/conversations/chat.js";
+import { ChatError, chatFromQuery, chatKey, issueChat } from "../src/conversations/chat.js";
+import { AREAS } from "../src/areas/profiles.js";
 import { ThreadBook } from "../src/conversations/thread-book.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import { PROJECT, call, startEdge, streamOf, type Edge } from "./helpers/edge.js";
@@ -75,35 +77,56 @@ async function removeOnSocket(edge: Edge, path: string): Promise<number> {
   return res.status;
 }
 
-test("chatFromQuery: none is the main chat; issues; issue with a positive number; anything else is refused", () => {
-  assert.deepEqual(chatFromQuery(undefined, undefined), {});
-  assert.deepEqual(chatFromQuery("issues", undefined), { view: "issues" });
-  assert.deepEqual(chatFromQuery("issue", "7"), { view: "issue", issueNumber: 7 });
-  assert.equal(chatKey({ view: "issue", issueNumber: 7 }), "issue-7");
+test("chatFromQuery: none is the main chat; an area; the area focused on a positive issue", () => {
+  assert.deepEqual(chatFromQuery({}), {});
+  assert.deepEqual(chatFromQuery({ area: "issues" }), { area: "issues" });
+  assert.deepEqual(chatFromQuery({ area: "issues", "focus[kind]": "issue", "focus[id]": "7" }), issueChat(7));
+  assert.deepEqual(issueChat(7), { area: "issues", focus: { kind: "issue", id: 7 } });
+});
+
+test("chatKey: the thread's use case derives from the area and its focus", () => {
   assert.equal(chatKey({}), "");
-  for (const [view, n] of [
-    ["issue", undefined],
-    ["issue", "0"],
-    ["issue", "-1"],
-    ["issue", "1.5"],
-    ["issues", "3"],
-    [undefined, "3"],
-    ["boards", undefined],
-    [["issues"], undefined],
-  ] as const) {
-    assert.throws(() => chatFromQuery(view, n), ChatError, `${String(view)} ${String(n)}`);
-  }
+  assert.equal(chatKey({ area: "issues" }), "issues");
+  assert.equal(chatKey(issueChat(7)), "issue-7");
+});
+
+test("chatFromQuery refuses an unknown area, a focus without an area, and a focus the area does not declare or without a positive id", () => {
+  const refused: Record<string, unknown>[] = [
+    { area: "boards" },
+    { area: "issue" },
+    { area: "" },
+    { area: ["issues", "issues"] },
+    { "focus[kind]": "issue", "focus[id]": "3" },
+    { area: "issues", "focus[kind]": "issue" },
+    { area: "issues", "focus[id]": "3" },
+    { area: "issues", "focus[kind]": "board", "focus[id]": "3" },
+    { area: "issues", "focus[kind]": "constructor", "focus[id]": "3" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "0" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "-1" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "1.5" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "1e3" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": "07" },
+    { area: "issues", "focus[kind]": "issue", "focus[id]": ["3", "4"] },
+    { area: "issues", focus: "issue" },
+  ];
+  for (const query of refused) assert.throws(() => chatFromQuery(query), ChatError, JSON.stringify(query));
+});
+
+test("chatFromQuery takes a focus only with an area whose profile declares that kind", () => {
+  const unfocused = { issues: { id: AREAS.issues.id, label: AREAS.issues.label, base: AREAS.issues.base } };
+  assert.deepEqual(chatFromQuery({ area: "issues" }, unfocused), { area: "issues" });
+  assert.throws(() => chatFromQuery({ area: "issues", "focus[kind]": "issue", "focus[id]": "7" }, unfocused), ChatError);
 });
 
 test("ThreadBook: each chat has its own current thread, and an id names its chat", () => {
   const threads = new ThreadBook({ store: new InMemoryConversationStore() });
   const main = threads.current("greeter", "Ann").conversationId;
-  const issues = threads.current("greeter", "Ann", { view: "issues" }).conversationId;
-  const seven = threads.current("greeter", "Ann", { view: "issue", issueNumber: 7 }).conversationId;
+  const issues = threads.current("greeter", "Ann", { area: "issues" }).conversationId;
+  const seven = threads.current("greeter", "Ann", issueChat(7)).conversationId;
   assert.equal(new Set([main, issues, seven]).size, 3);
   assert.deepEqual(threads.chatOf("greeter", main), {});
-  assert.deepEqual(threads.chatOf("greeter", issues), { view: "issues" });
-  assert.deepEqual(threads.chatOf("greeter", seven), { view: "issue", issueNumber: 7 });
+  assert.deepEqual(threads.chatOf("greeter", issues), { area: "issues" });
+  assert.deepEqual(threads.chatOf("greeter", seven), issueChat(7));
   assert.equal(threads.chatOf("billing", seven), null, "an id never names another project's chat");
 });
 
@@ -112,7 +135,7 @@ test("ThreadBook: branch notes count the Issues outcomes since the main turn and
   assert.deepEqual(threads.takeBranchNotes("greeter"), []);
   threads.noteOutcome("greeter", "Filed #3: Save fails");
   threads.noteOutcome("greeter", "Filed #4: Export");
-  assert.deepEqual(threads.takeBranchNotes("greeter"), [{ view: "issues", turns: 2, outcome: "Filed #4: Export" }]);
+  assert.deepEqual(threads.takeBranchNotes("greeter"), [{ area: "issues", turns: 2, outcome: "Filed #4: Export" }]);
   assert.deepEqual(threads.takeBranchNotes("greeter"), []);
 });
 
@@ -120,7 +143,7 @@ test("ThreadBook: an issue's thread goes only when it predates the removal, and 
   let now = new Date("2026-10-08T10:00:00Z");
   const store = new InMemoryConversationStore();
   const threads = new ThreadBook({ store, now: () => now });
-  const chat = { view: "issue" as const, issueNumber: 7 };
+  const chat = issueChat(7);
   const old = threads.current("greeter", "Ann", chat).conversationId;
   assert.equal(await threads.removeIssueThread("greeter", 7, new Date("2026-10-08T09:00:00Z")), false, "a thread started after the event stays");
   assert.equal(threads.chatOf("greeter", old) !== null, true);
@@ -141,23 +164,26 @@ test("v1: the Issues chat runs beside the main chat on its own thread and route;
   withEdge({ models: [slow("main working"), text("Filed #12: Save does nothing"), text("ok")] }, async (edge) => {
     const tok = await edge.token({ sub: "u1", name: "Ann" });
     const main = await current(edge, tok);
-    const issues = await current(edge, tok, "?view=issues");
+    const issues = await current(edge, tok, "?area=issues");
     assert.notEqual(main, issues);
 
     const mainTurn = await json<{ turnId: string }>(await send(edge, tok, main, "add a login page"));
     const issuesRes = await send(edge, tok, issues, "/design the save button is broken");
     assert.equal(issuesRes.status, 202, "the Issues chat never waits on the main chat");
     const issuesTurn = await json<{ turnId: string }>(issuesRes);
-    const active = await call(edge, `/v1/projects/${PROJECT}/turns/active?view=issues`, tok);
+    const active = await call(edge, `/v1/projects/${PROJECT}/turns/active?area=issues`, tok);
     assert.equal(active.status === 200 || active.status === 204, true);
     await streamOf(edge, tok, issuesTurn.turnId);
     await streamOf(edge, tok, mainTurn.turnId);
 
     await until(() => edge.tools.usage.length === 2, "both usage records");
     const issuesRecord = edge.tools.usage.find((r) => r.conversationId === issues)!;
-    assert.equal(issuesRecord.view, "issues");
+    assert.equal(issuesRecord.area, "issues");
+    assert.equal(issuesRecord.focus, undefined);
     assert.equal(issuesRecord.flow, "", "a typed /design is words for the Issues agent, not a flow");
-    assert.equal(edge.tools.usage.find((r) => r.conversationId === main)!.view, undefined);
+    const mainRecord = edge.tools.usage.find((r) => r.conversationId === main)!;
+    assert.equal(mainRecord.area, undefined);
+    assert.equal(mainRecord.focus, undefined);
 
     const next = await json<{ turnId: string }>(await send(edge, tok, main, "what happened?"));
     await streamOf(edge, tok, next.turnId);
@@ -170,24 +196,31 @@ test("v1: the Issues chat runs beside the main chat on its own thread and route;
 test("v1: an open issue's chat has a thread; a closed one is 409 issue_closed and its thread goes; an unknown one is 404", () =>
   withEdge({ models: [text("ok")], issues: { 7: { state: "open" } } }, async (edge) => {
     const tok = await edge.token();
-    const seven = await current(edge, tok, "?view=issue&issueNumber=7");
+    const seven = await current(edge, tok, "?area=issues&focus[kind]=issue&focus[id]=7");
+    assert.equal(await current(edge, tok, "?area=issues&focus%5Bkind%5D=issue&focus%5Bid%5D=7"), seven, "the focus's brackets may come encoded");
     const turn = await json<{ turnId: string }>(await send(edge, tok, seven, "summarise it"));
     await streamOf(edge, tok, turn.turnId);
     await until(() => edge.tools.usage.length === 1, "the usage record");
-    assert.equal(edge.tools.usage[0]!.view, "issue");
+    assert.equal(edge.tools.usage[0]!.area, "issues");
+    assert.deepEqual(edge.tools.usage[0]!.focus, { kind: "issue", id: 7 });
     assert.ok(edge.tools.toolCalls.some((c) => c.name === "get_issue" && c.route === `/projects/${PROJECT}/issues/7/mcp`));
 
     edge.tools.setIssueState(7, "closed");
-    const closed = await call(edge, `/v1/projects/${PROJECT}/conversations/current?view=issue&issueNumber=7`, tok);
+    const closed = await call(edge, `/v1/projects/${PROJECT}/conversations/current?area=issues&focus[kind]=issue&focus[id]=7`, tok);
     assert.equal(closed.status, 409);
     assert.equal((await json<{ code: string }>(closed)).code, "issue_closed");
     const refused = await send(edge, tok, seven, "again");
     assert.equal(refused.status, 409);
     assert.deepEqual(await json(refused), { code: "conversation_rotated" }, "the closed issue's thread is gone");
 
-    assert.equal((await call(edge, `/v1/projects/${PROJECT}/conversations/current?view=issue&issueNumber=8`, tok)).status, 404);
-    assert.equal((await call(edge, `/v1/projects/${PROJECT}/conversations/current?view=issue`, tok)).status, 400);
-    assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?view=boards`, tok)).status, 400);
+    assert.equal((await call(edge, `/v1/projects/${PROJECT}/conversations/current?area=issues&focus[kind]=issue&focus[id]=8`, tok)).status, 404);
+    for (const query of ["area=issues&focus[kind]=issue", "focus[kind]=issue&focus[id]=7", "area=issues&focus[kind]=issue&focus[id]=0", "area=issues&focus[kind]=board&focus[id]=7"]) {
+      const bad = await call(edge, `/v1/projects/${PROJECT}/conversations/current?${query}`, tok);
+      assert.equal(bad.status, 400, query);
+      assert.equal((await json<{ code: string }>(bad)).code, "invalid_chat", query);
+    }
+    assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?area=boards`, tok)).status, 400);
+    assert.equal((await call(edge, `/v1/projects/${PROJECT}/turns/active?focus[kind]=issue&focus[id]=7`, tok)).status, 400);
   }));
 
 test("Turn socket: removing an issue's thread is 204, and waits for a turn running on it", () => {
@@ -195,7 +228,7 @@ test("Turn socket: removing an issue's thread is 204, and waits for a turn runni
   const hold = new Promise<void>((resolve) => (release = resolve));
   return withEdge({ models: [mockModel([{ kind: "text", text: "working" }], { hold })], issues: { 7: { state: "open" } } }, async (edge) => {
     const tok = await edge.token();
-    const seven = await current(edge, tok, "?view=issue&issueNumber=7");
+    const seven = await current(edge, tok, "?area=issues&focus[kind]=issue&focus[id]=7");
     const turn = await json<{ turnId: string }>(await send(edge, tok, seven, "close it"));
     const later = new Date(Date.now() + 60_000).toISOString();
     assert.equal(await removeOnSocket(edge, `/projects/${PROJECT}/issues/7/thread?before=${later}`), 204);
@@ -212,7 +245,7 @@ test("Turn socket: removing an issue's thread is 204, and waits for a turn runni
 test("ThreadBook: a deferred removal whose thread already went drops the turn's stored messages and its pending entry", async () => {
   const store = new InMemoryConversationStore();
   const threads = new ThreadBook({ store });
-  const old = threads.current("greeter", "Ann", { view: "issue", issueNumber: 7 }).conversationId;
+  const old = threads.current("greeter", "Ann", issueChat(7)).conversationId;
   threads.deferIssueRemoval("greeter", 7, old, new Date(Date.now() + 60_000));
   // The thread goes another way (rotated full) while its turn still runs; the turn then saves.
   threads.noteContextTokens("greeter", old, 900);
@@ -228,10 +261,10 @@ test("v1: an issue closed while its turn runs keeps its thread until the turn en
   const hold = new Promise<void>((resolve) => (release = resolve));
   return withEdge({ models: [mockModel([{ kind: "text", text: "working" }], { hold })], issues: { 7: { state: "open" } } }, async (edge) => {
     const tok = await edge.token();
-    const seven = await current(edge, tok, "?view=issue&issueNumber=7");
+    const seven = await current(edge, tok, "?area=issues&focus[kind]=issue&focus[id]=7");
     const turn = await json<{ turnId: string }>(await send(edge, tok, seven, "summarise it"));
     edge.tools.setIssueState(7, "closed");
-    const closed = await call(edge, `/v1/projects/${PROJECT}/conversations/current?view=issue&issueNumber=7`, tok);
+    const closed = await call(edge, `/v1/projects/${PROJECT}/conversations/current?area=issues&focus[kind]=issue&focus[id]=7`, tok);
     assert.equal(closed.status, 409);
     assert.equal((await json<{ code: string }>(closed)).code, "issue_closed");
     assert.equal((await send(edge, tok, seven, "again")).status, 409);
@@ -256,5 +289,5 @@ test("v1: a main turn refused at its launch leaves the Issues chat's notes for t
     edge.turns.refuse();
     held.release();
     assert.equal((await sent).status, 503);
-    assert.deepEqual(edge.threads.takeBranchNotes(PROJECT), [{ view: "issues", turns: 1, outcome: "Filed #3: Save fails" }]);
+    assert.deepEqual(edge.threads.takeBranchNotes(PROJECT), [{ area: "issues", turns: 1, outcome: "Filed #3: Save fails" }]);
   }));

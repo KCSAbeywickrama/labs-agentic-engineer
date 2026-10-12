@@ -22,7 +22,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { ProjectChat } from "../chatStore";
-import type { ChatView } from "../chatView";
+import { chatIssue, ISSUES_CHAT, MAIN_CHAT, type ChatRef } from "../chatRef";
 import { ChatPanelContext, type ChatPanelControls, type ComposeRequest } from "../../shell/chatPanel";
 
 // The chat panel holds one thread, the one of the page in view: the project's
@@ -30,19 +30,23 @@ import { ChatPanelContext, type ChatPanelControls, type ComposeRequest } from ".
 // issue's chat. The breadcrumb names the thread and moves between threads;
 // the threads menu lists them all.
 
+/** The test's bucket of a chat: the main chat, the Issues area's, or an issue's. */
+type Bucket = "main" | "issues" | "issue";
+const bucketOf = (chat: ChatRef = MAIN_CHAT): Bucket => (chatIssue(chat) !== undefined ? "issue" : chat.area === "issues" ? "issues" : "main");
+
 let chatStatus: ProjectChat["status"] = "ready";
-const chats: Record<ChatView, ProjectChat["items"]> = { main: [], issues: [], issue: [] };
-const chatOf = (view: ChatView): ProjectChat => ({
+const chats: Record<Bucket, ProjectChat["items"]> = { main: [], issues: [], issue: [] };
+const chatOf = (chat?: ChatRef): ProjectChat => ({
   status: chatStatus,
   error: null,
-  items: chats[view],
+  items: chats[bucketOf(chat)],
   turn: { phase: "idle" },
 });
 
 const mainSend = vi.fn(() => Promise.resolve(true));
 const issuesSend = vi.fn(() => Promise.resolve(true));
 const issueSend = vi.fn(() => Promise.resolve(true));
-const stores: Record<ChatView, { send: typeof mainSend }> = {
+const stores: Record<Bucket, { send: typeof mainSend }> = {
   main: { send: mainSend },
   issues: { send: issuesSend },
   issue: { send: issueSend },
@@ -51,10 +55,10 @@ const storeIssue = vi.fn();
 const post = vi.fn();
 let issueThreads: { issueNumber: number; count: number }[] = [];
 vi.mock("../useProjectChat", () => ({
-  useProjectChat: (_projectName: string, view: ChatView = "main") => chatOf(view),
-  chatStoreFor: (view: ChatView, issueNumber?: number) => {
-    storeIssue(view, issueNumber);
-    return stores[view];
+  useProjectChat: (_projectName: string, chat?: ChatRef) => chatOf(chat),
+  chatStoreFor: (chat: ChatRef) => {
+    storeIssue(chat);
+    return stores[bucketOf(chat)];
   },
   chatStore: { retry: vi.fn(), answer: vi.fn(), post: (...args: unknown[]) => post(...args) },
   canSend: () => true,
@@ -195,7 +199,7 @@ describe("ChatPanel", () => {
       expect(within(s).getByText("Ask me about this issue, or tell me what to do with it.")).toBeTruthy();
       typeAndSend(s, "Comment that it is fixed");
       expect(issueSend).toHaveBeenCalledWith("shop", "Comment that it is fixed", { kind: "product" });
-      expect(storeIssue).toHaveBeenCalledWith("issue", 7);
+      expect(storeIssue).toHaveBeenCalledWith({ area: "issues", focus: { kind: "issue", id: 7 } });
       expect(mainSend).not.toHaveBeenCalled();
     });
 
@@ -347,7 +351,7 @@ describe("ChatPanel", () => {
 
   describe("a compose request", () => {
     const issuesInput = () => inputIn(issuesChat()!);
-    const issue = (nonce: number): ComposeRequest => ({ text: "/issue ", view: "issues", projectName: "shop", nonce });
+    const issue = (nonce: number): ComposeRequest => ({ text: "/issue ", chat: ISSUES_CHAT, projectName: "shop", nonce });
 
     it("fills the Issues chat's composer, focuses it with the cursor at the end, and sends nothing", async () => {
       render(panel("issues", null, issue(1)));
@@ -420,7 +424,7 @@ describe("ChatPanel", () => {
     });
 
     it("a main-chat request fills the main composer", async () => {
-      render(panel("overview", null, { text: "Make it blue", view: "main", projectName: "shop", nonce: 1 }));
+      render(panel("overview", null, { text: "Make it blue", chat: MAIN_CHAT, projectName: "shop", nonce: 1 }));
       await waitFor(() => expect(inputIn(mainChat()!).value).toBe("Make it blue"));
     });
   });

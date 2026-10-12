@@ -34,7 +34,7 @@ import { TOOLS } from "../src/tools/registry.js";
 const skills = loadSkillsFromSnapshot(fileURLToPath(new URL("../../../../../../", import.meta.url)));
 const flat = (s: string): string => s.replace(/\s+/g, " ");
 const ISSUES = flat(buildSubAgentInstructions(scopeFor("issues"), { skills }));
-const ISSUE = flat(buildSubAgentInstructions(scopeFor("issues", { kind: "issue", number: 42 }), { skills }));
+const ISSUE = flat(buildSubAgentInstructions(scopeFor("issues", { kind: "issue", id: 42 }), { skills }));
 
 test("Issues: classify, then a question is answered, an unclear kind is asked, and unknown means ask", () => {
   for (const needle of ["classify_report", "search_issues", "create_issue", "recentMessages"]) {

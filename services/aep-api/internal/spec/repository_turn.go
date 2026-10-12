@@ -62,8 +62,8 @@ type TurnRecord struct {
 	ConversationID string
 	Kind           string // TurnKindBrowser | TurnKindKickoff | TurnKindPlan
 	// ChatView is the chat a browser turn ran in when it is not the main
-	// chat: "issues" (the Issues page's) or "issue" (one issue's); "" for the
-	// main chat and every other kind (AgentTurn.ChatView).
+	// chat: "issues" (the Issues area's own) or "issue" (that area focused on
+	// one issue); "" for the main chat and every other kind (AgentTurn.ChatView).
 	ChatView   string
 	Flow       string
 	Status     string // completed | failed

@@ -170,8 +170,9 @@ func TestTurnUsage_CarriesTheDesignFeatures(t *testing.T) {
 	}
 }
 
-// The chat an Issues or issue turn ran in reaches the ledger; a main-chat
-// record names none.
+// The chat an area turn ran in reaches the ledger as its chat view: the area's
+// own chat as the area (issues), a focused one as its focus's kind (issue); a
+// main-chat record names none.
 func TestTurnUsage_CarriesTheChatView(t *testing.T) {
 	stack := newInternalStack(t)
 	ledger := &fakeTurnLedger{}
@@ -181,15 +182,22 @@ func TestTurnUsage_CarriesTheChatView(t *testing.T) {
 	h := NewHandler(AppParams{InternalDeps: deps})
 
 	body := turnUsageBody(t,
-		turnRecordJSON(t, func(r map[string]any) { r["view"] = "issue" }),
-		turnRecordJSON(t, func(r map[string]any) { r["turnId"] = "11111111-2222-4333-8444-555555555555" }),
+		turnRecordJSON(t, func(r map[string]any) {
+			r["area"] = "issues"
+			r["focus"] = map[string]any{"kind": "issue", "id": 7}
+		}),
+		turnRecordJSON(t, func(r map[string]any) {
+			r["turnId"] = "11111111-2222-4333-8444-555555555555"
+			r["area"] = "issues"
+		}),
+		turnRecordJSON(t, func(r map[string]any) { r["turnId"] = "22222222-2222-4333-8444-555555555555" }),
 	)
 	if rec := postTurnUsage(t, h, "Bearer "+stack.mintStudio("acme"), body); rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (body %s)", rec.Code, rec.Body)
 	}
 	got := ledger.batches[0]
-	if got[0].ChatView != "issue" || got[1].ChatView != "" {
-		t.Fatalf("chat views = %q and %q, want issue and none", got[0].ChatView, got[1].ChatView)
+	if got[0].ChatView != "issue" || got[1].ChatView != "issues" || got[2].ChatView != "" {
+		t.Fatalf("chat views = %q, %q and %q, want issue, issues and none", got[0].ChatView, got[1].ChatView, got[2].ChatView)
 	}
 }
 
@@ -356,7 +364,20 @@ func TestTurnUsage_Statuses(t *testing.T) {
 		{name: "turnId not a uuid", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["turnId"] = "x" })), want: 400},
 		{name: "running is not a finished status", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["status"] = "running" })), want: 400},
 		{name: "unknown kind", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["kind"] = "chat" })), want: 400},
-		{name: "unknown view", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["view"] = "main" })), want: 400},
+		{name: "unknown area", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["area"] = "main" })), want: 400},
+		{name: "the retired view", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["view"] = "issue" })), want: 400},
+		{name: "a focus of an unknown kind", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) {
+			r["area"] = "issues"
+			r["focus"] = map[string]any{"kind": "board", "id": 7}
+		})), want: 400},
+		{name: "a focus id of 0", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) {
+			r["area"] = "issues"
+			r["focus"] = map[string]any{"kind": "issue", "id": 0}
+		})), want: 400},
+		// A focus narrows an area's chat: alone it names no chat.
+		{name: "a focus without an area", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) {
+			r["focus"] = map[string]any{"kind": "issue", "id": 7}
+		})), want: 400},
 		{name: "unknown field", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["paths"] = []string{"a"} })), want: 400},
 		{name: "design feature not an F-id", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["designFeatures"] = []string{"F1", "G2"} })), want: 400},
 		{name: "design features as one line", body: turnUsageBody(t, turnRecordJSON(t, func(r map[string]any) { r["designFeatures"] = []string{"/design F1 F2"} })), want: 400},

@@ -69,6 +69,21 @@ func (e ProjectSnapshotKnown) Valid() bool {
 	}
 }
 
+// Defines values for TurnRecordArea.
+const (
+	Issues TurnRecordArea = "issues"
+)
+
+// Valid indicates whether the value is a known member of the TurnRecordArea enum.
+func (e TurnRecordArea) Valid() bool {
+	switch e {
+	case Issues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TurnRecordKind.
 const (
 	Browser TurnRecordKind = "browser"
@@ -132,18 +147,15 @@ func (e TurnRecordStatus) Valid() bool {
 	}
 }
 
-// Defines values for TurnRecordView.
+// Defines values for TurnRecordFocusKind.
 const (
-	Issue  TurnRecordView = "issue"
-	Issues TurnRecordView = "issues"
+	Issue TurnRecordFocusKind = "issue"
 )
 
-// Valid indicates whether the value is a known member of the TurnRecordView enum.
-func (e TurnRecordView) Valid() bool {
+// Valid indicates whether the value is a known member of the TurnRecordFocusKind enum.
+func (e TurnRecordFocusKind) Valid() bool {
 	switch e {
 	case Issue:
-		return true
-	case Issues:
 		return true
 	default:
 		return false
@@ -216,6 +228,8 @@ type SkillsSnapshot struct {
 
 // TurnRecord One finished turn, as the ledger stores it. Idempotent on turnId.
 type TurnRecord struct {
+	// Area The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+	Area   TurnRecordArea    `json:"area,omitempty"`
 	Author *TurnRecordAuthor `json:"author,omitempty"`
 
 	// BaseRef The repo snapshot sha the turn read.
@@ -249,14 +263,17 @@ type TurnRecord struct {
 	// the project's head. Absent when the flush did not land, and on
 	// every other flow. Same schema as aep-api's
 	// AEStudioTurnRecord.endRef.
-	EndRef       string         `json:"endRef,omitempty"`
-	FinishedAt   time.Time      `json:"finishedAt"`
-	Flow         string         `json:"flow"`
-	InputTokens  int64          `json:"inputTokens"`
-	Kind         TurnRecordKind `json:"kind"`
-	Model        string         `json:"model"`
-	ModelHost    string         `json:"modelHost"`
-	OutputTokens int64          `json:"outputTokens"`
+	EndRef     string    `json:"endRef,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Flow       string    `json:"flow"`
+
+	// Focus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+	Focus        *TurnRecordFocus `json:"focus,omitempty"`
+	InputTokens  int64            `json:"inputTokens"`
+	Kind         TurnRecordKind   `json:"kind"`
+	Model        string           `json:"model"`
+	ModelHost    string           `json:"modelHost"`
+	OutputTokens int64            `json:"outputTokens"`
 
 	// Project Absent on a marketplace turn.
 	Project string           `json:"project,omitempty"`
@@ -267,10 +284,10 @@ type TurnRecord struct {
 	StartedAt time.Time          `json:"startedAt"`
 	Status    TurnRecordStatus   `json:"status"`
 	TurnID    openapi_types.UUID `json:"turnId"`
-
-	// View The chat the turn ran in when it is not the project's main chat, the Issues page's (`issues`) or one issue's (`issue`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
-	View TurnRecordView `json:"view,omitempty"`
 }
+
+// TurnRecordArea The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+type TurnRecordArea string
 
 // TurnRecordKind defines model for TurnRecord.Kind.
 type TurnRecordKind string
@@ -281,14 +298,20 @@ type TurnRecordReason string
 // TurnRecordStatus defines model for TurnRecord.Status.
 type TurnRecordStatus string
 
-// TurnRecordView The chat the turn ran in when it is not the project's main chat, the Issues page's (`issues`) or one issue's (`issue`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
-type TurnRecordView string
-
 // TurnRecordAuthor defines model for TurnRecordAuthor.
 type TurnRecordAuthor struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
+
+// TurnRecordFocus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+type TurnRecordFocus struct {
+	ID   int                 `json:"id"`
+	Kind TurnRecordFocusKind `json:"kind"`
+}
+
+// TurnRecordFocusKind defines model for TurnRecordFocus.Kind.
+type TurnRecordFocusKind string
 
 // ProjectName defines model for ProjectName.
 type ProjectName = string
@@ -1258,66 +1281,67 @@ func (sh *strictHandler) PostTurnUsage(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7Fphc9s2k/4rO7z3xva8pKQ4TjqxP/nceOretfHY6dyHKCdBxFJERQIsAFrWefTfbxYARUqinShtb96Z",
-	"9psogMDuYvfZZxd8ilJVVkqitCY6f4oqplmJFrV7utXqV0ztz6xEeuRoUi0qK5SMzptBkKxEOP7+5/uk",
-	"YDMswBT1/CSKI0GTKmbzKI6kWyGqOuvFkcbfaqGRR+dW1xhHJs2xZLSRXVU03Vgt5Dxar9c02VRKGmzk",
-	"mhVY0s9USYvS0k9WVYVIGYk3rPyMf/5qSNanztr/0JhF59G/DVvFh37UDJt13Y7b2t5dX8G7szffQVh5",
-	"AFeKozmHoNOklgupljIGjdlEKjvJVC15DGSBiZAPrBA8hvBjQrqjsd0/UqV5DFyYxSSriyIGhtWEVWJS",
-	"S/bARMFmBcYgeLX9x1zYvJ5NUGulBxEJHrQhZX80St5V6XsadMerVYXaCm/GVHHsmFtIi3PUEenOLBlr",
-	"HUclGsPm2Hcq3RP85Bdr53+Om/lqRvahVYM0d173fY+6hB/vP/yc3N1ewelgBMFGA7icGZQWpoJPoWQL",
-	"NCAsMJDKiiwc+CCKd5QTvG8DLzwoDUxCUHhAspGj6Cqld1DWJWl0Ohh11GjUJhVtrnpWF1JYwQrxvxiD",
-	"Vaoww0IYS3v5p5QVxQAu5QqUzVGDXweEASbNEjVyWAqbA2vN4KckUtnEuROEY+6RykWu05xxLkgkVtx2",
-	"LOJjbOdMds6wMcJGxxdP0Qfkvlth420vhdqWZ67j3uP6mGPjBEcGBD/0oDSaurB/jEn6LNGBoRcDq5WI",
-	"o2Wi6B0yltna9IejFbboX9D/8aXYdKPNMputYi/nM5rRz3vJKpOrF0yYscLgbujlyPh9znoFFhxZ/0kH",
-	"IAWaASmrbE0RwSykGl2Mw/GUxqYgJExNhakZDtgcpRVpgnIuJKIeWFUWU3prGqSYnsRgtShL5AOgfUxQ",
-	"ChaIlQGbI3BlkwI5NEIpDaq2oDI36vY4MqCRcRODUWBzYShuc7UEBtOhsUzbKdhaS5ijJXzaoNYyR+mW",
-	"SVVZCgs5MyBVZ6uY0IwrpL8tVEwbjAk0BK1DthAGZgWTi96wd0mnEwzk0+2JzpQqkEkfDBlqlKk/om3z",
-	"X4sCXR43jc7hMI4MGKvoHDavA1dpXVIskzzCYmle8MyIac1Wzr8XoihMv1vsuKvXKd74UfflLUX6XPfe",
-	"T/02zz1AyHZqnxQfay3vXEr/ogTbR/FBImRCCpMjdw4VA/NOWiCfo/bn4T3shmNZKaI/oKSbfMP3EyGr",
-	"bf5lPG4FvvTz4+gxmauENEvMQlSJqrwKSaUImnRQYB1HM2bwjpbuB/BKtTFncuaUcaFCAdXr1ClLc7wK",
-	"Yf9RLVA6TTKlS2Y9NL49a1/sIKV78w4ZP+ytnMk58ltmc/MyOGWiQNNqEF48h2XOrItYtZSw1MKigQIz",
-	"O5ZcZM5fLWRalc1EcJARMn7sjJRoLJgVD0gQQ2MXBGOlMnYsacNMaGPhdDTahhZhGykIP3Ih5wO4J0ru",
-	"TxaYGUuGVcIqcWTg8v29rblQ7XEPuso7dGPgySioLKPlhRlLjVltkEOOGuH4bDTaZbInwCQHiQ+o4bca",
-	"a+Rb8FCyx/9CObd5dP7m1WkclUI2z6/6KBZ7vPGvno5G+1jybH511cCjPezwlXxAbZyv3fCtl+pa8D7/",
-	"5GjEXF4joxz1jMdkYZQShJ8fEoR/QL4J7OnQ/wXXr+D6dDqWhZAejjmNl1QkgCW/UZqjvoCb7w0oWazi",
-	"YG+HDkJi4xhjqTRgWdkVlMikAZq1aiQKAlD1QA4WgheOGcyYxrFsxJmeDOAeJScXoN0IY3Z0uYDgWSDm",
-	"MsASKDmWbENys0Itdx0SNv44lj0OuW3dGJa5SHPwHkjmXOaqQJgxm+aQKT2WStIjCUrG6nqw59PSjTh3",
-	"dpk7CCJMWJSP5QF+fQ5cq4pWvfneHwsl77Gk7F06oTRzqtucSTDegs8Fw6u3xNytRU1+8z/Xn0bJu8//",
-	"/Ed0eEyg5M9icKAendNTGqaMc43GJDRKucCf6ZGBO0VApfQCloQehj14ItbgTZOfzlsgzJRO3eG4d7Oi",
-	"NnlMox7kjUewllRQZt9nSO414MIhGRSMymeyPnmUd+Fv9ilvHTqFjvHfnvWYuVHu0m5BAWcWEytc42L/",
-	"nUIt+9murOrD0GghJO/WNjOtlgYpHS9EulBZRvm9YLK/MlUc+6sLN/KD8lX33qiq7aFyhrPsqbH9oTqw",
-	"KJleoK0Klno36U32Gllo0jQ6O8Kd+DKSqhWNrEy4QMJik9eWe3roWIhkRa8pPD17NiI+6Dn4KYdyk5C4",
-	"D3GPtrRrNCQCVqB1GmVMFMh7lfCU7qtS0oPA5TPBTxDV6uX6HptQFr7q2I7OkglHbawLYbgxpkYDFZvj",
-	"kaEizD1PTwhECHrdcztCeWPbCYRMvBAkgA9ooAzhnh2CBjEYBHendUO15mznjoOKkQpTX4+5AfTosrOF",
-	"T450eI25vcTkMvSjx9S79bK3+x43COEZAr5TSDcMuOt3XVfZgpUmTrtRuQ0VOxG5T2v7KfLLhcjlpg44",
-	"oCDybZk9b5OhI/yyGZ2nuqn7kq0dOmZq32d/keIxMSpdoIXL2xuYoV0iSmCY+OyVeAcgR2KYGAf1iWux",
-	"gZBGcHReefl+LH0agEpxOA4rVszmFACX7yc/Xd1O7j9c/ef7jzEY1JTkZqvdJWOgQxrL0du3oxPvkqWq",
-	"pXNZCo45sxh6AkQhnCODwbTWwq58esIB3DTzx7LpJjhKxdV2q6FSIan+dHXru4Zw7BoUniAGiZjkPqE6",
-	"dw7zwgohWMk4fpTCwpzELQLUhs2bapKYGu9Gv3txBxjNAI4/Nn0Q+FUJaVypk6qiYDOf8R3pw8T/1VAI",
-	"b/I4IIxW9Tz3BIyi+wRc788A0wh311dj2W2vGzh+rp1/ctHtkBJ61t7wjIojR/lILZi6BDKFEssZ6g3b",
-	"rrSyKlWFa8R4Yhbaa9Hm6J35vfRRHBECeNd8NRgNRi5hVihZJaLz6PVgNHgdORLna8dhmVauI6j6Wty3",
-	"ze5hUTgdnZ4lr14lozcDmLZd42noCRvAR5baYuVkxwIfUI5l1x1cRenoacPFnS97N2mWTFlRTMlFWmJO",
-	"cTmWLQd2pd0APi5VWJfOJYSFkI13juXxHO1EY6ksTubCTqginoRbGKofkek0706gYi2muhh1Mq+Z5shP",
-	"Yu+/Go11+2RKL90IWNXoMYDLrRY/HEvl7gBO3GGnKVaWqLvj+KejU0/UFcwUd+BPMLYp6iKyQEJH4yEK",
-	"jf0PxVcv3CAddnO0c7Wx3oZCq2vcvcM6HY3++N1DS77n/moTMI0QVPD5Bnm4DXHhEqLlhJz8dHTad4XS",
-	"PZN4cw4XjenpzTOvW5/IGxu0l21x9MbvdMD81wfMJwZWlyXTq+g8osje2OK4/8om7lzYnBA+sLmhfPbT",
-	"1W30mZYbBrQ0w6fOleaaZJpjT9TfoVHFQ2gcaayUEVbpVdx0iuxen4xZmDI79ehP1ZJjbGOpSmEt8hgy",
-	"tGmO/MSXuNYxpecataAeUBdMUBE3lqF1HryzDFZreqrDqQcO20+SQ/JpwMntS0DavLK/e+grH/ueVkih",
-	"LpWMpWdv0+Em0zxj2OFTaAWvp37/7itewuHTpiG7ng6guSkwW8nNtdNdG86l4k6731FkZkOlHDteCTM0",
-	"NsEsU9oO4Gx0BtOdy95p6K+41TabNJSaEp2eH5mNQaXjBs0RC+OO36K8oMXHcrp1c9ys7dzA21CqppIP",
-	"yb51pQG8Gb0ey+nm+njaaZhIXG551rsR/HuzhE94oc/P5riPnIVSi7pKmoIv3vpG4FN/FLZTht1vCNbx",
-	"bmRceX2s6noY5PgInig6zQfwwbt9S0n8tQ1mrC5sMtNMprlvKjQfHvxWo161Xx4wErwF007L5dMoeceS",
-	"7DK5/vz0Xfz2bN3TfFl//hPBe/eurQe8t67HDDjfI5v5bpY7wW+B3bPR2b8qTAfEBLZFTB1cOu65cYQO",
-	"PN9v/nsJpIe+GHyZpn1smTTx5yOzTbWlqzDCqnEvezkyY+k4R1tP+I2JhLjSgl7zoBMW6ieAY+muDBpy",
-	"R2MmhgVW1nsAQiWkRL7BWU/A/GbxWLrbU/TPMaQFM0ZkqwlBh7YnF19giHvN/8HuElvfL7j6yQva5KWx",
-	"rApmM6XLIwM/4gMscNX0dAOpDO3VXBXcDODStVK/QPvgANbX2v33gdfnv6njX5o6vgwKx11meQhrbADp",
-	"SdZkv/XLyPSh03DzHS/fEzgEg3ogyGviOEEHkMaytyQ9BJBCwRjghyZPWpPHEO4emnHkwrZQpUyDW4RB",
-	"VHM3YzmTfGIV1ZZCzieOTn4Lln1NhbkLNWP5Jaz5/VAT9yWk4G1NS5dEnKna9n9q6Z3pxa8sSyFFWZfd",
-	"G9hNg/9vsPuLg10/znwNyvk67OtqYVcfNTVmT2HcpXrQXGOIyrctd4rQi/ZjLdgvLPuqxL0QnqNNgvh/",
-	"ohfufKH0DN9vRCf75Oz/+fT/2xHtZ3oAL1BuW2uZ1M0Hw/0Z7LLBVSFDvlC1nanHGDgW4sHxyDaHATMr",
-	"meZaSVWbogd2aZOks++fg1ud77m+CrNOn9f72wL/m4/yB3fh9uDv1LY/LXPfNDqd2hP9xX+97ZR03d+Q",
-	"vWpdROfR0LHgMPfpOeg8HYwcXICpdcZS11MIaYlgoj+77d1NdN7yQu2/d9upDXsc1XSWaD11/Xn9fwEA",
-	"AP//",
+	"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",
+	"nVVeqP11D53asAeoprNFi9T15/X/BQAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

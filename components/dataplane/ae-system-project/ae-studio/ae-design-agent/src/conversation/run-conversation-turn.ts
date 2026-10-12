@@ -47,7 +47,8 @@ import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn } from "../agents/main/run-turn.js";
 import { createMainAgent } from "../agents/main/agent.js";
 import { buildSubAgent } from "../areas/sub-agent.js";
-import { scopeFor, type ResolvedScope } from "../areas/profiles.js";
+import { scopeFor } from "../areas/profiles.js";
+import type { AreaChat } from "../conversations/chat.js";
 import { answerableQuestion } from "../agents/confirmation.js";
 import { endedAwaitingHuman, type AgentRunSettings, type ProviderOptions, type TurnAgent } from "../agents/run-settings.js";
 import { buildFileToolSet, buildRegisterDraftTools } from "../agents/main/tools/files.js";
@@ -145,11 +146,12 @@ export interface RunConversationTurnInput {
   /** A `task-plan` turn: what the version carries, which `planBuild` is checked against. */
   planScope?: PlanScope;
   /**
-   * The issue an `issue` turn works on: the focus of its Issues scope, which
-   * its prompt names. Required for the `issue` tool set (a turn without it is
-   * refused before the model runs); ignored by every other.
+   * The area chat the turn runs in (the Issues area's own, or the area
+   * focused on an issue): present → the turn runs the generic sub-agent built
+   * from that area's scope, and `toolset` is ignored. Absent → a spec turn on
+   * the main agent.
    */
-  issueNumber?: number;
+  chat?: AreaChat;
   /** The project an area chat's turn belongs to: its sub-agent's prompt names it. Ignored by a spec turn. */
   project?: string;
   /**
@@ -257,20 +259,20 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 2. mark active (in memory; not saved mid-turn — the TurnDesk lock handles concurrency)
     conv.status = "active";
 
-    // 3. select the agent from `toolset` (default `files`). The Issues chat
-    //    and an issue's own chat each run the generic sub-agent built from
-    //    their area scope (areas/sub-agent.ts); every other turn runs the
-    //    main agent (agents/main/agent.ts) over the tool set built here. Both
-    //    spec tool sets build a throwaway per-turn accumulator from the passed
+    // 3. select the agent. An area's chat (the Issues area's own, or the
+    //    area focused on an issue) runs the generic sub-agent built from its
+    //    area scope (areas/sub-agent.ts); every other turn runs the main
+    //    agent (agents/main/agent.ts) over the tool set `toolset` (default
+    //    `files`) names, built here. Both spec tool sets build a throwaway per-turn accumulator from the passed
     //    snapshot; the skill catalog + `loadSkill` are registered identically
     //    (only when skills were supplied, ADR-0002). The `files` set also
     //    carries the HITL question tools (ask_question / ask_questions);
     //    `task-plan` does not. The FileBundle is held by name: the live doc
     //    writer below needs it.
     const toolset: Toolset = input.toolset ?? "files";
-    // An area chat's turn (the Issues chat, an issue's thread) works on no
-    // spec: the user's message is its whole prompt, with no spec-turn notes.
-    const scope = areaScopeOf(toolset, input.issueNumber);
+    // An area chat's turn works on no spec: the user's message is its whole
+    // prompt, with no spec-turn notes.
+    const scope = input.chat ? scopeFor(input.chat.area, input.chat.focus) : undefined;
     const areaChat = scope !== undefined;
     // An area chat's sub-agent writes only what the user confirmed on a
     // question card: the card it binds to is the one the user is answering,
@@ -528,18 +530,6 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       docWriter.rollbackDangling();
     }
   }
-}
-
-/**
- * The area scope a chat's tool set names: the Issues chat's, or an issue's
- * (the Issues area focused on that issue); none for a spec turn. An issue
- * turn without its number is refused before the model runs.
- */
-function areaScopeOf(toolset: Toolset, issueNumber: number | undefined): ResolvedScope | undefined {
-  if (toolset === "issues") return scopeFor("issues");
-  if (toolset !== "issue") return undefined;
-  if (issueNumber === undefined) throw new Error("an issue turn needs the issue number it works on");
-  return scopeFor("issues", { kind: "issue", number: issueNumber });
 }
 
 /** The turn's provider options as a spreadable field; none for a model that takes none. */

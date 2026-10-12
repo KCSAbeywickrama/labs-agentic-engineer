@@ -26,17 +26,10 @@
  * scope (`./sub-agent.ts`); no area has agent code of its own.
  */
 
-import type { AreaId } from "@aep/agent-stream";
+import type { AreaId, Focus, FocusKind } from "@aep/agent-stream";
 import { TOOLS, type RegisteredTool } from "../tools/registry.js";
 
-export type FocusKind = "issue";
-
-/** The entity an area is narrowed to. */
-export interface Focus {
-  kind: FocusKind;
-  /** The issue's number. */
-  number: number;
-}
+export type { Focus, FocusKind };
 
 /**
  * What a turn of the sub-agent tells the main chat: its outcome as a branch

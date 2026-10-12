@@ -56,7 +56,7 @@ import type { components } from "../generated/api.js";
 import { projectDisplayHistory, type DisplayMessage } from "../conversation/display-history.js";
 import type { ConversationStore } from "../store/conversation-store.js";
 import type { BranchNote } from "./branch-notes.js";
-import { chatKey, MAIN_CHAT, type Chat } from "./chat.js";
+import { chatKey, issueChat, issueOf, MAIN_CHAT, type Chat } from "./chat.js";
 
 export type ThreadView = components["schemas"]["ProjectConversationView"];
 
@@ -236,7 +236,7 @@ export class ThreadBook {
   takeBranchNotes(project: string): BranchNote[] {
     const seen = this.issuesOutcomes.get(project);
     this.issuesOutcomes.delete(project);
-    return seen ? [{ view: "issues", turns: seen.turns, outcome: seen.outcome }] : [];
+    return seen ? [{ area: "issues", turns: seen.turns, outcome: seen.outcome }] : [];
   }
 
   /**
@@ -246,7 +246,7 @@ export class ThreadBook {
    * is a no-op. `true` when a thread went.
    */
   async removeIssueThread(project: string, issueNumber: number, before: Date): Promise<boolean> {
-    const key = threadKey(project, { view: "issue", issueNumber });
+    const key = threadKey(project, issueChat(issueNumber));
     this.pendingRemovals.delete(key);
     const thread = this.threads.get(key);
     if (!thread || thread.createdAt >= before) return false;
@@ -261,7 +261,7 @@ export class ThreadBook {
    * removal for the same turn keeps the later bound, which covers both.
    */
   deferIssueRemoval(project: string, issueNumber: number, conversationId: string, before: Date): void {
-    const key = threadKey(project, { view: "issue", issueNumber });
+    const key = threadKey(project, issueChat(issueNumber));
     const prev = this.pendingRemovals.get(key);
     const bound = prev && prev.conversationId === conversationId && prev.before > before ? prev.before : before;
     this.pendingRemovals.set(key, { conversationId, before: bound });
@@ -276,8 +276,9 @@ export class ThreadBook {
     for (const [key, pending] of this.pendingRemovals) {
       if (pending.conversationId !== conversationId) continue;
       const thread = this.threads.get(key);
-      if (thread?.id === conversationId && thread.project === project && thread.chat.view === "issue") {
-        await this.removeIssueThread(project, thread.chat.issueNumber, pending.before);
+      const issue = thread ? issueOf(thread.chat) : undefined;
+      if (thread?.id === conversationId && thread.project === project && issue !== undefined) {
+        await this.removeIssueThread(project, issue, pending.before);
         continue;
       }
       this.pendingRemovals.delete(key);

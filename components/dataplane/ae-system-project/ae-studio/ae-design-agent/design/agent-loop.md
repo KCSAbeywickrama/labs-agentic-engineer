@@ -37,9 +37,9 @@ and leaves an absent option off entirely.
 `runTurn` takes `agentFor(run)` rather than tools and instructions: it pushes the user
 message, which is what fixes the turn prompt's index for the rolling breakpoint, then
 calls `agentFor` once and streams the agent it returns. `runConversationTurn` picks the
-factory: the Issues view's turns get `buildSubAgent` over `scopeFor("issues")`, an issue's
-thread over `scopeFor("issues", {kind: "issue", number})` (the wire still says `view` and
-`issueNumber`; `areaScopeOf` maps them); every other turn gets `createMainAgent`
+factory: an area chat's turn (its `chat`: the area and its focus) gets `buildSubAgent`
+over `scopeFor(area, focus)` — the Issues area's own chat `scopeFor("issues")`, an issue's
+thread `scopeFor("issues", {kind: "issue", id})`; every other turn gets `createMainAgent`
 over the tool set it assembles (files or task-plan, then MCP, register draft and web
 search).
 
@@ -90,22 +90,23 @@ search).
   prototype from its body; the coding run builds against its
   `references/implementing.md`.
 
-## Views
+## Areas
 
-A **view** is a main-panel view of the console that owns an agent of its own, and a
-project has a **chat** per view (`src/conversations/chat.ts`): the main (spec) chat, the
-Issues page's (`view=issues`) and one per open issue (`view=issue&issueNumber=<n>`). Each
-chat has its own current thread in the `ThreadBook` and its own turn slot on the
-`TurnDesk` (scope `project#issues`, `project#issue-<n>`), so an Issues turn never waits
-on the spec chat nor one issue's on another's. The `/v1` reads that are not addressed by a
-conversation id (`conversations/current`, `turns/active`) name the chat by query (a bad
-pair is `400 invalid_chat`); a turn is sent to a thread, whose chat the book knows, so a
-turn body names no view. Only the main chat rotates. The chat's view (`VIEWS` in
-`@aep/agent-stream`) selects that view's agent in place of the spec editor:
-`toolsetFor(turn, view)` returns `issues` for `view: "issues"`, `issue` for
-`view: "issue"`, and otherwise derives `files`/`task-plan` from the turn. `runConversationTurn` runs an `issues` or
-`issue` turn on the generic sub-agent, and it stops on an accepted question call like
-every agent, so a "File this issue?" card ends the turn awaiting the user.
+An **area** is a main-panel page of the console whose chat has a sub-agent of its own, and
+a **focus** narrows an area's chat to one entity. A project has a **chat**
+(`src/conversations/chat.ts`) for its main (spec) chat, per area (`area=issues`) and per
+focus the area declares (`area=issues&focus[kind]=issue&focus[id]=<n>`, one per open
+issue). Each chat has its own current thread in the `ThreadBook` and its own turn slot on
+the `TurnDesk`, keyed by its use case derived from the area and focus (`""`, `issues`,
+`issue-<n>`), so an Issues turn never waits on the spec chat nor one issue's on another's.
+The `/v1` reads that are not addressed by a conversation id (`conversations/current`,
+`turns/active`) name the chat by query (`chatFromQuery`: an unknown area, a focus without
+an area, a focus kind the area's profile does not declare or an id that is not a positive
+integer is `400 invalid_chat`); a turn is sent to a thread, whose chat the book knows, so a
+turn body names no chat. Only the main chat rotates. An area chat's turn runs the generic
+sub-agent in place of the spec editor (`toolsetFor(turn)` only derives the main agent's
+`files`/`task-plan`), and it stops on an accepted question call like every agent, so a
+"File this issue?" card ends the turn awaiting the user.
 
 **Area profiles.** What a sub-agent is, is data (`src/areas/profiles.ts`): an
 `AreaProfile` (`id`, `label`, an optional hand-off sentence, a `base` scope and per focus
@@ -127,22 +128,22 @@ go-ahead discipline, the rules), the area block (project, area label, focus: "is
 #N"), the scope's skills inlined, the catalog of the other chat skills, the confirmation
 table generated from the scope's writes, and the surface's narration policy. Adding an
 area is a profile, its tools in the registry and its skills in `skills/` with `audience:
-[chat]`, one entry in `VIEWS` and one in `AREAS` (`@aep/agent-stream`: id, label, the
-command a handed-off request arrives as). The main agent's one hand-off tool,
+[chat]`, and one entry in `AREAS` (`@aep/agent-stream`: id, label, the command a
+handed-off request arrives as; a new focus kind is one more `FocusKind` there). The main agent's one hand-off tool,
 `hand_off({area, request})` (`src/agents/main/tools/hand-off.ts`), is built from the
 profiles with a `handOff`: its `area` enum is their ids and its description their
 sentences, so a hand-off target is a sentence in its profile, never code. The schema
 refuses a request shaped as an answer; the console sends the request on as the area's
 command (`/issue <request>`), never as an answer, and `handOffStop` ends the turn on an
 accepted call. Only the Issues area receives a hand-off and only its chat leaves the main chat a branch
-note; a view's agent works on no spec, so its turn is a plain chat turn (a typed
+note; an area's sub-agent works on no spec, so its turn is a plain chat turn (a typed
 `/design` is words for it, not a flow), it joins no Room, takes no spec scope (a `400`),
 gets no web search and no eager skills, and its prompt is the user's message alone, with
 no divergence note and no branch note. Its tools come over its chat's own MCP route on
 the tools socket (`mcpRoute`: `/projects/{p}/issues/mcp`, `/projects/{p}/issues/{n}/mcp`),
 which ae-studio-tools forwards to aep-api's surface for that project and issue; the model
-never names either. The usage record of a view's turn carries `view`, so aep-api's spec
-status reads past it.
+never names either. The usage record of an area chat's turn carries its `area` and
+`focus`, so aep-api's spec status reads past it.
 
 **Branch notes.** A turn of a scope that reports back with an outcome note (the Issues
 chat) carries its `outcome` (`src/areas/outcome.ts`: `Filed #N: <title>` when it filed, else its last reply, one line, at most 400
@@ -151,7 +152,7 @@ next browser turn takes them as the desk accepts it (`takeBranchNotes`, once: a 
 pod refuses leaves them, a main turn that fails does not hand them on) and opens its prompt with one quoted, labelled `Meanwhile in Issues (N turns): …`
 line (`branchNotesNote`, the label from the area's profile).
 
-An **issue's thread** (`view: "issue"`) is the chat on one filed issue's card; its
+An **issue's thread** (the Issues area focused on the issue) is the chat on one filed issue's card; its
 sub-agent's prompt names its issue number. It exists only while the issue is
 open: opening its thread and starting a turn on it first read the issue through its own
 route's `get_issue` (`conversations/issue-state.ts`), and a closed issue is `409

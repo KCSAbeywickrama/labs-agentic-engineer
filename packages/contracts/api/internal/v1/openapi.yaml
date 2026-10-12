@@ -568,6 +568,22 @@ components:
             $ref: '#/components/schemas/AEStudioTurnRecord'
       required:
       - records
+    AEStudioTurnRecordFocus:
+      type: object
+      additionalProperties: false
+      description: The entity the turn's area chat was narrowed to (one issue's
+        chat, by its number). Absent on the area's own chat.
+      required:
+      - kind
+      - id
+      properties:
+        kind:
+          type: string
+          enum:
+          - issue
+        id:
+          type: integer
+          minimum: 1
     AEStudioTurnRecord:
       type: object
       additionalProperties: false
@@ -604,15 +620,19 @@ components:
           - browser
           - kickoff
           - plan
-        view:
+        area:
           type: string
           enum:
           - issues
-          - issue
-          description: The chat the turn ran in when it is not the project's main
-            chat, the Issues page's (`issues`) or one issue's (`issue`). Absent
-            on a main-chat turn and on any turn that is not a browser one. The
+          description: The area whose chat the turn ran in when it is not the
+            project's main chat (the Issues page's, `issues`). Absent on a
+            main-chat turn and on any turn that is not a browser one. The
             status read's spec agent state reads main-chat turns only.
+        focus:
+          $ref: '#/components/schemas/AEStudioTurnRecordFocus'
+          # A pointer under the global prefer-skip-optional-pointer: absent must
+          # omit the key, which omitempty cannot do for a struct value.
+          x-go-type-skip-optional-pointer: false
         flow:
           type: string
         status:

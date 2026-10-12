@@ -318,9 +318,12 @@ func (s *internalServer) requireAEStudioProject(ctx context.Context, org, projec
 }
 
 // storableTurnRecord refuses what the contract admits but the ledger can never
-// store or price: a negative token count, or a NUL byte, which Postgres
-// refuses in text on every attempt.
+// store or price: a negative token count, a NUL byte, which Postgres
+// refuses in text on every attempt, or a focus without the area it narrows.
 func storableTurnRecord(r igen.AEStudioTurnRecord) error {
+	if r.Focus != nil && r.Area == "" {
+		return errors.New("a focus is taken only with an area")
+	}
 	for _, n := range []int64{r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreationTokens, r.ContextTokens} {
 		if n < 0 {
 			return errors.New("token counts must not be negative")
@@ -339,6 +342,16 @@ func storableTurnRecord(r igen.AEStudioTurnRecord) error {
 	return nil
 }
 
+// chatViewOf is the ledger's chat_view of the chat a record's turn ran in: a
+// focused area chat as its focus's kind ("issue"), an area's own chat as the
+// area ("issues"), the main chat as "".
+func chatViewOf(r igen.AEStudioTurnRecord) string {
+	if r.Focus != nil {
+		return string(r.Focus.Kind)
+	}
+	return string(r.Area)
+}
+
 // toTurnRecord is the wire record as the ledger's. contextTokens is optional
 // and never 0 for a turn that measured one, so 0 reads as absent.
 func toTurnRecord(r igen.AEStudioTurnRecord) spec.TurnRecord {
@@ -347,7 +360,7 @@ func toTurnRecord(r igen.AEStudioTurnRecord) spec.TurnRecord {
 		Project:        r.Project,
 		ConversationID: r.ConversationID.String(),
 		Kind:           string(r.Kind),
-		ChatView:       string(r.View),
+		ChatView:       chatViewOf(r),
 		Flow:           r.Flow,
 		Status:         string(r.Status),
 		Reason:         string(r.Reason),

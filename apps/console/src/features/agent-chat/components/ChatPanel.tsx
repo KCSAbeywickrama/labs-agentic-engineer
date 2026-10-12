@@ -27,7 +27,7 @@ import { chatTopic, type ProjectCard, type ProjectPage } from "../../shell/scope
 import { useSpecFeature } from "../../spec/useSpecWorkspace";
 import type { ChatItem } from "../chatLog";
 import { turnScopeFor, type TurnScope } from "../turnScope";
-import { chatViewFor, type ChatView } from "../chatView";
+import { chatFor, chatIssue, chatKey, ISSUES_CHAT, MAIN_CHAT, sameChat, type ChatRef } from "../chatRef";
 import { useIssueThreadRemovedNote, useIssueThreadState, useOpenIssueThreads } from "../useIssueThread";
 import { useOpenIssueChat, useOpenIssuesChat } from "../useOpenIssuesChat";
 import { canSend, chatStoreFor, useProjectChat } from "../useProjectChat";
@@ -63,17 +63,18 @@ interface Crumb {
 }
 
 /** The thread in view as a path, `org › project › Issues › #N`; every step before it goes back up. */
-function ThreadCrumb({ projectName, view, issueNumber }: { projectName: string; view: ChatView; issueNumber: number | null }) {
+function ThreadCrumb({ projectName, chat }: { projectName: string; chat: ChatRef }) {
   const { orgHandle } = useSession();
   const label = useProjectLabel(projectName);
   const navigate = useNavigate();
+  const issue = chatIssue(chat);
   const crumbs: Crumb[] = [
     { label: orgHandle ?? "Organization", go: () => void navigate({ to: "/" }) },
     { label, go: () => void navigate({ to: "/projects/$projectName", params: { projectName } }) },
-    ...(view !== "main"
+    ...(chat.area !== undefined
       ? [{ label: "Issues", go: () => void navigate({ to: "/projects/$projectName/issues", params: { projectName } }) }]
       : []),
-    ...(view === "issue" && issueNumber !== null ? [{ label: `#${issueNumber}` }] : []),
+    ...(issue !== undefined ? [{ label: `#${issue}` }] : []),
   ];
   const last = crumbs.length - 1;
   return (
@@ -138,8 +139,7 @@ function Composer({
   topic,
   note,
   scope,
-  view,
-  issueNumber,
+  chat,
   composeRequest,
   onComposeApplied,
 }: {
@@ -147,24 +147,22 @@ function Composer({
   topic: string;
   note: string | null;
   scope: TurnScope;
-  view: ChatView;
-  /** The issue whose chat this is, in the issue view. */
-  issueNumber?: number;
+  /** The chat this composer sends to. */
+  chat: ChatRef;
   composeRequest: ComposeRequest | null;
   onComposeApplied: (nonce: number) => void;
 }) {
-  const chat = useProjectChat(projectName, view, issueNumber);
+  const conversation = useProjectChat(projectName, chat);
   const statusId = useId();
   const [draft, setDraft] = useState("");
   const input = useRef<HTMLTextAreaElement | null>(null);
-  // Each request applies once, and only here if it is for this project's view.
+  // Each request applies once, and only here if it is for this project's chat.
   const appliedNonce = useRef(0);
   const [pendingFocus, setPendingFocus] = useState(false);
   const request =
     composeRequest &&
     composeRequest.projectName === projectName &&
-    composeRequest.view === view &&
-    composeRequest.issueNumber === issueNumber
+    sameChat(composeRequest.chat, chat)
       ? composeRequest
       : null;
   useEffect(() => {
@@ -176,7 +174,7 @@ function Composer({
   }, [request, onComposeApplied]);
   // After the draft has committed, so the cursor lands past the new text, and
   // once the input is enabled: a disabled field takes no focus.
-  const enabled = chat.status === "ready";
+  const enabled = conversation.status === "ready";
   useEffect(() => {
     if (!pendingFocus || !enabled) return;
     const el = input.current;
@@ -185,14 +183,14 @@ function Composer({
     el.setSelectionRange(el.value.length, el.value.length);
     setPendingFocus(false);
   }, [pendingFocus, enabled]);
-  const ready = canSend(chat);
-  const status = composerNote(chat);
+  const ready = canSend(conversation);
+  const status = composerNote(conversation);
 
   const send = () => {
     const text = draft.trim();
     if (!text || !ready) return;
     setDraft("");
-    void chatStoreFor(view, issueNumber).send(projectName, text, scope).then((sent) => {
+    void chatStoreFor(chat).send(projectName, text, scope).then((sent) => {
       // Refused: the words come back, unless the user has typed again.
       if (!sent) setDraft((current) => current || text);
     });
@@ -237,10 +235,10 @@ function Composer({
           onKeyDown={onKeyDown}
           disabled={!enabled}
           placeholder={
-            view === "issues"
-              ? "Describe what's broken, or what you need…"
-              : view === "issue"
-                ? "Ask about this issue, or what to do with it…"
+            chatIssue(chat) !== undefined
+              ? "Ask about this issue, or what to do with it…"
+              : chat.area === "issues"
+                ? "Describe what's broken, or what you need…"
                 : "Tell the agent what to change…"
           }
           inputProps={{
@@ -302,8 +300,8 @@ export function ChatPanel({
   const scope = turnScopeFor(card, feature);
   const label = useProjectLabel(projectName);
   const navigate = useNavigate();
-  const main = useProjectChat(projectName, "main");
-  const issues = useProjectChat(projectName, "issues");
+  const main = useProjectChat(projectName, MAIN_CHAT);
+  const issues = useProjectChat(projectName, ISSUES_CHAT);
   const openIssuesChat = useOpenIssuesChat(projectName);
   const openIssueChat = useOpenIssueChat(projectName);
   const issueThreads = useOpenIssueThreads(projectName);
@@ -313,14 +311,13 @@ export function ChatPanel({
   useIssueThreadRemovedNote(projectName, issueNumber, issueState);
 
   // The page's own thread; an issue's card without an open issue holds the main chat.
-  const pageView = chatViewFor(page, card, issueNumber);
-  const view: ChatView = pageView === "issue" && issueState !== "open" ? "main" : pageView;
-  const threadIssue = view === "issue" ? (issueNumber ?? undefined) : undefined;
-  const ofIssue = threadIssue !== undefined ? { issueNumber: threadIssue } : {};
-  const topic = chatTopic(card, feature ? `${feature.id} ${feature.name}` : null, view, threadIssue);
+  const pageChat = chatFor(page, card, issueNumber);
+  const chat: ChatRef = chatIssue(pageChat) !== undefined && issueState !== "open" ? MAIN_CHAT : pageChat;
+  const threadIssue = chatIssue(chat);
+  const topic = chatTopic(card, feature ? `${feature.id} ${feature.name}` : null, chat);
 
   const issuesThread: IssuesThread | null =
-    issues.items.length > 0 || view === "issues"
+    issues.items.length > 0 || sameChat(chat, ISSUES_CHAT)
       ? {
           count: issues.items.filter(isSpoken).length,
           state: page === "issues" ? "open" : main.items.some(summarisesIssues) ? "summarised" : null,
@@ -345,13 +342,13 @@ export function ChatPanel({
           borderColor: "divider",
         }}
       >
-        <ThreadCrumb projectName={projectName} view={view} issueNumber={threadIssue ?? null} />
+        <ThreadCrumb projectName={projectName} chat={chat} />
         <ThreadsMenu
           projectLabel={label}
           mainCount={main.items.filter(isSpoken).length}
           issues={issuesThread}
           issueThreads={issueThreads}
-          current={view === "issue" && threadIssue !== undefined ? threadIssue : view === "issues" ? "issues" : "main"}
+          current={threadIssue ?? (chat.area === "issues" ? "issues" : "main")}
           onMain={() => void navigate({ to: "/projects/$projectName", params: { projectName } })}
           onIssues={() => void openIssuesChat()}
           onIssue={(n) => void openIssueChat(n)}
@@ -364,19 +361,18 @@ export function ChatPanel({
       </Box>
       {/* Keyed by thread: a draft belongs to the thread it was typed in. */}
       <Box
-        key={`${view}#${threadIssue ?? ""}`}
+        key={chatKey(chat)}
         component="section"
-        aria-label={view === "issue" ? `Issue #${threadIssue} chat` : view === "issues" ? "Issues chat" : "Main chat"}
+        aria-label={threadIssue !== undefined ? `Issue #${threadIssue} chat` : chat.area === "issues" ? "Issues chat" : "Main chat"}
         sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
       >
-        <Thread projectName={projectName} card={card} view={view} {...ofIssue} />
+        <Thread projectName={projectName} card={card} chat={chat} />
         <Composer
           projectName={projectName}
           topic={topic.topic}
           note={topic.note}
           scope={scope}
-          view={view}
-          {...ofIssue}
+          chat={chat}
           composeRequest={composeRequest}
           onComposeApplied={onComposeApplied}
         />

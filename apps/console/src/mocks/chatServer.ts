@@ -16,8 +16,8 @@
  * under the License.
  */
 
-import type { ChatView } from "../features/agent-chat/chatView";
-import type { StreamPart } from "@aep/agent-stream";
+import type { AreaId, Focus, StreamPart } from "@aep/agent-stream";
+import { chatIssue, MAIN_CHAT, sameChat, type ChatRef } from "../features/agent-chat/chatRef";
 import type { components } from "../generated/ae-design-agent";
 import type { FeatureStage } from "../features/spec/api/specModel";
 import type { DesignEffect } from "./designState";
@@ -63,10 +63,10 @@ export interface MockTurn {
   turnId: string;
   projectName: string;
   conversationId: string;
-  /** The view whose chat this turn belongs to; absent is the project's main chat. */
-  view?: ChatView;
-  /** The issue whose own chat this turn is in, in the issue view. */
-  issueNumber?: number;
+  /** The area whose chat this turn belongs to; absent is the project's main chat. */
+  area?: AreaId;
+  /** The entity that area chat is focused on (an issue's own chat). */
+  focus?: Focus;
   /** The display record: the message that started it. */
   instruction: string;
   /** The scope it was sent with, which the history carries back as the platform's does. */
@@ -114,17 +114,24 @@ function write(state: State): void {
  * the chat of each thread it keeps; `null` for an id that is no thread of the
  * project.
  */
-export function chatOfConversation(projectName: string, conversationId: string): { view: ChatView; issueNumber?: number } | null {
-  if (conversationId === conversationIdFor(projectName)) return { view: "main" };
-  if (conversationId === conversationIdFor(projectName, "issues")) return { view: "issues" };
+export function chatOfConversation(projectName: string, conversationId: string): ChatRef | null {
+  if (conversationId === conversationIdFor(projectName)) return MAIN_CHAT;
+  if (conversationId === conversationIdFor(projectName, { area: "issues" })) return { area: "issues" };
   const issue = new RegExp(`^conv-${projectName}-issue-([1-9][0-9]*)$`).exec(conversationId);
-  return issue ? { view: "issue", issueNumber: Number(issue[1]) } : null;
+  return issue ? { area: "issues", focus: { kind: "issue", id: Number(issue[1]) } } : null;
 }
 
-/** A project's conversation in a view: the main chat's, the Issues Page's own, or an issue's own. */
-export function conversationIdFor(projectName: string, view: ChatView = "main", issueNumber?: number): string {
-  if (view === "issue") return `conv-${projectName}-issue-${issueNumber}`;
-  return view === "main" ? `conv-${projectName}` : `conv-${projectName}-${view}`;
+/** A project's conversation in a chat: the main chat's, the Issues area's own, or an issue's own. */
+export function conversationIdFor(projectName: string, chat: ChatRef = MAIN_CHAT): string {
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return `conv-${projectName}-issue-${issue}`;
+  return chat.area === undefined ? `conv-${projectName}` : `conv-${projectName}-${chat.area}`;
+}
+
+/** The chat a turn ran in. */
+function chatOfTurn(turn: MockTurn): ChatRef {
+  if (turn.area === undefined) return MAIN_CHAT;
+  return turn.focus ? { area: turn.area, focus: turn.focus } : { area: turn.area };
 }
 
 function duration(turn: MockTurn): number {
@@ -135,15 +142,9 @@ export function isRunning(turn: MockTurn, now = Date.now()): boolean {
   return now < turn.startedAt + duration(turn);
 }
 
-/** The turn running in a view's chat (the main chat's by default; an issue's by its number): one at a time per conversation. */
-export function runningTurn(projectName: string, view: ChatView = "main", issueNumber?: number): MockTurn | undefined {
-  return read().turns.find(
-    (t) =>
-      t.projectName === projectName &&
-      (t.view ?? "main") === view &&
-      (view !== "issue" || t.issueNumber === issueNumber) &&
-      isRunning(t),
-  );
+/** The turn running in a chat (the main chat's by default): one at a time per conversation. */
+export function runningTurn(projectName: string, chat: ChatRef = MAIN_CHAT): MockTurn | undefined {
+  return read().turns.find((t) => t.projectName === projectName && sameChat(chatOfTurn(t), chat) && isRunning(t));
 }
 
 export function findTurn(turnId: string): MockTurn | undefined {

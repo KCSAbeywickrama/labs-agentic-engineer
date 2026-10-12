@@ -42,7 +42,7 @@ import { mockModel } from "../src/shared/mock-model.js";
 import { testSkillSource } from "./skill-source.js";
 
 const ISSUES = scopeFor("issues");
-const ISSUE_42 = scopeFor("issues", { kind: "issue", number: 42 });
+const ISSUE_42 = scopeFor("issues", { kind: "issue", id: 42 });
 
 /** The repo's own `skills/` tree, read as a `_skills` snapshot. */
 const REPO_SKILLS = loadSkillsFromSnapshot(fileURLToPath(new URL("../../../../../../", import.meta.url)));

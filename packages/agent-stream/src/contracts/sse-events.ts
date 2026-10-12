@@ -728,32 +728,17 @@ export function isSurface(v: unknown): v is Surface {
 }
 
 /**
- * The main-panel views that own an agent of their own. A view selects that
- * view's tool set and instructions in place of the spec agent's; absent means
- * the spec agent. Adding a view is one entry here, one tool set below, and one
- * `agents/<view>/` directory. `issues` is the Issues page's chat; `issue` is
- * one filed issue's own thread (the turn names it in `issueNumber`).
- */
-export const VIEWS = ["issues", "issue"] as const;
-
-export type View = (typeof VIEWS)[number];
-
-/** Runtime guard for a `View` value. */
-export function isView(v: unknown): v is View {
-  return (VIEWS as readonly unknown[]).includes(v);
-}
-
-/**
  * The areas: the main-panel pages whose chat has a sub-agent of its own, and
  * so can be handed a request from the main chat. `label` is the area's name on
  * screen; `command` is the slash command a handed-off request reaches the
  * area's chat as (the area's agent reads it as the user's command, never as an
- * answer). Each area is a view; an issue's own thread is opened from its card,
- * never handed a request, so it is not one.
+ * answer). A chat names its area on the wire (`area`), and a focused chat its
+ * focus too (`Focus`): an issue's own thread is the Issues area focused on
+ * that issue, opened from its card, never handed a request.
  */
 export const AREAS = [
   { id: "issues", label: "Issues", command: "/issue" },
-] as const satisfies readonly { id: View; label: string; command: `/${string}` }[];
+] as const satisfies readonly { id: string; label: string; command: `/${string}` }[];
 
 export type AreaId = (typeof AREAS)[number]["id"];
 
@@ -776,6 +761,20 @@ function areaOf(id: AreaId): (typeof AREAS)[number] {
   const area = AREAS.find((a) => a.id === id);
   if (area === undefined) throw new Error(`unknown area: ${String(id)}`);
   return area;
+}
+
+/** The kinds of entity an area's chat can be narrowed to. */
+export type FocusKind = "issue";
+
+/**
+ * The entity an area's chat is narrowed to: an issue, by its number. On the
+ * wire it rides next to the chat's `area`, and only with an area whose agent
+ * declares that kind (the design agent refuses any other pairing).
+ */
+export interface Focus {
+  kind: FocusKind;
+  /** The entity's id: an issue's number (a positive integer). */
+  id: number;
 }
 
 // --- hand_off (the main agent hands a request to an area's agent) ---
@@ -810,13 +809,13 @@ export interface HandOffResult {
 }
 
 /**
- * The registrable tool sets. NOT a wire field: the design agent derives the
- * set from `TurnSpec.kind` (`plan` → task-plan, everything else → files) and
- * the chat the turn runs in (the Issues chat → issues, an issue's chat →
- * issue), so a caller cannot ask for a tool set that disagrees with what its
- * turn is for.
+ * The main agent's registrable tool sets. NOT a wire field: the design agent
+ * derives the set from `TurnSpec.kind` (`plan` → task-plan, everything else →
+ * files), so a caller cannot ask for a tool set that disagrees with what its
+ * turn is for. An area's chat runs no tool set of these: its sub-agent takes
+ * the tools its area profile names.
  */
-export const TOOLSETS = ["files", "task-plan", "issues", "issue"] as const;
+export const TOOLSETS = ["files", "task-plan"] as const;
 
 export type Toolset = (typeof TOOLSETS)[number];
 

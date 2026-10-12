@@ -20,7 +20,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
-import { homeLink } from "../../agent-chat/chatView";
+import { homeLink, issueChat } from "../../agent-chat/chatRef";
 
 // A card closes back to the Page it is over, or to where it is told: the
 // Questions card answering an issue's chat closes back to that issue's card.
@@ -55,7 +55,7 @@ describe("CardOverlay", () => {
   });
 
   it("closes back to where it is told instead: the Questions card of issue #7's chat, to #7's card", () => {
-    renderCard({ to: homeLink("shop", "issue", 7), name: "Issue #7" });
+    renderCard({ to: homeLink("shop", issueChat(7)), name: "Issue #7" });
     expect(navigate).toHaveBeenCalledWith({ to: "/projects/$projectName/issues/$number", params: { projectName: "shop", number: "7" } });
   });
 });

@@ -19,7 +19,7 @@
 import { http, HttpResponse } from "msw";
 import { SSE_DONE } from "@aep/agent-stream";
 import { parsePrototypeCommand } from "@aep/contracts/commands";
-import type { ChatView } from "../../features/agent-chat/chatView";
+import { chatIssue, ISSUES_CHAT, issueChat, MAIN_CHAT, type ChatRef } from "../../features/agent-chat/chatRef";
 import { scopeOfBody, type TurnBody } from "../../features/agent-chat/turnScope";
 import { webApplications } from "../../features/prototype/model/prototypes";
 import { projectSpecDoc } from "../../features/spec/collab/specDoc";
@@ -73,11 +73,11 @@ type Problem = components["schemas"]["Problem"];
 // project starts with the platform's kickoff (handlers/projects.ts); every
 // other project's is empty, which the real server answers the same way.
 //
-// The Issues Page's chat is a second conversation (`view=issues`) with its own
+// The Issues Page's chat is a second conversation (`area=issues`) with its own
 // agent (fixtures/issuesAgent.ts): a turn sent to its thread goes to it, and
-// the running turn is looked up per view, so the two chats never block each other.
-// Each open issue has one more (`view=issue` with `issueNumber`), with the
-// issue's own agent (fixtures/issueAgent.ts). A closed issue has none:
+// the running turn is looked up per chat, so the two chats never block each other.
+// Each open issue has one more (the area focused on it,
+// `focus[kind]=issue&focus[id]=<n>`), with the issue's own agent (fixtures/issueAgent.ts). A closed issue has none:
 // resolving or sending to its thread is refused as the design agent refuses
 // it (409 `issue_closed`), so closing an issue removes its thread; reading its
 // running turn is not refused.
@@ -105,20 +105,21 @@ function historyFor(conversationId: string): ConversationMessage[] {
   ];
 }
 
-/** A project chat: its view, and an issue's number. */
-type MockChat = { view: ChatView; issueNumber?: number };
-
-/** The chat a request's `view` and `issueNumber` query names, as the design agent reads it; null for a bad pair (400). */
-function chatOf(url: URL): MockChat | null {
-  const view = url.searchParams.get("view");
-  const raw = url.searchParams.get("issueNumber");
-  if (view === "issue") {
-    const n = Number(raw);
-    return raw !== null && Number.isInteger(n) && n > 0 ? { view, issueNumber: n } : null;
-  }
-  if (raw !== null) return null;
-  if (view === null) return { view: "main" };
-  return view === "issues" ? { view } : null;
+/**
+ * The chat a request's `area` and `focus` query names, as the design agent
+ * reads it: none is the main chat; `issues` the Issues area's; with
+ * `focus[kind]=issue` and a positive `focus[id]` that issue's. Null for
+ * anything else (400).
+ */
+function chatOf(url: URL): ChatRef | null {
+  const area = url.searchParams.get("area");
+  const kind = url.searchParams.get("focus[kind]");
+  const id = url.searchParams.get("focus[id]");
+  const focused = kind !== null || id !== null;
+  if (area === null) return focused ? null : MAIN_CHAT;
+  if (area !== "issues") return null;
+  if (!focused) return ISSUES_CHAT;
+  return kind === "issue" && id !== null && /^[1-9][0-9]*$/.test(id) ? issueChat(Number(id)) : null;
 }
 
 function statusOf(turn: MockTurn): TurnStatus {
@@ -138,19 +139,19 @@ function statusOf(turn: MockTurn): TurnStatus {
   };
 }
 
-/** A turn for the Issues view: the Issues agent's, filing the issue it drafted once the user says so. */
+/** A turn in the Issues area's chat: the Issues agent's, filing the issue it drafted once the user says so. */
 function startIssuesTurn(projectName: string, body: TurnBody): MockTurn {
-  const conversationId = conversationIdFor(projectName, "issues");
+  const conversationId = conversationIdFor(projectName, ISSUES_CHAT);
   const history = finishedTurns(conversationId).map((t) => t.instruction);
   const scripted = scriptIssuesTurn(body.instruction, nextIssueNumber(projectName), history, projectName);
   const frames = scripted.frames;
   if (scripted.filed) fileMockIssue(projectName, scripted.filed, Date.now() + (frames.at(-1)?.at ?? 0));
-  return recordTurn({ projectName, conversationId, view: "issues", instruction: scripted.display, frames, reply: scripted.reply });
+  return recordTurn({ projectName, conversationId, area: "issues", instruction: scripted.display, frames, reply: scripted.reply });
 }
 
 /** A turn in an issue's own chat: its agent's, making a confirmed change once the turn ends. */
 function startIssueTurn(projectName: string, issueNumber: number, body: TurnBody): MockTurn {
-  const conversationId = conversationIdFor(projectName, "issue", issueNumber);
+  const conversationId = conversationIdFor(projectName, issueChat(issueNumber));
   const history = finishedTurns(conversationId).map((t) => t.instruction);
   const info = issuesOf(projectName).find((i) => i.Number === issueNumber);
   const issue = {
@@ -162,13 +163,15 @@ function startIssueTurn(projectName: string, issueNumber: number, body: TurnBody
   const scripted = scriptIssueTurn(body.instruction, issue, history);
   const frames = scripted.frames;
   if (scripted.change) changeMockIssue(projectName, issueNumber, scripted.change, Date.now() + (frames.at(-1)?.at ?? 0));
-  return recordTurn({ projectName, conversationId, view: "issue", issueNumber, instruction: scripted.display, frames, reply: scripted.reply });
+  const focus = { kind: "issue", id: issueNumber } as const;
+  return recordTurn({ projectName, conversationId, area: "issues", focus, instruction: scripted.display, frames, reply: scripted.reply });
 }
 
 /** Start a turn in a chat (the main chat by default): what the mock agent does with the message, scheduled from now. */
-export function startMockTurn(projectName: string, body: TurnBody, chat: MockChat = { view: "main" }): MockTurn {
-  if (chat.view === "issues") return startIssuesTurn(projectName, body);
-  if (chat.view === "issue" && chat.issueNumber) return startIssueTurn(projectName, chat.issueNumber, body);
+export function startMockTurn(projectName: string, body: TurnBody, chat: ChatRef = MAIN_CHAT): MockTurn {
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return startIssueTurn(projectName, issue, body);
+  if (chat.area === "issues") return startIssuesTurn(projectName, body);
   const scope = scopeOfBody(body);
   const turnKey = `t${Date.now().toString(36)}`;
   const prototypeTurn = parsePrototypeCommand(body.instruction)
@@ -263,10 +266,11 @@ export const conversationHandlers = [
   http.get(`${POD}/conversations/current`, ({ params, request }): Response => {
     const projectName = String(params.projectName);
     const chat = chatOf(new URL(request.url));
-    if (!chat) return problem(400, "invalid_chat", "view and issueNumber name no chat");
-    if (chat.view === "issue" && !issueThreadOpen(projectName, chat.issueNumber!)) return problem(409, "issue_closed", "the issue is closed");
+    if (!chat) return problem(400, "invalid_chat", "area and focus name no chat");
+    const issue = chatIssue(chat);
+    if (issue !== undefined && !issueThreadOpen(projectName, issue)) return problem(409, "issue_closed", "the issue is closed");
     return HttpResponse.json<ProjectConversationView>({
-      conversationId: conversationIdFor(projectName, chat.view, chat.issueNumber),
+      conversationId: conversationIdFor(projectName, chat),
       createdAt: "2026-09-29T09:00:00Z",
       createdBy: "Developer",
       current: true,
@@ -286,10 +290,11 @@ export const conversationHandlers = [
     if (!chat) {
       return HttpResponse.json<TurnConflict>({ code: "conversation_rotated" }, { status: 409 });
     }
-    if (chat.view === "issue" && !issueThreadOpen(projectName, chat.issueNumber!)) {
+    const issue = chatIssue(chat);
+    if (issue !== undefined && !issueThreadOpen(projectName, issue)) {
       return HttpResponse.json<TurnConflict>({ code: "issue_closed" }, { status: 409 });
     }
-    const running = runningTurn(projectName, chat.view, chat.issueNumber);
+    const running = runningTurn(projectName, chat);
     if (running) {
       return HttpResponse.json<TurnConflict>({ code: "turn_in_progress", activeTurnId: running.turnId }, { status: 409 });
     }
@@ -299,8 +304,8 @@ export const conversationHandlers = [
 
   http.get(`${POD}/turns/active`, ({ params, request }): Response => {
     const chat = chatOf(new URL(request.url));
-    if (!chat) return problem(400, "invalid_chat", "view and issueNumber name no chat");
-    const running = runningTurn(String(params.projectName), chat.view, chat.issueNumber);
+    if (!chat) return problem(400, "invalid_chat", "area and focus name no chat");
+    const running = runningTurn(String(params.projectName), chat);
     return running ? HttpResponse.json<TurnStatus>(statusOf(running)) : new HttpResponse(null, { status: 204 });
   }),
 

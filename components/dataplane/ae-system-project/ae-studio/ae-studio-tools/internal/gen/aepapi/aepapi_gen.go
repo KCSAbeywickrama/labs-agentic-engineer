@@ -23,6 +23,21 @@ const (
 	PublisherCCScopes publisherCCContextKey = "publisherCC.Scopes"
 )
 
+// Defines values for AEStudioTurnRecordArea.
+const (
+	Issues AEStudioTurnRecordArea = "issues"
+)
+
+// Valid indicates whether the value is a known member of the AEStudioTurnRecordArea enum.
+func (e AEStudioTurnRecordArea) Valid() bool {
+	switch e {
+	case Issues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AEStudioTurnRecordKind.
 const (
 	Browser AEStudioTurnRecordKind = "browser"
@@ -86,18 +101,15 @@ func (e AEStudioTurnRecordStatus) Valid() bool {
 	}
 }
 
-// Defines values for AEStudioTurnRecordView.
+// Defines values for AEStudioTurnRecordFocusKind.
 const (
-	Issue  AEStudioTurnRecordView = "issue"
-	Issues AEStudioTurnRecordView = "issues"
+	Issue AEStudioTurnRecordFocusKind = "issue"
 )
 
-// Valid indicates whether the value is a known member of the AEStudioTurnRecordView enum.
-func (e AEStudioTurnRecordView) Valid() bool {
+// Valid indicates whether the value is a known member of the AEStudioTurnRecordFocusKind enum.
+func (e AEStudioTurnRecordFocusKind) Valid() bool {
 	switch e {
 	case Issue:
-		return true
-	case Issues:
 		return true
 	default:
 		return false
@@ -169,6 +181,8 @@ type AEStudioProjectRepository struct {
 
 // AEStudioTurnRecord One finished turn, as the ledger stores it. Idempotent on turnId.
 type AEStudioTurnRecord struct {
+	// Area The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+	Area   AEStudioTurnRecordArea    `json:"area,omitempty"`
 	Author *AEStudioTurnRecordAuthor `json:"author,omitempty"`
 
 	// BaseRef The repo snapshot sha the turn read.
@@ -198,14 +212,17 @@ type AEStudioTurnRecord struct {
 	// the features the turn designed, so the turn's own edits never read
 	// as out of date. Absent when the flush did not land, and on every
 	// other flow; the basis then falls back to baseRef.
-	EndRef       string                 `json:"endRef,omitempty"`
-	FinishedAt   time.Time              `json:"finishedAt"`
-	Flow         string                 `json:"flow"`
-	InputTokens  int64                  `json:"inputTokens"`
-	Kind         AEStudioTurnRecordKind `json:"kind"`
-	Model        string                 `json:"model"`
-	ModelHost    string                 `json:"modelHost"`
-	OutputTokens int64                  `json:"outputTokens"`
+	EndRef     string    `json:"endRef,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Flow       string    `json:"flow"`
+
+	// Focus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+	Focus        *AEStudioTurnRecordFocus `json:"focus,omitempty"`
+	InputTokens  int64                    `json:"inputTokens"`
+	Kind         AEStudioTurnRecordKind   `json:"kind"`
+	Model        string                   `json:"model"`
+	ModelHost    string                   `json:"modelHost"`
+	OutputTokens int64                    `json:"outputTokens"`
 
 	// Project Absent on a marketplace turn.
 	Project string                   `json:"project,omitempty"`
@@ -216,10 +233,10 @@ type AEStudioTurnRecord struct {
 	StartedAt time.Time                `json:"startedAt"`
 	Status    AEStudioTurnRecordStatus `json:"status"`
 	TurnID    openapi_types.UUID       `json:"turnId"`
-
-	// View The chat the turn ran in when it is not the project's main chat, the Issues page's (`issues`) or one issue's (`issue`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
-	View AEStudioTurnRecordView `json:"view,omitempty"`
 }
+
+// AEStudioTurnRecordArea The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+type AEStudioTurnRecordArea string
 
 // AEStudioTurnRecordKind defines model for AEStudioTurnRecord.Kind.
 type AEStudioTurnRecordKind string
@@ -230,14 +247,20 @@ type AEStudioTurnRecordReason string
 // AEStudioTurnRecordStatus defines model for AEStudioTurnRecord.Status.
 type AEStudioTurnRecordStatus string
 
-// AEStudioTurnRecordView The chat the turn ran in when it is not the project's main chat, the Issues page's (`issues`) or one issue's (`issue`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
-type AEStudioTurnRecordView string
-
 // AEStudioTurnRecordAuthor defines model for AEStudioTurnRecordAuthor.
 type AEStudioTurnRecordAuthor struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
+
+// AEStudioTurnRecordFocus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+type AEStudioTurnRecordFocus struct {
+	ID   int                         `json:"id"`
+	Kind AEStudioTurnRecordFocusKind `json:"kind"`
+}
+
+// AEStudioTurnRecordFocusKind defines model for AEStudioTurnRecordFocus.Kind.
+type AEStudioTurnRecordFocusKind string
 
 // AEStudioTurnUsageRequest The records of finished turns.
 type AEStudioTurnUsageRequest struct {

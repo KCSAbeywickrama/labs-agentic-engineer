@@ -18,7 +18,7 @@
 
 import { useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { homeLink } from "../../../../features/agent-chat/chatView";
+import { homeLink, ISSUES_CHAT, issueChat } from "../../../../features/agent-chat/chatRef";
 import { QuestionsList } from "../../../../features/agent-chat/components/QuestionsList";
 import { CardOverlay } from "../../../../features/projects/components/CardOverlay";
 
@@ -43,16 +43,12 @@ function IssuesQuestionsRoute() {
   const { projectName } = Route.useParams();
   const { issue } = Route.useSearch();
   const back = useMemo(
-    () => (issue === undefined ? {} : { back: { to: homeLink(projectName, "issue", issue), name: `Issue #${issue}` } }),
+    () => (issue === undefined ? {} : { back: { to: homeLink(projectName, issueChat(issue)), name: `Issue #${issue}` } }),
     [projectName, issue],
   );
   return (
     <CardOverlay card="questions" page="issues" fill {...back}>
-      {issue === undefined ? (
-        <QuestionsList projectName={projectName} view="issues" />
-      ) : (
-        <QuestionsList projectName={projectName} view="issue" issueNumber={issue} />
-      )}
+      <QuestionsList projectName={projectName} chat={issue === undefined ? ISSUES_CHAT : issueChat(issue)} />
     </CardOverlay>
   );
 }

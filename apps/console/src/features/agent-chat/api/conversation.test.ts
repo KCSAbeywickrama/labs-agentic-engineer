@@ -19,6 +19,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ISSUES_CHAT, issueChat, MAIN_CHAT } from "../chatRef";
 
 // The project conversation's two reads, on the org's design agent.
 
@@ -61,7 +62,7 @@ describe("fetchCurrentConversationId", () => {
     );
     await expect(fetchCurrentConversationId("shop")).rejects.toThrow(AE_STUDIO_RESTARTING);
   });
-  it("reads a view's own thread by its query, and never puts the main chat on the wire", async () => {
+  it("reads an area chat's own thread by its area and focus, and never puts the main chat on the wire", async () => {
     const seen: string[] = [];
     server.use(
       http.get(`${POD}/projects/shop/conversations/current`, ({ request }) => {
@@ -69,10 +70,10 @@ describe("fetchCurrentConversationId", () => {
         return HttpResponse.json({ conversationId: "conv-v", createdAt: "2026-10-07T09:00:00Z", current: true });
       }),
     );
-    await fetchCurrentConversationId("shop", "main");
-    await fetchCurrentConversationId("shop", "issues");
-    await fetchCurrentConversationId("shop", "issue", 7);
-    expect(seen).toEqual(["", "?view=issues", "?view=issue&issueNumber=7"]);
+    await fetchCurrentConversationId("shop", MAIN_CHAT);
+    await fetchCurrentConversationId("shop", ISSUES_CHAT);
+    await fetchCurrentConversationId("shop", issueChat(7));
+    expect(seen).toEqual(["", "?area=issues", "?area=issues&focus[kind]=issue&focus[id]=7"]);
   });
 
   it("reads a 409 issue_closed as the issue being closed: it has no thread", async () => {
@@ -81,7 +82,7 @@ describe("fetchCurrentConversationId", () => {
         HttpResponse.json({ type: "about:blank", title: "Conflict", status: 409, code: "issue_closed" }, { status: 409 }),
       ),
     );
-    await expect(fetchCurrentConversationId("shop", "issue", 7)).rejects.toBeInstanceOf(IssueClosedError);
+    await expect(fetchCurrentConversationId("shop", issueChat(7))).rejects.toBeInstanceOf(IssueClosedError);
   });
 });
 

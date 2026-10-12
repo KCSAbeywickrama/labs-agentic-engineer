@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import { cardOfRoute, chatTopic, pageOfCard, shellScope } from "./scope";
+import { ISSUES_CHAT, issueChat, MAIN_CHAT } from "../agent-chat/chatRef";
 
 describe("shellScope", () => {
   const inProject = (routeId: string, search?: { file?: unknown }) =>
@@ -179,8 +180,8 @@ describe("chatTopic", () => {
   });
 
   it("talks about the project's issues on the Issues Page, where the Issues agent is", () => {
-    expect(chatTopic(null, null, "issues")).toEqual({ topic: "the project's issues", note: null });
-    expect(chatTopic(null, null, "main")).toEqual(product);
+    expect(chatTopic(null, null, ISSUES_CHAT)).toEqual({ topic: "the project's issues", note: null });
+    expect(chatTopic(null, null, MAIN_CHAT)).toEqual(product);
   });
 
   it("talks about the whole product on the product page, product-wide, the overview, a build and a validation", () => {
@@ -196,6 +197,6 @@ describe("chatTopic", () => {
 
   it("talks about the whole product in the main chat on an Issue card, and about the issue in its own chat", () => {
     expect(chatTopic("issue", null)).toEqual(product);
-    expect(chatTopic("issue", null, "issue", 7)).toEqual({ topic: "issue #7", note: null });
+    expect(chatTopic("issue", null, issueChat(7))).toEqual({ topic: "issue #7", note: null });
   });
 });

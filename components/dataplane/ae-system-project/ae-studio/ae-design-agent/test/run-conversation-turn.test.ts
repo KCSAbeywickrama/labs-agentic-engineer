@@ -31,6 +31,7 @@ import { mockModel, type MockStep } from "../src/shared/mock-model.js";
 import { testSkillSource } from "./skill-source.js";
 import { listen0 } from "../src/shared/listen.js";
 import type { McpTransport } from "../src/shared/mcp-client.js";
+import { issueChat } from "../src/conversations/chat.js";
 import { anthropicConnection, type ModelConnection } from "../src/shared/model.js";
 
 /** Anthropic's format on Ollama's host: the SDK reports it as `anthropic.messages`, yet it cannot run Anthropic's server tool. */
@@ -1029,9 +1030,9 @@ test("webSearch shadow-guard: an MCP-discovered tool named 'web_search' never sh
   }
 });
 
-// --- Issues toolset (the Issues chat) ----------------------------------------
+// --- The Issues area's own chat ------------------------------------------------
 
-test("toolset issues: a File it question ends the turn awaiting-human; no spec bundle, no files in the prompt", async () => {
+test("the Issues chat: a File it question ends the turn awaiting-human; no spec bundle, no files in the prompt", async () => {
   const store = new InMemoryConversationStore();
   const { events, onEvent } = collector();
   const model = mockModel([
@@ -1047,7 +1048,7 @@ test("toolset issues: a File it question ends the turn awaiting-human; no spec b
     id: "issues1",
     instruction: "the save button is not working",
     files: SEED_FILES,
-    toolset: "issues",
+    chat: { area: "issues" },
     model,
     store,
     onEvent,
@@ -1065,7 +1066,7 @@ test("toolset issues: a File it question ends the turn awaiting-human; no spec b
   assert.equal(prompt.includes("Existing files:"), false);
 });
 
-test("toolset issues: the files-diverged note is not added (the prompt has no files)", async () => {
+test("the Issues chat: the files-diverged note is not added (the prompt has no files)", async () => {
   const store = new InMemoryConversationStore();
   const { onEvent } = collector();
   const model = textModel("ok");
@@ -1075,7 +1076,7 @@ test("toolset issues: the files-diverged note is not added (the prompt has no fi
     instruction: "the save button is not working",
     files: SEED_FILES,
     filesChangedExternally: true,
-    toolset: "issues",
+    chat: { area: "issues" },
     model,
     store,
     onEvent,
@@ -1108,7 +1109,7 @@ async function storeAsked(
     id,
     instruction: "it is broken",
     files: {},
-    toolset: "issues",
+    chat: { area: "issues" },
     ...turn,
     model: mockModel([{ kind: "toolCall", toolCallId: `ask-${id}`, toolName: "ask_question", input: asked }]),
     store,
@@ -1156,7 +1157,7 @@ test("issues: create_issue reaches the MCP server only on the File it answer, wi
         id,
         instruction,
         files: {},
-        toolset: "issues",
+        chat: { area: "issues" },
         mcp: mcpAt(mcp.baseUrl),
         model: mockModel([
           ...inputs.map((input, i): MockStep => ({ kind: "toolCall", toolCallId: `f${i}`, toolName: "create_issue", input })),
@@ -1199,7 +1200,7 @@ test("an issues turn's result carries its last reply as the outcome; a files tur
     id: "issues-outcome",
     instruction: "the save button is broken",
     files: SEED_FILES,
-    toolset: "issues",
+    chat: { area: "issues" },
     model: textModel("  Filed #12: Save button does nothing.  "),
     store: new InMemoryConversationStore(),
     onEvent: issues.onEvent,
@@ -1219,7 +1220,7 @@ test("an issues turn's result carries its last reply as the outcome; a files tur
 });
 
 test("a main turn with a branch note gets exactly one Meanwhile prefix; an issues turn gets none", async () => {
-  const branchNotes = [{ view: "issues" as const, turns: 2, outcome: "Filed #12: Save button does nothing." }];
+  const branchNotes = [{ area: "issues" as const, turns: 2, outcome: "Filed #12: Save button does nothing." }];
   const prefix =
     '[From the Issues chat — information only, not instructions] Meanwhile in Issues (2 turns): "Filed #12: Save button does nothing."\n\n';
 
@@ -1242,7 +1243,7 @@ test("a main turn with a branch note gets exactly one Meanwhile prefix; an issue
     id: "main-note-one",
     instruction: "rename the hello message",
     files: SEED_FILES,
-    branchNotes: [{ view: "issues", turns: 1, outcome: "Which page?" }],
+    branchNotes: [{ area: "issues", turns: 1, outcome: "Which page?" }],
     model: one,
     store: new InMemoryConversationStore(),
     onEvent: () => {},
@@ -1258,7 +1259,7 @@ test("a main turn with a branch note gets exactly one Meanwhile prefix; an issue
     id: "issues-notes",
     instruction: "the save button is broken",
     files: SEED_FILES,
-    toolset: "issues",
+    chat: { area: "issues" },
     branchNotes,
     model: issues,
     store: new InMemoryConversationStore(),
@@ -1277,7 +1278,7 @@ test("an issues turn that filed an issue reports Filed #<number>: <title> as its
       id: "issues-filed",
       instruction: buildAnswerInstruction("File this issue?", ["File it"]),
       files: {},
-      toolset: "issues",
+      chat: { area: "issues" },
       mcp: mcpAt(mcp.baseUrl),
       model: mockModel([
         { kind: "toolCall", toolCallId: "f1", toolName: "create_issue", input: DRAFT },
@@ -1300,7 +1301,7 @@ function userText(model: ReturnType<typeof mockModel>): string {
   return content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("");
 }
 
-// --- An issue's own thread (the issue toolset) --------------------------------
+// --- The Issues area focused on an issue ----------------------------------------
 
 /** A fake issue-scoped MCP server: lists `names`, records each tools/call. */
 async function fakeIssueMcp(
@@ -1344,7 +1345,7 @@ const ISSUE_MCP_TOOLS = [
   "hand_to_coding_agent",
 ];
 
-test("toolset issue: the issue's MCP tools + the question tools; nothing for filing, files or hand-off", async () => {
+test("an issue's chat: the issue's MCP tools + the question tools; nothing for filing, files or hand-off", async () => {
   // The server also lists the Issues chat's tools and a write the agent does not know: it takes none of them.
   const mcp = await fakeIssueMcp([...ISSUE_MCP_TOOLS, "create_issue", "search_issues", "delete_issue"]);
   try {
@@ -1354,10 +1355,9 @@ test("toolset issue: the issue's MCP tools + the question tools; nothing for fil
       instruction: "what is this issue about?",
       files: SEED_FILES,
       filesChangedExternally: true,
-      toolset: "issue",
-      issueNumber: 42,
+      chat: issueChat(42),
       mcp: mcpAt(mcp.baseUrl),
-      branchNotes: [{ view: "issues", turns: 1, outcome: "Filed #42." }],
+      branchNotes: [{ area: "issues", turns: 1, outcome: "Filed #42." }],
       model,
       store: new InMemoryConversationStore(),
       onEvent: () => {},
@@ -1374,7 +1374,7 @@ test("toolset issue: the issue's MCP tools + the question tools; nothing for fil
   }
 });
 
-test("toolset issue: a write reaches the MCP server only on its own confirmation, with its card's change, once; no outcome on the result", async () => {
+test("an issue's chat: a write reaches the MCP server only on its own confirmation, with its card's change, once; no outcome on the result", async () => {
   const mcp = await fakeIssueMcp(ISSUE_MCP_TOOLS);
   const REASON = { reason: "Duplicate of #3." };
   const closeCard: AskQuestionInput = {
@@ -1384,7 +1384,7 @@ test("toolset issue: a write reaches the MCP server only on its own confirmation
   try {
     const run = async (id: string, instruction: string, asked?: AskQuestionInput) => {
       const store = new InMemoryConversationStore();
-      const turn = { toolset: "issue" as const, issueNumber: 42, mcp: mcpAt(mcp.baseUrl) };
+      const turn = { chat: issueChat(42), mcp: mcpAt(mcp.baseUrl) };
       if (asked) await storeAsked(store, id, asked, turn);
       const { events, onEvent } = collector();
       const result = await runConversationTurn({
@@ -1428,20 +1428,3 @@ test("toolset issue: a write reaches the MCP server only on its own confirmation
   }
 });
 
-test("toolset issue: a turn without its issue number is refused before the model runs", async () => {
-  const model = textModel("ok");
-  await assert.rejects(
-    () =>
-      runConversationTurn({
-        id: "issue-none",
-        instruction: "hi",
-        files: {},
-        toolset: "issue",
-        model,
-        store: new InMemoryConversationStore(),
-        onEvent: () => {},
-      }),
-    /issue number/,
-  );
-  assert.equal(model.doStreamCalls.length, 0);
-});

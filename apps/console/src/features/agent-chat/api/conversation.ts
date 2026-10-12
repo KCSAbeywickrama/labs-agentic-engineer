@@ -21,7 +21,7 @@
 
 import type { components } from "../../../generated/ae-design-agent";
 import { designAgentCall } from "../../../api/aeStudio";
-import { wireQuery, type ChatView } from "../chatView";
+import { wireQuery, type ChatRef } from "../chatRef";
 import { IssueClosedError } from "./errors";
 import { podFailure } from "./turns";
 
@@ -29,14 +29,14 @@ export type ConversationMessage = components["schemas"]["ConversationMessage"];
 
 /**
  * The project's CURRENT thread id (#430): minted by the pod on first read and
- * kept for the project, so every member resolves the same one. Each view has
- * its own: the Issues Page's agent talks on a thread of its own, and so does
- * each open issue's (`issueNumber`); a closed issue has none (409
+ * kept for the project, so every member resolves the same one. Each chat has
+ * its own: the Issues area's agent talks on a thread of its own, and so does
+ * that area focused on each open issue; a closed issue has none (409
  * `issue_closed`).
  */
-export async function fetchCurrentConversationId(projectName: string, view?: ChatView, issueNumber?: number): Promise<string> {
+export async function fetchCurrentConversationId(projectName: string, chat?: ChatRef): Promise<string> {
   const fallback = "Couldn't open the project conversation";
-  const query = wireQuery(view, issueNumber);
+  const query = wireQuery(chat);
   const { data, error, response } = await designAgentCall(fallback, (agent) =>
     agent.GET("/projects/{projectName}/conversations/current", {
       params: { path: { projectName }, ...(query ? { query } : {}) },

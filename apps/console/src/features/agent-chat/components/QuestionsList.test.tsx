@@ -24,6 +24,7 @@ import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { AskQuestionInput } from "@aep/agent-stream";
 import type { ChatItem } from "../chatLog";
 import type { ProjectChat } from "../chatStore";
+import { ISSUES_CHAT, MAIN_CHAT, type ChatRef } from "../chatRef";
 
 // The Questions card's list (ADR-0002 / #879): every open question at once,
 // answerable as they arrive, sent as one message once all are answered.
@@ -33,13 +34,13 @@ const answer = vi.fn(async () => true);
 const retry = vi.fn();
 const issuesAnswer = vi.fn(async () => true);
 const issuesRetry = vi.fn();
-const viewsRead: string[] = [];
+const chatsRead: ChatRef[] = [];
 vi.mock("../useProjectChat", () => ({
-  useProjectChat: (_project: string, view = "main") => {
-    viewsRead.push(view);
+  useProjectChat: (_project: string, read: ChatRef = MAIN_CHAT) => {
+    chatsRead.push(read);
     return chat;
   },
-  chatStoreFor: (view: string) => (view === "issues" ? { answer: issuesAnswer, retry: issuesRetry } : { answer, retry }),
+  chatStoreFor: (read: ChatRef) => (read.area === "issues" ? { answer: issuesAnswer, retry: issuesRetry } : { answer, retry }),
 }));
 const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
@@ -54,7 +55,7 @@ afterEach(() => {
   answer.mockClear();
   issuesAnswer.mockClear();
   issuesRetry.mockClear();
-  viewsRead.length = 0;
+  chatsRead.length = 0;
   navigate.mockReset();
 });
 
@@ -67,7 +68,7 @@ function show(
   phase: "idle" | "starting" | "running" = "idle",
   project = { fresh: true },
   status: Partial<Pick<ProjectChat, "status" | "error">> = {},
-  view?: "main" | "issues",
+  of: ChatRef = MAIN_CHAT,
 ) {
   if (project.fresh) n += 1;
   chat = {
@@ -80,7 +81,7 @@ function show(
   // A project per render: drafts are kept per project and question.
   render(
     <OxygenUIThemeProvider theme={OxygenTheme}>
-      <QuestionsList projectName={`acme-${n}`} view={view ?? "main"} />
+      <QuestionsList projectName={`acme-${n}`} chat={of} />
     </OxygenUIThemeProvider>,
   );
 }
@@ -129,8 +130,8 @@ describe("QuestionsList", () => {
   });
 
   it("answers the Issues chat's questions through its own store, then closes back to the Issues page", async () => {
-    show([batch()], "idle", { fresh: true }, {}, "issues");
-    expect(viewsRead).toContain("issues");
+    show([batch()], "idle", { fresh: true }, {}, ISSUES_CHAT);
+    expect(chatsRead).toContainEqual(ISSUES_CHAT);
     fireEvent.click(screen.getByRole("radio", { name: /Finance/ }));
     fireEvent.click(screen.getByRole("radio", { name: /In-app only/ }));
     fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
@@ -142,7 +143,7 @@ describe("QuestionsList", () => {
   });
 
   it("retries the Issues chat's load through its own store", () => {
-    show([], "idle", { fresh: true }, { status: "error", error: "boom" }, "issues");
+    show([], "idle", { fresh: true }, { status: "error", error: "boom" }, ISSUES_CHAT);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(issuesRetry).toHaveBeenCalledWith(`acme-${n}`);
     expect(retry).not.toHaveBeenCalled();

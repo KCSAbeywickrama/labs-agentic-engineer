@@ -23,7 +23,7 @@
  * through here, so neither drops a thread under its running turn.
  */
 
-import { chatKey } from "../conversations/chat.js";
+import { chatKey, issueChat } from "../conversations/chat.js";
 import type { ThreadBook } from "../conversations/thread-book.js";
 import type { TurnDesk } from "./turn-desk.js";
 
@@ -38,7 +38,7 @@ export interface IssueThreadRemovalDeps {
  * never brings the thread back (nor leaves its messages behind). Idempotent.
  */
 export async function removeIssueThread(deps: IssueThreadRemovalDeps, project: string, issueNumber: number, before: Date): Promise<void> {
-  const active = deps.desk.active({ kind: "project", project, chat: chatKey({ view: "issue", issueNumber }) });
+  const active = deps.desk.active({ kind: "project", project, chat: chatKey(issueChat(issueNumber)) });
   if (active) deps.threads.deferIssueRemoval(project, issueNumber, active.conversationId, before);
   else await deps.threads.removeIssueThread(project, issueNumber, before);
 }

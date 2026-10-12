@@ -37,7 +37,7 @@ import { scopeFor } from "../src/areas/profiles.js";
 type WriteTool = "comment_issue" | "edit_issue" | "close_issue" | "reopen_issue" | "hand_to_coding_agent";
 
 /** The issue chat's MCP tools: everything its scope names that is not built in. */
-const ISSUE_MCP_TOOLS = scopeFor("issues", { kind: "issue", number: 1 }).tools.filter((t) => TOOLS[t]!.source === "mcp");
+const ISSUE_MCP_TOOLS = scopeFor("issues", { kind: "issue", id: 1 }).tools.filter((t) => TOOLS[t]!.source === "mcp");
 
 /** The issue chat's writes and their confirmations, from the registry. */
 const CONFIRMATIONS = Object.fromEntries(

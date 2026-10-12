@@ -21,6 +21,7 @@ import { Box, Button, Link, Typography } from "@wso2/oxygen-ui";
 import { areaLabel } from "@aep/agent-stream";
 import { useChatPanel } from "../../shell/chatPanel";
 import type { HandOffItem } from "../chatLog";
+import type { ChatRef } from "../chatRef";
 import { areaRequest, continueInArea, getHandOff, setHandOff, type HandOffState } from "../handOffState";
 import { useOpenAreaChat } from "../useOpenIssuesChat";
 import { chatStoreFor, useProjectChat } from "../useProjectChat";
@@ -89,7 +90,8 @@ function Pending({
   choose: (next: HandOffState) => void;
 }) {
   const chatPanel = useChatPanel();
-  const areaChat = useProjectChat(projectName, item.area);
+  const chat: ChatRef = { area: item.area };
+  const areaChat = useProjectChat(projectName, chat);
   const [moving, setMoving] = useState(false);
   const label = areaLabel(item.area);
   const message = areaRequest(item.area, item.request);
@@ -111,8 +113,8 @@ function Pending({
     choose("continued");
     chatPanel.open();
     await continueInArea(projectName, item.area, item.request, {
-      store: chatStoreFor(item.area),
-      compose: (text) => chatPanel.compose(text, { view: item.area, projectName }),
+      store: chatStoreFor(chat),
+      compose: (text) => chatPanel.compose(text, { chat, projectName }),
     });
   };
 

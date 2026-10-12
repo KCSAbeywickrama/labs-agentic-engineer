@@ -19,6 +19,7 @@
 import { useEffect, useRef } from "react";
 import type { ShellScope } from "../shell/scope";
 import type { ChatItem } from "./chatLog";
+import { ISSUES_CHAT } from "./chatRef";
 import { chatStore, chatStoreFor } from "./useProjectChat";
 
 // The Issues page has a chat of its own, a branch of the main one. When the
@@ -88,7 +89,7 @@ export function useBranchSummary(scope: ShellScope): void {
 
   useEffect(() => {
     if (!project) return;
-    const issues = chatStoreFor("issues");
+    const issues = chatStoreFor(ISSUES_CHAT);
     const notice = () => {
       const chat = issues.get(project);
       if (chat.status === "ready" && !arrival.current.has(project)) arrival.current.set(project, chat.items.filter(isSpoken).length);
@@ -104,7 +105,7 @@ export function useBranchSummary(scope: ShellScope): void {
     const since = arrival.current.get(left);
     arrival.current.delete(left);
     if (since === undefined) return;
-    const spoken = chatStoreFor("issues").get(left).items.filter(isSpoken).slice(since);
+    const spoken = chatStoreFor(ISSUES_CHAT).get(left).items.filter(isSpoken).slice(since);
     if (spoken.length === 0) return;
     const replies = spoken.flatMap((i) => (i.kind === "agent" && i.text.trim() !== "" ? [i.text] : []));
     const line = replies.length > 0 ? oneLine(replies[replies.length - 1]!) : "";

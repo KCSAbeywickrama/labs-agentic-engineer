@@ -16,15 +16,17 @@
  * under the License.
  */
 
+import type { AreaId } from "@aep/agent-stream";
+
 /**
- * A branch note: what another view's chat did since the main chat's previous
+ * A branch note: what an area's chat did since the main chat's previous
  * turn, which that turn's prompt is told (`prompts/turn.ts`
- * `branchNotesNote`). The ThreadBook counts them; only the Issues chat leaves
- * one (an issue's own chat works on that issue and tells the main chat
- * nothing).
+ * `branchNotesNote`). The ThreadBook counts them; only the Issues area's own
+ * chat leaves one (its scope reports back with an outcome note; the area
+ * focused on an issue works on that issue and tells the main chat nothing).
  */
 export interface BranchNote {
-  view: "issues";
+  area: AreaId;
   /** Turns that chat completed since then (a positive integer). */
   turns: number;
   /** The newest of those turns' outcome (`areas/outcome.ts`). */

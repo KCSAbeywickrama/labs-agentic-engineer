@@ -57,7 +57,7 @@ routes/projects/$projectName/
   (`PAGE_ROUTES`, and `ORG_PAGE_ROUTES` for the org's), which are Cards
   (`CARD_ROUTES` and `ORG_CARD_ROUTES`, both read by `cardOfRoute`), and the
   Page each Card is over (`pageOfCard`; `ORG_CARD_PAGE`). The rail's active
-  item, the chat's thread (`chatViewFor`), the Turn scope and `CardOverlay`'s
+  item, the chat's thread (`chatFor`), the Turn scope and `CardOverlay`'s
   close all read them, so a new Card is a route file plus its rows there; a new project
   Page also needs its path in `CardOverlay`'s `PAGE_PATH`.
 - **A card with a draft guards it**: `LeaveGuard` (`features/shell/`) asks
@@ -92,24 +92,24 @@ Dashboard, and keeps its section in the address (`?section=github|ai|usage`).
 The Issues Page lists the project's GitHub issues (incidents the SRE agent
 filed, the platform's own, people's), those that need attention first. It
 has a chat of its own, a branch of the project's main chat. The chat panel
-holds one thread, the page's (ADR-0003): with no card open (`chatViewFor`
-reads the Page and Card as the `issues` view) that is the Issues agent's
+holds one thread, the page's (ADR-0003): with no card open (`chatFor`
+reads the Page and Card as the Issues area's chat) that is the Issues agent's
 chat, in place of the main chat. Its breadcrumb reads **<org> › <Project> ›
 Issues**; the project crumb goes back to the overview and the main chat.
 Create Issue, a hand-off's Open Issues, Reopen and the threads menu all go to
 the page. When the user leaves the Issues page the main chat gets its From
 Issues note. The Issues chat's thread and running turn are its alone, about
 "the project's issues", with no spec room and no Turn scope (the composer's
-scope is not sent; `viewTurnBody` sends the words and the view). The Issues agent files
+scope is not sent; `areaTurnBody` sends the words alone, and the thread names its chat). The Issues agent files
 issues, so its turn ending re-reads the issue list. When it files #N, a
 **Continue on #N · Open** line follows its reply (read from the `create_issue`
 result, in the stream and in the history); Open goes to that issue's card.
 
 An Issue card is over the Page (the Issues chat's thread and any running turn
 are kept in its store while the card is open; an unsent draft is not). An open
-issue has an agent of its own on a thread of its own (the `issue` view with
-the issue's number, use case `issue-<n>`; one chat store per issue,
-`chatStoreFor("issue", n)`), which the panel holds on its card, breadcrumb
+issue has an agent of its own on a thread of its own (the Issues area focused
+on the issue, `issueChat(n)`, use case `issue-<n>`; one chat store per issue,
+`chatStoreFor(issueChat(n))`), which the panel holds on its card, breadcrumb
 **<org> › <Project> › Issues › #N** (Issues goes back to the Issues chat). Its turn
 ending re-reads the issue list and that issue's detail, so a comment, an edit
 or a close shows at once. A closed issue has none: closing an issue removes its
@@ -141,12 +141,12 @@ header says closed too while the list lags. The threads menu lists each issue
 chat that holds something (opened in this tab).
 
 The Issues chat's questions (ADR-0002) are answered on a Questions card of
-their own over this Page (`issues/questions`, `chatViewFor` reads it as the
-`issues` view), so a question asked here never points to the overview or
+their own over this Page (`issues/questions`, `chatFor` reads it as the
+Issues area's chat), so a question asked here never points to the overview or
 answers the main chat; a send closes back to the Issues Page. An issue's chat's
 questions (its agent confirms every change on one: the change is the confirm
 option's description) are answered on the same card naming the issue
-(`issues/questions?issue=N`, the `issue` view), which opens by itself only on
+(`issues/questions?issue=N`, the issue's chat), which opens by itself only on
 that issue's card and closes back to it, on a send or its X (`CardOverlay`'s
 `back`). The Dashboard's Alerts
 link straight to Issue cards: they are every project's issues that need

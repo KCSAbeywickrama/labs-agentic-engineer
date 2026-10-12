@@ -140,7 +140,7 @@ test("a task-plan turn does not offer the hand-off", async () => {
 
 test("an issues turn does not offer the hand-off", async () => {
   const model = mockModel([{ kind: "text", text: "ok" }]);
-  await run({ model, toolset: "issues" }).done;
+  await run({ model, chat: { area: "issues" } }).done;
   const offered = offeredTo(model);
   assert.ok(offered.length > 0);
   assert.equal(offered.includes(TOOL), false);

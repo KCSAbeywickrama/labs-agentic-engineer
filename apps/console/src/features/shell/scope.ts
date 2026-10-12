@@ -27,7 +27,7 @@
 // the Page each Card is over, are this module's tables
 // (design/pages-and-cards.md).
 
-import type { ChatView } from "../agent-chat/chatView";
+import { chatIssue, MAIN_CHAT, type ChatRef } from "../agent-chat/chatRef";
 
 /** The org's Pages; "other" is an org-level address that is none of them. */
 export type OrgPage = "dashboard" | "projects" | "new" | "skills" | "resources" | "other";
@@ -199,9 +199,9 @@ export function cardTitle(card: ProjectCard): string {
 
 /**
  * What a message sent from here would be about, for the line above the
- * composer: the Issues Page (the issues view) talks about the project's
- * issues, with the Issues agent; an issue's chat (the issue view), about that
- * issue, with its own agent; the design card talks about the design review; a feature open in
+ * composer: the Issues area's chat (the Issues Page's) talks about the
+ * project's issues, with the Issues agent; the area focused on an issue (its
+ * card's chat), about that issue; the design card talks about the design review; a feature open in
  * the spec card narrows it to that feature, and a change reaching past it is
  * made there too; everywhere else in a project, the whole product. That
  * includes a Build or Validation card, the Deploy Page and an environment's
@@ -211,11 +211,11 @@ export function cardTitle(card: ProjectCard): string {
 export function chatTopic(
   card: ProjectCard | null,
   openFeature: string | null,
-  view?: ChatView,
-  issueNumber?: number,
+  chat: ChatRef = MAIN_CHAT,
 ): { topic: string; note: string | null } {
-  if (view === "issues") return { topic: "the project's issues", note: null };
-  if (view === "issue" && issueNumber !== undefined) return { topic: `issue #${issueNumber}`, note: null };
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return { topic: `issue #${issue}`, note: null };
+  if (chat.area === "issues") return { topic: "the project's issues", note: null };
   if (card === "design") return { topic: "the design review", note: null };
   if (card === "spec" && openFeature) {
     return { topic: openFeature, note: "A change that reaches other features is made there too." };

@@ -586,7 +586,7 @@ func TestTurnUsage_OptionalFieldsStayAbsent(t *testing.T) {
 		t.Fatalf("outbox = %+v", got)
 	}
 	sent, _ := json.Marshal(got[0])
-	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`, `"endRef"`, `"changedPaths"`, `"view"`} {
+	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`, `"endRef"`, `"changedPaths"`, `"area"`, `"focus"`} {
 		if strings.Contains(string(sent), key) {
 			t.Fatalf("%s invented: %s", key, sent)
 		}
@@ -611,15 +611,16 @@ func TestTurnUsage_DesignFeaturesCarriedOver(t *testing.T) {
 	}
 }
 
-// The chat an Issues or issue turn ran in reaches the record aep-api gets.
-func TestTurnUsage_ViewCarriedOver(t *testing.T) {
+// The chat an area turn ran in (its area, and its focus when narrowed to an
+// issue) reaches the record aep-api gets.
+func TestTurnUsage_AreaAndFocusCarriedOver(t *testing.T) {
 	s := newMCPHarness(t, &fakeUpstream{})
-	record := strings.Replace(turnRecordJSON, `,"contextTokens":15}`, `,"contextTokens":15,"view":"issue"}`, 1)
+	record := strings.Replace(turnRecordJSON, `,"contextTokens":15}`, `,"contextTokens":15,"area":"issues","focus":{"kind":"issue","id":7}}`, 1)
 	if c, body := s.post("/turn-usage", record); c != http.StatusAccepted {
 		t.Fatalf("POST /turn-usage = %d %s", c, body)
 	}
 	sent, _ := json.Marshal(s.usage.got()[0])
-	if !strings.Contains(string(sent), `"view":"issue"`) {
+	if !strings.Contains(string(sent), `"area":"issues"`) || !strings.Contains(string(sent), `"focus":{"id":7,"kind":"issue"}`) {
 		t.Fatalf("record = %s", sent)
 	}
 }
@@ -655,6 +656,9 @@ func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 		"201 features":           strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","designFeatures":[`+strings.Repeat(`"F1",`, 200)+`"F1"]`, 1),
 		"201 changed paths":      strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[`+strings.Repeat(`"specs/a.md",`, 200)+`"specs/a.md"]`, 1),
 		"an empty changed path":  strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[""]`, 1),
+		"a retired view":         strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","view":"issue"`, 1),
+		"a focus of no kind":     strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"board","id":7}`, 1),
+		"a focus id of 0":        strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"issue","id":0}`, 1),
 	} {
 		if c, out := s.post("/turn-usage", body); c != http.StatusBadRequest || !strings.Contains(out, "invalid_request") {
 			t.Fatalf("%s: POST /turn-usage = %d %s", name, c, out)

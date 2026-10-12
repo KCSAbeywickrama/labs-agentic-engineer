@@ -119,8 +119,10 @@ export interface TurnMeta {
   skillsRef?: string;
   /** A `design` turn's scoped feature IDs (`start-spec.ts` `designFeaturesOf`); absent = every feature. */
   designFeatures?: string[];
-  /** The chat a browser turn ran in when it is not the main chat (the record's `view`). */
-  view?: TurnRecord["view"];
+  /** The area whose chat a browser turn ran in when it is not the main chat (the record's `area`). */
+  area?: TurnRecord["area"];
+  /** The entity that area chat was narrowed to (the record's `focus`). */
+  focus?: TurnRecord["focus"];
 }
 
 /** How a run ended, as the run reports it. */
@@ -383,7 +385,8 @@ export class TurnDesk {
       ...(status.project !== undefined ? { project: status.project } : {}),
       conversationId: meta.conversationId,
       kind: meta.kind,
-      ...(meta.view ? { view: meta.view } : {}),
+      ...(meta.area ? { area: meta.area } : {}),
+      ...(meta.focus ? { focus: meta.focus } : {}),
       flow: meta.flow,
       status: ending.status,
       ...(reason ? { reason } : {}),

@@ -29,7 +29,7 @@ import { IssueClosedError } from "./api/errors";
 import { getActiveTurn, getTurn, openTurnStream, startTurn } from "./api/turns";
 import { issueDetailKey, issuesListKey } from "../issues/api/issues";
 import { createChatStore, type ProjectChat } from "./chatStore";
-import { questionsLink, viewTurnBody, type ChatView } from "./chatView";
+import { areaTurnBody, chatIssue, ISSUES_CHAT, issueChat, MAIN_CHAT, questionsLink, type ChatRef } from "./chatRef";
 import { markIssueClosed, onIssueClosedMark } from "./closedIssues";
 import { opensQuestionsCard } from "./openQuestions";
 import { readSpecStateUntilRecorded, RECORD_READ_DELAYS_MS } from "./turnRecord";
@@ -37,7 +37,7 @@ import { shellScope } from "../shell/scope";
 
 // The app's chat stores, on the real transport (the org's design agent in
 // its AE Studio pod), and the React side of them: the project's main chat,
-// the Issues Page's, and one per issue.
+// the Issues area's, and one per issue it is focused on.
 
 /** The project's main chat: it writes the spec room, so a turn flushes the room first. */
 export const chatStore = createChatStore({
@@ -54,16 +54,16 @@ export const chatStore = createChatStore({
 });
 
 /**
- * The Issues Page's chat: its own thread, running turn and turns, all in the
- * issues view. The Issues agent writes no spec, so there is nothing to apply
- * or to flush, and its turns carry no room or scope.
+ * The Issues area's chat, the Issues Page's: its own thread, running turn and
+ * turns. The Issues agent writes no spec, so there is nothing to apply or to
+ * flush, and its turns carry no room or scope.
  */
 const issuesChatStore = createChatStore({
   api: {
-    conversationId: (projectName) => fetchCurrentConversationId(projectName, "issues"),
+    conversationId: (projectName) => fetchCurrentConversationId(projectName, ISSUES_CHAT),
     history: fetchConversationMessages,
-    startTurn: (projectName, conversationId, body) => startTurn(projectName, conversationId, viewTurnBody("issues", body)),
-    activeTurn: (projectName) => getActiveTurn(projectName, "issues"),
+    startTurn: (projectName, conversationId, body) => startTurn(projectName, conversationId, areaTurnBody(ISSUES_CHAT, body)),
+    activeTurn: (projectName) => getActiveTurn(projectName, ISSUES_CHAT),
     turn: getTurn,
     openStream: openTurnStream,
   },
@@ -82,8 +82,8 @@ const issueQuestionsAsked = new Set<IssueListener>();
 const issueStoresMade = new Set<() => void>();
 
 /**
- * An issue's chat: its own thread, running turn and turns, in the issue view
- * by its number. Like the Issues agent, the issue's agent writes no spec. A
+ * An issue's chat, the Issues area focused on it: its own thread, running
+ * turn and turns. Like the Issues agent, the issue's agent writes no spec. A
  * closed issue has no thread: the server's 409 `issue_closed`, on resolving
  * the thread or on sending to it, marks the issue closed (`closedIssues`) and
  * forgets the thread here, so a reopen starts on a fresh one.
@@ -102,13 +102,13 @@ function issueChatStore(issueNumber: number): ChatStore {
       throw err;
     }
   };
+  const chat = issueChat(issueNumber);
   const store = createChatStore({
     api: {
-      conversationId: (projectName) => closedOn(projectName, fetchCurrentConversationId(projectName, "issue", issueNumber)),
+      conversationId: (projectName) => closedOn(projectName, fetchCurrentConversationId(projectName, chat)),
       history: fetchConversationMessages,
-      startTurn: (projectName, conversationId, body) =>
-        closedOn(projectName, startTurn(projectName, conversationId, viewTurnBody("issue", body))),
-      activeTurn: (projectName) => getActiveTurn(projectName, "issue", issueNumber),
+      startTurn: (projectName, conversationId, body) => closedOn(projectName, startTurn(projectName, conversationId, areaTurnBody(chat, body))),
+      activeTurn: (projectName) => getActiveTurn(projectName, chat),
       turn: getTurn,
       openStream: openTurnStream,
     },
@@ -132,32 +132,27 @@ export function forgetIssueChat(projectName: string, issueNumber: number): void 
   issueStores.get(issueNumber)?.forget(projectName);
 }
 
-/**
- * The chat store of a view of the main panel: "main" is the project's main
- * chat; "issue" is one issue's, by its number.
- */
-export function chatStoreFor(view: ChatView, issueNumber?: number): ChatStore {
-  if (view === "issue") {
-    if (issueNumber === undefined) throw new Error("An issue's chat needs the issue's number.");
-    return issueChatStore(issueNumber);
-  }
-  return view === "issues" ? issuesChatStore : chatStore;
+/** The store of a project's chat: the main chat's, the Issues area's, or one issue's. */
+export function chatStoreFor(chat: ChatRef): ChatStore {
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return issueChatStore(issue);
+  return chat.area === "issues" ? issuesChatStore : chatStore;
 }
 
 /**
- * A project's chat in a view (the main chat by default; an issue's by its
- * number), kept current while the caller is mounted and AE Studio is ready:
- * the conversation lives on the design agent, so nothing is asked of it
+ * A project's chat (the main chat by default), kept current while the caller
+ * is mounted and AE Studio is ready: the conversation lives on the design
+ * agent, so nothing is asked of it
  * before then (the chat stays loading), and a chat that failed while AE
  * Studio restarted loads again once it is back.
  */
-export function useProjectChat(projectName: string, view: ChatView = "main", issueNumber?: number): ProjectChat {
-  const store = chatStoreFor(view, issueNumber);
+export function useProjectChat(projectName: string, chat: ChatRef = MAIN_CHAT): ProjectChat {
+  const store = chatStoreFor(chat);
   const subscribe = useCallback((fn: () => void) => store.subscribe(projectName, fn), [store, projectName]);
-  const chat = useSyncExternalStore(subscribe, () => store.get(projectName));
+  const conversation = useSyncExternalStore(subscribe, () => store.get(projectName));
   const ready = useSyncExternalStore(subscribeDesignAgentReady, isDesignAgentReady);
   useEffect(() => (ready ? store.watch(projectName) : undefined), [store, projectName, ready]);
-  return chat;
+  return conversation;
 }
 
 /** An issue's chat as the threads menu lists it: the issue, and what was said there. */
@@ -287,19 +282,19 @@ export function useRefreshOnTurnEnd(): void {
 export function useOpenQuestionsWhenAsked(): void {
   const router = useRouter();
   useEffect(() => {
-    const opener = (view: ChatView, issueNumber?: number) => (projectName: string) => {
+    const opener = (chat: ChatRef) => (projectName: string) => {
       const leaf = router.state.matches.at(-1);
       const scope = shellScope({
         routeId: leaf?.routeId ?? "",
         params: (leaf?.params ?? {}) as { projectName?: string; number?: string },
         search: (leaf?.search ?? {}) as { issue?: unknown },
       });
-      if (!opensQuestionsCard(scope, projectName, view, issueNumber)) return;
-      void router.navigate(questionsLink(projectName, view, issueNumber));
+      if (!opensQuestionsCard(scope, projectName, chat)) return;
+      void router.navigate(questionsLink(projectName, chat));
     };
-    const stopMain = chatStore.onQuestionsAsked(opener("main"));
-    const stopIssues = issuesChatStore.onQuestionsAsked(opener("issues"));
-    const issueAsked = (projectName: string, issueNumber: number) => opener("issue", issueNumber)(projectName);
+    const stopMain = chatStore.onQuestionsAsked(opener(MAIN_CHAT));
+    const stopIssues = issuesChatStore.onQuestionsAsked(opener(ISSUES_CHAT));
+    const issueAsked = (projectName: string, issueNumber: number) => opener(issueChat(issueNumber))(projectName);
     issueQuestionsAsked.add(issueAsked);
     return () => {
       stopMain();

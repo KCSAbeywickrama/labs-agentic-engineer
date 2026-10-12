@@ -25,7 +25,7 @@
 import type { components } from "../../../generated/ae-design-agent";
 import { designAgentCall, PodRequestError } from "../../../api/aeStudio";
 import { retryAfterMs } from "../../../api/errors";
-import { wireQuery, type ChatView } from "../chatView";
+import { wireQuery, type ChatRef } from "../chatRef";
 import type { TurnBody } from "../turnScope";
 import { IssueClosedError } from "./errors";
 
@@ -94,9 +94,9 @@ export async function startTurn(projectName: string, conversationId: string, bod
   throw podFailure(error, response, UNREACHABLE);
 }
 
-/** The project's running turn in a view (the main chat's by default; an issue's by its number), or null (204, or the read failed). */
-export async function getActiveTurn(projectName: string, view?: ChatView, issueNumber?: number): Promise<TurnStatus | null> {
-  const query = wireQuery(view, issueNumber);
+/** The project's running turn in a chat (the main chat's by default), or null (204, or the read failed). */
+export async function getActiveTurn(projectName: string, chat?: ChatRef): Promise<TurnStatus | null> {
+  const query = wireQuery(chat);
   try {
     const { data } = await designAgentCall(UNREACHABLE, (agent) =>
       agent.GET("/projects/{projectName}/turns/active", { params: { path: { projectName }, ...(query ? { query } : {}) } }),

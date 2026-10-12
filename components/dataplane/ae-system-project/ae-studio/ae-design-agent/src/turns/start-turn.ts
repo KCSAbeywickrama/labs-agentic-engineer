@@ -27,12 +27,13 @@
  * lock). Every refusal is a `TurnStartError` the edge maps to a status.
  *
  * A browser turn runs in the chat its thread belongs to (`conversations/
- * chat.ts`). The main chat's is a spec turn. The Issues chat's and an issue's
- * are plain chat turns for that view's agent: no `/<skill>` flows, no Room, no
- * spec scope, the view's tools over its MCP route; an issue's turn is refused
- * while its issue is closed (`409 issue_closed`), which removes the thread. A
- * main turn is told what the Issues chat came to meanwhile (branch notes); an
- * Issues turn's outcome is kept for it.
+ * chat.ts`). The main chat's is a spec turn. An area's chat (the Issues
+ * area's own, or the area focused on an issue) runs plain chat turns for the
+ * area's sub-agent: no `/<skill>` flows, no Room, no spec scope, its scope's
+ * tools over its MCP route; a turn focused on an issue is refused while the
+ * issue is closed (`409 issue_closed`), which removes the thread. A main turn
+ * is told what the Issues area's chat came to meanwhile (branch notes); that
+ * chat's turn outcome is kept for it.
  *
  * Server-started turns (the Turn socket) take the same path with the
  * caller's `turnId`: a turn id the desk still knows reattaches instead.
@@ -74,7 +75,7 @@ import { runConversationTurn } from "../conversation/run-conversation-turn.js";
 import { stepContextOf } from "../conversation/step-context.js";
 import { codedErrorFrame, turnErrorFrame } from "../conversation/turn-error.js";
 import type { BranchNote } from "../conversations/branch-notes.js";
-import { chatKey, MAIN_CHAT, type Chat } from "../conversations/chat.js";
+import { chatKey, issueOf, MAIN_CHAT, type Chat } from "../conversations/chat.js";
 import { issueMcpPath, issuesMcpPath, issueState } from "../conversations/issue-state.js";
 import type { ThreadBook } from "../conversations/thread-book.js";
 import { mcpRoute } from "../shared/mcp-client.js";
@@ -239,12 +240,12 @@ interface Launch {
   flow: string;
   material: TurnMaterial;
   conn: ModelConnection;
-  /** The project turn joins the Room (`undefined` for marketplace, Plan and view-chat turns). */
+  /** The project turn joins the Room (`undefined` for marketplace, Plan and area-chat turns). */
   roomProject?: string;
-  /** The project chat the turn runs in (the main chat for every turn but an Issues or issue chat's). */
+  /** The project chat the turn runs in (the main chat for every turn but an area chat's). */
   chat: Chat;
   /**
-   * A main-chat browser turn: told what the Issues chat came to meanwhile,
+   * A main-chat browser turn: told what the area chats came to meanwhile,
    * taken once the desk accepted the turn (a refused start leaves them).
    */
   takesBranchNotes?: true;
@@ -276,16 +277,17 @@ export class TurnStarter {
     const conn = this.admissible(req.input);
     const chat = this.deps.threads.chatOf(req.project, req.conversationId);
     if (!chat) throw rotated();
-    if (chat.view !== undefined && req.input.scope) {
-      throw new TurnStartError(400, "invalid_turn", "the issues chats take no scope");
+    if (chat.area !== undefined && req.input.scope) {
+      throw new TurnStartError(400, "invalid_turn", "an area's chat takes no scope");
     }
     // A closed issue has no thread: refused (and its thread removed) before the lookup.
-    if (chat.view === "issue") await this.checkIssueOpen(req.project, chat.issueNumber);
+    const issue = issueOf(chat);
+    if (issue !== undefined) await this.checkIssueOpen(req.project, issue);
     const lookup = await this.lookup(req.project);
-    // A view's agent works on no spec: its message is a plain chat turn, so a
-    // typed `/design` is words for that agent, not a command.
+    // An area's sub-agent works on no spec: its message is a plain chat turn,
+    // so a typed `/design` is words for that agent, not a command.
     const { spec, flow } =
-      chat.view === undefined ? turnSpecFor(req.input.instruction, lookup) : { spec: { kind: "chat" as const, text: req.input.instruction }, flow: "" };
+      chat.area === undefined ? turnSpecFor(req.input.instruction, lookup) : { spec: { kind: "chat" as const, text: req.input.instruction }, flow: "" };
     const material = await this.material(req.input, spec, () => this.projectDirs(req.project, lookup), conn);
     const scope: Scope = { kind: "project", project: req.project, chat: chatKey(chat) };
     this.refuseBusy(scope);
@@ -301,10 +303,10 @@ export class TurnStarter {
       flow,
       material,
       conn,
-      ...(this.deps.room && chat.view === undefined ? { roomProject: req.project } : {}),
+      ...(this.deps.room && chat.area === undefined ? { roomProject: req.project } : {}),
       route: "project",
       chat,
-      ...(chat.view === undefined ? { takesBranchNotes: true } : {}),
+      ...(chat.area === undefined ? { takesBranchNotes: true } : {}),
     }).turnId;
   }
 
@@ -580,7 +582,8 @@ export class TurnStarter {
       baseRef: l.material.baseRef,
       skillsRef: l.material.skillsRef,
       ...designFeaturesFact(l.flow, l.spec),
-      ...(l.chat.view ? { view: l.chat.view } : {}),
+      ...(l.chat.area !== undefined ? { area: l.chat.area } : {}),
+      ...(l.chat.focus !== undefined ? { focus: l.chat.focus } : {}),
     };
     const scope = l.input.scope;
     const instruction = composeInstruction(l.spec, {
@@ -592,7 +595,7 @@ export class TurnStarter {
       previousTurnFailed: last?.status === "failed",
       ...(l.input.aim ? { aim: l.input.aim } : {}),
       ...(this.deps.headless ? { headless: true } : {}),
-      ...(l.chat.view ? { view: l.chat.view } : {}),
+      ...(l.chat.area !== undefined ? { area: l.chat.area } : {}),
       now: new Date().toISOString(),
     });
     const filesChangedExternally = last !== null && last.baseRef !== l.material.baseRef;
@@ -619,16 +622,16 @@ export class TurnStarter {
     const roomScoped = l.roomProject !== undefined;
     const gates = { flow: l.flow, roomScoped };
     const { chat } = l;
-    const toolset = toolsetFor(l.spec, chat.view);
-    // A view's agent carries no spec flows, so there is nothing to inline.
-    const eager = chat.view ? [] : eagerSkillsFor(l.spec, l.input.scope, orgDesignSystem(l.material.skillSource));
-    // A view's agent acts with its chat's tools only, over its MCP route.
-    const viewMcp =
-      chat.view === "issues"
-        ? mcpRoute(deps.tools, issuesMcpPath(projectOf(l.scope)))
-        : chat.view === "issue"
-          ? mcpRoute(deps.tools, issueMcpPath(projectOf(l.scope), chat.issueNumber))
-          : undefined;
+    const toolset = toolsetFor(l.spec);
+    // An area's sub-agent carries no spec flows, so there is nothing to inline.
+    const eager = chat.area !== undefined ? [] : eagerSkillsFor(l.spec, l.input.scope, orgDesignSystem(l.material.skillSource));
+    // An area's sub-agent acts with its chat's tools only, over its MCP route:
+    // the issue's when the chat is focused on one, else the Issues area's.
+    const issue = issueOf(chat);
+    const areaMcp =
+      chat.area === undefined
+        ? undefined
+        : mcpRoute(deps.tools, issue !== undefined ? issueMcpPath(projectOf(l.scope), issue) : issuesMcpPath(projectOf(l.scope)));
     const m = l.material;
     const author = authorOf(l.credit);
     return async (emit, signal): Promise<TurnOutcome> => {
@@ -671,11 +674,10 @@ export class TurnStarter {
             toolset,
             ...(l.spec.kind === "plan" && l.spec.scope ? { planScope: l.spec.scope } : {}),
             ...(wantsRegisterDraftTool(l.spec, l.route) ? { registerDraft: true } : {}),
-            ...(viewMcp ? { mcp: viewMcp } : catalogTurn(gates) ? { mcp: deps.tools } : {}),
-            ...(chat.view === "issue" ? { issueNumber: chat.issueNumber } : {}),
-            ...(chat.view !== undefined ? { project: projectOf(l.scope) } : {}),
+            ...(areaMcp ? { mcp: areaMcp } : catalogTurn(gates) ? { mcp: deps.tools } : {}),
+            ...(chat.area !== undefined ? { chat, project: projectOf(l.scope) } : {}),
             ...(branchNotes.length ? { branchNotes } : {}),
-            webSearch: chat.view === undefined && designOrRoomTurn(gates),
+            webSearch: chat.area === undefined && designOrRoomTurn(gates),
             ...(eager.length ? { eagerSkills: eager } : {}),
             ...(deps.surface ? { surface: deps.surface } : {}),
             ...(peer ? { collabPeer: peer } : {}),
@@ -696,8 +698,8 @@ export class TurnStarter {
             onEvent,
             abortSignal: signal,
           });
-          // What an Issues turn came to reaches the main chat's next turn.
-          if (chat.view === "issues" && res.outcome) deps.threads.noteOutcome(projectOf(l.scope), res.outcome);
+          // What the Issues area's chat came to reaches the main chat's next turn.
+          if (chat.area === "issues" && res.outcome) deps.threads.noteOutcome(projectOf(l.scope), res.outcome);
           const usage = {
             usage: res.usage,
             ...(contextTokens !== undefined ? { contextTokens } : {}),
@@ -751,7 +753,7 @@ function rotated(): TurnStartError {
 
 /** The project a project-scoped turn runs for. */
 function projectOf(scope: Scope): string {
-  if (scope.kind !== "project") throw new Error("a view chat's turn is a project turn");
+  if (scope.kind !== "project") throw new Error("an area chat's turn is a project turn");
   return scope.project;
 }
 

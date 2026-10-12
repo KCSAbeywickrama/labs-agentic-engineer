@@ -18,11 +18,11 @@ servers:
 tags:
 - name: Conversations
   description: |-
-    A project chat's current thread and its messages. A project has a chat
-    per view: its main chat, the Issues page's (`view=issues`) and one for
-    each open issue (`view=issue&issueNumber=<n>`). Each has its own thread
-    and runs one turn at a time, apart from the others. A closed issue has
-    no thread (409 issue_closed).
+    A project chat's current thread and its messages. A project has a main
+    chat and a chat per area: the Issues area's (`area=issues`), narrowed to
+    one open issue by a focus (`area=issues&focus[kind]=issue&focus[id]=<n>`).
+    Each has its own thread and runs one turn at a time, apart from the
+    others. A closed issue has no thread (409 issue_closed).
 - name: Turns
   description: Start a turn, read its status, attach to its event stream.
 - name: Marketplace
@@ -38,8 +38,8 @@ paths:
       - Conversations
       parameters:
       - $ref: '#/components/parameters/ProjectName'
-      - $ref: '#/components/parameters/View'
-      - $ref: '#/components/parameters/IssueNumber'
+      - $ref: '#/components/parameters/Area'
+      - $ref: '#/components/parameters/Focus'
       responses:
         '200':
           description: The current thread
@@ -198,8 +198,8 @@ paths:
       - Turns
       parameters:
       - $ref: '#/components/parameters/ProjectName'
-      - $ref: '#/components/parameters/View'
-      - $ref: '#/components/parameters/IssueNumber'
+      - $ref: '#/components/parameters/Area'
+      - $ref: '#/components/parameters/Focus'
       responses:
         '200':
           description: The running turn
@@ -466,25 +466,24 @@ components:
       schema:
         type: integer
         minimum: 0
-    View:
-      name: view
+    Area:
+      name: area
       in: query
-      description: The chat of a view other than the project's main chat, the
-        Issues page's (`issues`) or one issue's (`issue`, with issueNumber).
-        Absent is the main chat.
+      description: The area whose chat it is (the Issues page's, `issues`).
+        Absent is the project's main chat.
       schema:
-        type: string
-        enum:
-        - issues
-        - issue
-    IssueNumber:
-      name: issueNumber
+        $ref: '#/components/schemas/AreaId'
+    Focus:
+      name: focus
       in: query
-      description: The issue whose chat it is. Required with view=issue, refused
-        with any other view.
+      description: The entity the area's chat is narrowed to, as
+        `focus[kind]=issue&focus[id]=<n>` (one issue's chat). Taken only with
+        an area that declares that kind of focus; absent is the area's own
+        chat.
+      style: deepObject
+      explode: true
       schema:
-        type: integer
-        minimum: 1
+        $ref: '#/components/schemas/Focus'
     LastEventId:
       name: Last-Event-ID
       in: header
@@ -495,8 +494,9 @@ components:
         type: string
   responses:
     BadChat:
-      description: 'A view outside the enum, or an issueNumber missing with
-        view=issue or sent with any other view (problem code: invalid_chat)'
+      description: 'An area outside the enum, or a focus without an area, of a
+        kind the area does not declare, or without a positive integer id
+        (problem code: invalid_chat)'
       content:
         application/problem+json:
           schema:
@@ -556,6 +556,28 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    AreaId:
+      type: string
+      description: An area, a main-panel page whose chat has a sub-agent of its
+        own (`@aep/agent-stream` AREAS).
+      enum:
+      - issues
+    Focus:
+      type: object
+      additionalProperties: false
+      description: The entity an area's chat is narrowed to; an issue by its
+        number.
+      required:
+      - kind
+      - id
+      properties:
+        kind:
+          type: string
+          enum:
+          - issue
+        id:
+          type: integer
+          minimum: 1
     Problem:
       type: object
       required:

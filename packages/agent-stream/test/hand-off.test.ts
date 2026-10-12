@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AREAS, areaCommand, areaLabel, HAND_OFF_TOOL, isAreaId, isHandOffTool, VIEWS } from "../src/contracts/sse-events.js";
+import { AREAS, areaCommand, areaLabel, HAND_OFF_TOOL, isAreaId, isHandOffTool } from "../src/contracts/sse-events.js";
 
 test("one hand-off tool, recognised by name", () => {
   assert.equal(HAND_OFF_TOOL, "hand_off");
@@ -34,8 +34,7 @@ test("the areas: Issues, by id and label, reached by its /issue command", () => 
   assert.equal(areaCommand("issues"), "/issue");
 });
 
-test("every area is a view; an issue's own thread is not an area", () => {
-  for (const area of AREAS) assert.ok((VIEWS as readonly string[]).includes(area.id), area.id);
+test("an issue's own thread is not an area: it is the Issues area's focus", () => {
   assert.equal(isAreaId("issues"), true);
   assert.equal(isAreaId("issue"), false);
   assert.equal(isAreaId(undefined), false);

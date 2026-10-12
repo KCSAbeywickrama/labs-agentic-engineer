@@ -69,7 +69,7 @@ vi.mock("./useProjectChat", () => ({
   get chatStore() {
     return main.store;
   },
-  chatStoreFor: (view: string) => (view === "issues" ? issues.store : main.store),
+  chatStoreFor: (chat: { area?: string }) => (chat.area === "issues" ? issues.store : main.store),
 }));
 
 const { useBranchSummary } = await import("./useBranchSummary");

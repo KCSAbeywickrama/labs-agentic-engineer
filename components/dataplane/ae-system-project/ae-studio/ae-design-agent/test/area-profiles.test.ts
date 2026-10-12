@@ -40,7 +40,7 @@ const SCOPES = Object.values(AREAS).flatMap((area) => [
   { name: area.id, scope: scopeFor(area.id) },
   ...Object.keys(area.focus ?? {}).map((kind) => ({
     name: `${area.id} › ${kind}`,
-    scope: scopeFor(area.id, { kind: kind as "issue", number: 1 }),
+    scope: scopeFor(area.id, { kind: kind as "issue", id: 1 }),
   })),
 ]);
 
@@ -66,7 +66,7 @@ test("a scope naming an unknown tool or an unconfirmed write is refused", () => 
 
 test("a focus replaces only the base fields it states", () => {
   const base = scopeFor("issues");
-  const issue = scopeFor("issues", { kind: "issue", number: 12 });
+  const issue = scopeFor("issues", { kind: "issue", id: 12 });
   assert.deepEqual(base.tools, ["ask_question", "ask_questions", "classify_report", "search_issues", "create_issue"]);
   assert.deepEqual(base.skills, ["issue-triage"]);
   assert.equal(base.reportsBack, "outcome-note");
@@ -84,7 +84,7 @@ test("a focus replaces only the base fields it states", () => {
   ]);
   assert.deepEqual(issue.skills, ["issue-work"]);
   assert.equal(issue.reportsBack, "on-close-summary");
-  assert.deepEqual(issue.focus, { kind: "issue", number: 12 });
+  assert.deepEqual(issue.focus, { kind: "issue", id: 12 });
   assert.equal(issue.area.label, "Issues");
 });
 
