@@ -3184,7 +3184,7 @@ func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
 // TestAgentDeath_SignalEndsTheCycleWithoutTheLandingDeadline is the whole point
 // of SigRunAgentDied. The landing wait is the only wait in the loop with no poll
 // behind it, so before this signal a cycle whose pod died after twenty minutes
-// held its run for cycleLandingTimeout, re-dispatched into a cycle record the
+// held its run for legacyCycleLandingTimeout, re-dispatched into a cycle record the
 // store would no longer write to, and held it for another — four hours of wall
 // clock, measured on a live OOMKill.
 //
@@ -3203,7 +3203,7 @@ func TestAgentDeath_SignalEndsTheCycleWithoutTheLandingDeadline(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
-	require.Less(t, h.env.Now().Sub(start), cycleLandingTimeout,
+	require.Less(t, h.env.Now().Sub(start), legacyCycleLandingTimeout,
 		"the run must settle on the signal, not on the landing deadline")
 }
 
@@ -3212,7 +3212,7 @@ func TestAgentDeath_SignalEndsTheCycleWithoutTheLandingDeadline(t *testing.T) {
 // watcher, and BOTH are fenced on `ended_at IS NULL` — so once the watcher has
 // closed the cycle, a second attempt cannot be recorded, cannot be watched, and
 // cannot raise the death that would end its wait. Spending the budget on it buys
-// a second cycleLandingTimeout and nothing else.
+// a second legacyCycleLandingTimeout and nothing else.
 //
 // The budget is not gone: it belongs to deaths the watcher never recorded, which
 // TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch pins.
@@ -3245,8 +3245,27 @@ func TestAgentDeath_WithoutTheSignalTheDeadlineStillSettlesTheRun(t *testing.T) 
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
-	require.Equal(t, cycleLandingTimeout, h.env.Now().Sub(start),
+	require.Equal(t, legacyCycleLandingTimeout, h.env.Now().Sub(start),
 		"with the signal lost the run falls back to the one deadline it always had")
+}
+
+// TestAgentDeath_TheDeadlineIsTheOneTheRunWasStartedWith: the landing timeout
+// is snapshotted on the input (AgentDeadlines.LandingTimeout), so a run waits
+// out the timeout it was started with, not the legacy 2h, and a Job allowed
+// longer than 2h is not called dead while it may still be running.
+func TestAgentDeath_TheDeadlineIsTheOneTheRunWasStartedWith(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.factsAre(CycleFacts{CycleID: testCycleID, Ended: true})
+	landing := delivery.AgentDeadlines{Coding: 5 * time.Hour}.LandingTimeout()
+	start := h.env.Now()
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, LandingTimeout: landing})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, landing, h.env.Now().Sub(start),
+		"the run must wait out the landing timeout it was started with")
 }
 
 // TestAgentDeath_EndedIsNotALanding guards the ground-truth check itself. Reading

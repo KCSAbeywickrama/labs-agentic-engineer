@@ -454,11 +454,15 @@ func TestSettler_BackstopLeavesAPendingPodInsideTheCeiling(t *testing.T) {
 	c := settled("c1", false)
 	ended := time.Now().Add(-3 * time.Hour)
 	c.EndedAt = &ended
-	NewComponentSettler(rt, jobs, &fakeDeleter{}, newSettleCycles(c), testWriteTargets(), nil).Tick(context.Background())
+	NewComponentSettler(rt, jobs, &fakeDeleter{}, newSettleCycles(c), testWriteTargets(), nil).WithDeadlines(threeHourCeiling).Tick(context.Background())
 	if len(jobs.suspends) != 0 {
-		t.Fatal("3h after close is still inside the 3h10m ceiling")
+		t.Fatal("3h after close is still inside the 3h10m hold")
 	}
 }
+
+// threeHourCeiling pins the backstop hold at 3h10m for the tests that age a
+// cycle against it, independent of the platform default.
+var threeHourCeiling = delivery.AgentDeadlines{Coding: 3 * time.Hour}
 
 func TestSettler_BackstopSuspendsARunningPodPastTheCeiling(t *testing.T) {
 	records := captureLogs(t)
@@ -468,7 +472,7 @@ func TestSettler_BackstopSuspendsARunningPodPastTheCeiling(t *testing.T) {
 	ended := time.Now().Add(-(3*time.Hour + 11*time.Minute))
 	c.EndedAt = &ended
 	cycles := newSettleCycles(c)
-	NewComponentSettler(rt, jobs, &fakeDeleter{}, cycles, testWriteTargets(), nil).Tick(context.Background())
+	NewComponentSettler(rt, jobs, &fakeDeleter{}, cycles, testWriteTargets(), nil).WithDeadlines(threeHourCeiling).Tick(context.Background())
 	if len(jobs.suspends) != 1 || !cycles.marked["c1"] {
 		t.Fatalf("suspends %v", jobs.suspends)
 	}
@@ -538,7 +542,7 @@ func TestBackstopDue_ANonMergeCloseWithALivePodIsDueAtOnce(t *testing.T) {
 	ended := now.Add(-time.Minute)
 	closed := delivery.RunCycle{EndedAt: &ended} // Finish(id, ""): no merge sha, no agent reason
 	for _, phase := range []string{"Pending", "Running"} {
-		if !backstopDue(&closed, openchoreo.RuntimePod{Found: true, Phase: phase}, now) {
+		if !backstopDue(&closed, openchoreo.RuntimePod{Found: true, Phase: phase}, now, time.Hour) {
 			t.Fatalf("%s pod of a cycle closed with nothing merged must be due at once", phase)
 		}
 	}
@@ -551,13 +555,36 @@ func TestBackstopDue_HoldsAMergeClosedLivePodInsideTheCeiling(t *testing.T) {
 	ended := now.Add(-time.Minute)
 	merged := delivery.RunCycle{EndedAt: &ended, PRNumber: 7, MergeSHA: "abc"}
 	for _, phase := range []string{"Running", "Pending"} {
-		if backstopDue(&merged, openchoreo.RuntimePod{Found: true, Phase: phase}, now) {
+		if backstopDue(&merged, openchoreo.RuntimePod{Found: true, Phase: phase}, now, time.Hour) {
 			t.Fatalf("%s pod of a merge-closed cycle must be held until the ceiling", phase)
 		}
 	}
 	startup := delivery.RunCycle{EndedAt: &ended, AgentReason: delivery.CycleReasonStartupFailedPrefix + "Unschedulable"}
-	if !backstopDue(&startup, openchoreo.RuntimePod{Found: true, Phase: "Pending"}, now) {
+	if !backstopDue(&startup, openchoreo.RuntimePod{Found: true, Phase: "Pending"}, now, time.Hour) {
 		t.Fatal("a startup_failed cycle's Pending pod is due at once")
+	}
+}
+
+// Past the hold, Kubernetes has killed the pod anyway, so a merge-closed
+// cycle's pod that still reads Running is due.
+func TestBackstopDue_ReleasesAMergeClosedLivePodPastTheHold(t *testing.T) {
+	now := time.Now()
+	ended := now.Add(-2 * time.Hour)
+	merged := delivery.RunCycle{EndedAt: &ended, PRNumber: 7, MergeSHA: "abc"}
+	if !backstopDue(&merged, openchoreo.RuntimePod{Found: true, Phase: "Running"}, now, time.Hour) {
+		t.Fatal("a merge-closed cycle's pod past the hold must be due")
+	}
+}
+
+// The hold reaches past the longest Job the dispatcher can launch: a shorter
+// hold would suspend a merged cycle's pod while it may still be writing its
+// usage line.
+func TestComponentSettler_BackstopHoldOutlivesTheDeadlineCeiling(t *testing.T) {
+	for _, d := range []delivery.AgentDeadlines{{}, {Coding: 8 * time.Hour}} {
+		s := (&ComponentSettler{}).WithDeadlines(d)
+		if s.backstopHold() <= d.Ceiling() {
+			t.Errorf("hold %s does not outlive the ceiling %s", s.backstopHold(), d.Ceiling())
+		}
 	}
 }
 
@@ -841,7 +868,7 @@ func TestSettler_BackstopDoesNotAnnounceASuspendStampedElsewhere(t *testing.T) {
 	c.EndedAt = &ended
 	cycles := newSettleCycles(c)
 	jobs := &fakeJobs{before: func() { cycles.suspendedAt["c1"] = time.Now() }}
-	NewComponentSettler(rt, jobs, &fakeDeleter{}, cycles, testWriteTargets(), nil).Tick(context.Background())
+	NewComponentSettler(rt, jobs, &fakeDeleter{}, cycles, testWriteTargets(), nil).WithDeadlines(threeHourCeiling).Tick(context.Background())
 	if len(jobs.suspends) != 1 {
 		t.Fatalf("suspends %v", jobs.suspends)
 	}

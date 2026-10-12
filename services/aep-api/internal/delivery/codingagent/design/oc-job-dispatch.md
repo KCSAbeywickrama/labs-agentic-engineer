@@ -150,11 +150,28 @@ dispatch into an org whose stored type lacks the parameter updates it in place.
 
 The type pins the cost envelope rather than trusting callers: `backoffLimit: 0`
 (the runner pushes commits and opens pull requests — a silent retry would repeat
-side effects), `activeDeadlineSeconds` (a coding cycle passes 3h — it ends with a browser
-verification wave — and a validation cycle 2h),
+side effects), `activeDeadlineSeconds` (see Deadlines below),
 `ttlSecondsAfterFinished` as a backstop, and schema-bounded CPU/memory requests
 and limits, where the schema enforces the ceiling so an out-of-bounds
 per-dispatch override is rejected instead of silently clamped.
+
+**Deadlines.** One `delivery.AgentDeadlines` value, configured by
+`CODING_AGENT_DEADLINE` (coding, fix and conflict cycles; default 5h — the cycle
+ends with a browser verification wave) and `CODING_AGENT_VALIDATION_DEADLINE`
+(default 2h), each a Go duration of at most 12h. Every bound on an agent's wall
+clock derives from it, so they stay ordered:
+
+| Bound | Value |
+|---|---|
+| Job `activeDeadlineSeconds`, and the runner's `AEP_RUN_DEADLINE_SECONDS` | the cycle kind's deadline (`For`) |
+| ComponentType schema `activeDeadlineSeconds.maximum` | the longest kind's deadline (`Ceiling`) |
+| Settler backstop hold on a merge-closed cycle's live pod | `Ceiling` + 10 min |
+| Run supervisor's landing timeout per dispatch | `Ceiling` + 1h (`LandingTimeout`) |
+
+The `OCDispatcher` owns the first two, so a dispatch can never ask for more than
+the schema it ensures allows. The landing timeout is snapshotted on the run's
+workflow input at start: a config change does not re-time a live run, and a run
+started before the field existed replays with the 2h it was started with.
 
 The Job's CPU request is the type's `cpuRequest` default, set from `CODING_AGENT_CPU_REQUEST` (default `500m`; a positive CPU quantity such as `250m` or `0.5`, at most the `cpuLimit` default `3`; boot fails naming the key otherwise). The value is canonicalised (`0.5` and `500m` are one value). Unset or `500m` renders the schema unchanged; `1` (already in the enum) changes only the default; any other value becomes the default and is prepended to the enum. aep-api re-asserts the type on every dispatch, so a change reaches the next cycle. Memory is not tunable.
 
@@ -249,8 +266,9 @@ TTL. From attempt 2 on, the watcher ignores a TERMINAL pod that was created and
 finished more than `dispatchClockSkew` (30 s) before `dispatched_at`: it is neither
 the attempt's terminal pod (no suspend, no usage) nor its pod for the startup
 grace, and the in-memory absent/seen facts are kept per attempt. A Running or
-Pending pod from before the dispatch (attempt 1's agent outliving the 2 h
-landing timeout under its 3 h deadline) is the same Job still in flight, which
+Pending pod from before the dispatch (attempt 1's agent outliving a run's
+landing timeout, which only a run started before the landing timeout was
+derived from the deadline can see) is the same Job still in flight, which
 cannot start a second pod, so it is watched as the current attempt's: present
 for the grace, captured and suspended when it ends (its finish time is after
 the dispatch).
@@ -393,7 +411,7 @@ terminal pod, and a failed usage write is logged, not retried.
 pod; for no pod only when an earlier pass also saw none (one empty read can
 hide a Running pod); and for a `Running`/`Pending` pod at once unless the
 cycle merged. A merge-closed cycle's live pod is left to the watcher until
-`ended_at` + 3h10m (the deadline ceiling + 10 min), so its last line and usage
+`ended_at` + the deadline ceiling + 10 min, so its last line and usage
 are kept. Every other close is suspended at once, whatever its pod is doing: a
 cancel (its cancel-time suspend failed), a `startup_failed:*` close (its agent
 never started), and a cycle the run closed with nothing merged (a spent

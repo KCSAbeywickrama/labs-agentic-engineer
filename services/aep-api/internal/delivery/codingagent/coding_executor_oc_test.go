@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -360,8 +361,8 @@ func TestDispatch_ValidationCycleDispatchesOnOCPath(t *testing.T) {
 	if kind != validationTaskKind {
 		t.Errorf("AEP_TASK_KIND = %q, want %q", kind, validationTaskKind)
 	}
-	if rec.create.Parameters["activeDeadlineSeconds"] != int(validationDeadlineSeconds) {
-		t.Errorf("validation deadline = %v, want %d", rec.create.Parameters["activeDeadlineSeconds"], validationDeadlineSeconds)
+	if want := int(delivery.DefaultValidationAgentDeadline / time.Second); rec.create.Parameters["activeDeadlineSeconds"] != want {
+		t.Errorf("validation deadline = %v, want %d", rec.create.Parameters["activeDeadlineSeconds"], want)
 	}
 	if rec.create.DisplayName != "Validation cycle — milestone #1 v1" {
 		t.Errorf("displayName = %q", rec.create.DisplayName)
@@ -837,45 +838,57 @@ func TestDispatch_DeclaresThePlatformOwnsTheEvaluationKey(t *testing.T) {
 	}
 }
 
-// TestDispatch_CodingCycleCarriesTheThreeHourDeadline: a coding cycle names its
-// own activeDeadlineSeconds rather than falling through to the ComponentType's
-// 1h default — the cycle's browser verification wave does not fit in an hour,
-// and the pod was being reaped mid-run.
-func TestDispatch_CodingCycleCarriesTheThreeHourDeadline(t *testing.T) {
+// TestDispatch_CodingCycleCarriesItsDeadline: a coding cycle names its own
+// activeDeadlineSeconds rather than falling through to the ComponentType's 1h
+// default — the cycle's browser verification wave does not fit in an hour, and
+// the pod was being reaped mid-run. Unconfigured, it is the platform default.
+func TestDispatch_CodingCycleCarriesItsDeadline(t *testing.T) {
 	rec := &chainRecorder{}
 	e := newOCDispatchExecutor(rec)
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if got := rec.create.Parameters["activeDeadlineSeconds"]; got != int(codingDeadlineSeconds) {
-		t.Errorf("coding deadline = %v, want %d", got, codingDeadlineSeconds)
-	}
-	if codingDeadlineSeconds != 10800 {
-		t.Errorf("codingDeadlineSeconds = %d, want 10800 (3h)", codingDeadlineSeconds)
+	if got := rec.create.Parameters["activeDeadlineSeconds"]; got != 5*3600 {
+		t.Errorf("coding deadline = %v, want %d (5h)", got, 5*3600)
 	}
 }
 
 // TestDeadlinesFitTheComponentTypeSchema: the dispatched deadline and the schema
 // that validates it are two halves of one change. The ComponentType's maximum is
-// what OpenChoreo rejects against, so a deadline raised on this side alone would
-// not time a run out — it would fail the dispatch outright.
+// what OpenChoreo rejects against, so a deadline raised on one side alone would
+// not time a run out — it would fail the dispatch outright. Both come from the
+// dispatcher's one AgentDeadlines, whichever kind is configured longer.
 func TestDeadlinesFitTheComponentTypeSchema(t *testing.T) {
-	spec, _ := openchoreo.CodingAgentComponentType(openchoreo.CodingAgentResources{})["spec"].(map[string]any)
-	params, _ := spec["parameters"].(map[string]any)
-	schema, _ := params["openAPIV3Schema"].(map[string]any)
-	props, _ := schema["properties"].(map[string]any)
-	deadline, _ := props["activeDeadlineSeconds"].(map[string]any)
-	ceiling, ok := deadline["maximum"].(int)
-	if !ok {
-		t.Fatalf("activeDeadlineSeconds.maximum missing or not an int: %#v", deadline["maximum"])
-	}
-	for name, want := range map[string]int64{
-		"coding":     codingDeadlineSeconds,
-		"validation": validationDeadlineSeconds,
+	for _, deadlines := range []delivery.AgentDeadlines{
+		{},
+		{Coding: 8 * time.Hour},
+		{Coding: time.Hour, Validation: 3 * time.Hour},
 	} {
-		if want > int64(ceiling) {
-			t.Errorf("%s deadline %d exceeds the ComponentType schema maximum %d — the dispatch would be rejected", name, want, ceiling)
+		for _, kind := range []string{"", validationTaskKind} {
+			fake := &fakeOCSurface{}
+			in := ocDispatchInputs()
+			in.Kind = kind
+			d := NewOCDispatcher(fake, testWriteTargets()).WithImage("img").WithDeadlines(deadlines)
+			if _, err := d.Dispatch(context.Background(), in); err != nil {
+				t.Fatal(err)
+			}
+			spec, _ := fake.ensuredType["spec"].(map[string]any)
+			params, _ := spec["parameters"].(map[string]any)
+			schema, _ := params["openAPIV3Schema"].(map[string]any)
+			props, _ := schema["properties"].(map[string]any)
+			deadline, _ := props["activeDeadlineSeconds"].(map[string]any)
+			ceiling, ok := deadline["maximum"].(int)
+			if !ok {
+				t.Fatalf("activeDeadlineSeconds.maximum missing or not an int: %#v", deadline["maximum"])
+			}
+			got, _ := fake.create.Parameters["activeDeadlineSeconds"].(int)
+			if want := int(deadlines.For(kind) / time.Second); got != want {
+				t.Errorf("%+v kind %q: deadline %d, want %d", deadlines, kind, got, want)
+			}
+			if got > ceiling {
+				t.Errorf("%+v kind %q: deadline %d exceeds the ComponentType schema maximum %d — the dispatch would be rejected", deadlines, kind, got, ceiling)
+			}
 		}
 	}
 }
@@ -1066,13 +1079,13 @@ func TestDispatch_TheRunLearnsItsOwnDeadline(t *testing.T) {
 		disp delivery.MilestoneDispatch
 		want int64
 	}{
-		{"coding", codingMilestoneDispatch(), codingDeadlineSeconds},
+		{"coding", codingMilestoneDispatch(), int64(delivery.DefaultCodingAgentDeadline / time.Second)},
 		{"validation", func() delivery.MilestoneDispatch {
 			d := codingMilestoneDispatch()
 			d.Kind = delivery.CycleKindValidation
 			d.IssueNumber = 7
 			return d
-		}(), validationDeadlineSeconds},
+		}(), int64(delivery.DefaultValidationAgentDeadline / time.Second)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &chainRecorder{}
