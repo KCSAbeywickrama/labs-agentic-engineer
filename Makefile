@@ -461,7 +461,7 @@ dev-runner:
 # PATCH /api/v1/config (deployments/scripts/seed-dev.sh). Idempotent; SEED_FORCE=1
 # overwrites. Keys that are unset in .env are skipped.
 dev-seed:
-	bash deployments/scripts/seed-dev.sh
+	AE_DOMAIN=$(AE_DOMAIN) bash deployments/scripts/seed-dev.sh
 
 # Read-only check of the live ae-studio Resource, pod and public hosts
 # (deployments/scripts/ae-studio-check.sh). CP_CONTEXT/DP_CONTEXT are separate

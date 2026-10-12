@@ -31,17 +31,25 @@
 #   ANTHROPIC_API_KEY                                           llm
 #   AEP_CODING_ANTHROPIC_KEY                                    Claude Code OAuth
 #                                                               token (subscription)
-# Claude Code is the default runtime and is set explicitly.
 #
-# Knobs: THUNDER_URL, API_URL, CONSOLE_URL, SEED_USER / SEED_PASSWORD (the
-# local Thunder admin, setup-env-for-aectl.sh), ENV_FILE, SEED_FORCE.
-# Secrets are read from the file and sent on stdin, never on argv or echoed.
+# The runtime is set to Claude Code only alongside the subscription token,
+# which needs it; otherwise the org's runtime is left as it is. Nothing to
+# connect sends no PATCH.
+#
+# Knobs: AE_DOMAIN / WITH_TLS (as `make dev-env`), THUNDER_URL, API_URL,
+# CONSOLE_URL, SEED_USER / SEED_PASSWORD (the local Thunder admin,
+# setup-env-for-aectl.sh), ENV_FILE, SEED_FORCE.
+# Secrets reach jq through its environment and curl through stdin, never argv,
+# and are never echoed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/tls-env.sh
+source "${SCRIPT_DIR}/lib/tls-env.sh"
+AE_DOMAIN="${AE_DOMAIN:-localhost}"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/../.env}"
-THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
-CONSOLE_URL="${CONSOLE_URL:-http://console.ae.localhost:8080}"
+THUNDER_URL="${THUNDER_URL:-${SCHEME}://thunder.openchoreo.${AE_DOMAIN}:${CP_PORT}}"
+CONSOLE_URL="${CONSOLE_URL:-${SCHEME}://console.ae.${AE_DOMAIN}:${CP_PORT}}"
 API_URL="${API_URL:-${CONSOLE_URL}/aep-api-service}"
 SEED_USER="${SEED_USER:-admin}"
 SEED_PASSWORD="${SEED_PASSWORD:-Admin@123}"
@@ -85,18 +93,19 @@ exec_id=$(printf '%s' "$loc" | sed -n 's/.*executionId=\([^&]*\).*/\1/p')
 
 flow() { curl -sS --max-time 10 -X POST "${THUNDER_URL}/flow/execute" -H 'Content-Type: application/json' -d @-; }
 challenge_token=$(jq -n --arg e "$exec_id" '{executionId:$e,action:"",inputs:{}}' | flow | jq -r '.challengeToken // empty')
-assertion=$(jq -n --arg e "$exec_id" --arg c "$challenge_token" --arg u "$SEED_USER" --arg p "$SEED_PASSWORD" \
-  '{executionId:$e,action:"action_001",challengeToken:$c,inputs:{username:$u,password:$p}}' | flow | jq -r '.assertion // empty')
+assertion=$(SEED_PASSWORD="$SEED_PASSWORD" jq -n --arg e "$exec_id" --arg c "$challenge_token" --arg u "$SEED_USER" \
+  '{executionId:$e,action:"action_001",challengeToken:$c,inputs:{username:$u,password:env.SEED_PASSWORD}}' | flow | jq -r '.assertion // empty')
 [ -n "$assertion" ] || { echo "❌ sign-in as ${SEED_USER} failed (wrong SEED_USER/SEED_PASSWORD?)"; exit 1; }
 
-code=$(jq -n --arg a "$auth_id" --arg s "$assertion" '{authId:$a,assertion:$s}' \
+code=$(ASSERTION="$assertion" jq -n --arg a "$auth_id" '{authId:$a,assertion:env.ASSERTION}' \
   | curl -sS --max-time 10 -X POST "${THUNDER_URL}/oauth2/auth/callback" -H 'Content-Type: application/json' -d @- \
   | jq -r '.redirect_uri // empty' | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
 [ -n "$code" ] || { echo "❌ Thunder returned no authorization code"; exit 1; }
-token=$(curl -sS --max-time 10 -X POST "${THUNDER_URL}/oauth2/token" \
-  -d grant_type=authorization_code -d "client_id=${CLIENT_ID}" \
-  --data-urlencode "code=${code}" --data-urlencode "redirect_uri=${CONSOLE_URL}/callback" \
-  --data-urlencode "code_verifier=${verifier}" | jq -r '.access_token // empty')
+# The code and its verifier go in the form body on stdin, not on argv.
+token=$(CODE="$code" VERIFIER="$verifier" jq -rn --arg c "$CLIENT_ID" --arg r "${CONSOLE_URL}/callback" \
+  '"grant_type=authorization_code&client_id=\($c|@uri)&code=\(env.CODE|@uri)&redirect_uri=\($r|@uri)&code_verifier=\(env.VERIFIER|@uri)"' \
+  | curl -sS --max-time 10 -X POST "${THUNDER_URL}/oauth2/token" -H 'Content-Type: application/x-www-form-urlencoded' -d @- \
+  | jq -r '.access_token // empty')
 [ -n "$token" ] || { echo "❌ token exchange failed"; exit 1; }
 echo "✅ Signed in as ${SEED_USER}"
 
@@ -108,40 +117,44 @@ connected() { # connected jq-path : true when that section is non-null
   [ "$(printf '%s' "$config" | jq -r "${1} != null")" = "true" ]
 }
 
-patch='{"agents":{"runtime":"claude-code"}}'
-labels="Claude Code runtime"
+# Each section is decided first; the patch is built once, with the secrets
+# read from jq's environment.
+seed_llm=0 seed_sub=0 seed_git=0
+labels=()
 
 if [ -n "$ANTHROPIC_KEY" ]; then
   if connected .llm; then echo "✅ Anthropic API key already connected, skipping"
-  else
-    patch=$(jq -nc --argjson p "$patch" --arg k "$ANTHROPIC_KEY" '$p + {llm:{kind:"anthropic",apiKey:$k}}')
-    labels="${labels} + Anthropic API key"
-  fi
+  else seed_llm=1; labels+=("Anthropic API key"); fi
 else echo "⏭️  ANTHROPIC_API_KEY not set, skipping the API key"; fi
 
 if [ -n "$OAUTH_TOKEN" ]; then
   if connected .agents.subscription; then echo "✅ Claude subscription token already connected, skipping"
-  else
-    patch=$(jq -nc --argjson p "$patch" --arg t "$OAUTH_TOKEN" '$p | .agents.subscription = {kind:"claude",token:$t}')
-    labels="${labels} + Claude OAuth token"
-  fi
+  else seed_sub=1; labels+=("Claude OAuth token + Claude Code runtime"); fi
 else echo "⏭️  AEP_CODING_ANTHROPIC_KEY (OAuth token) not set, skipping the subscription"; fi
 
 if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_OWNER" ]; then
   if connected .gitProvider; then echo "✅ GitHub already connected, skipping"
-  else
-    patch=$(jq -nc --argjson p "$patch" --arg pat "$GITHUB_PAT" --arg login "$GITHUB_OWNER" \
-      '$p + {gitProvider:{kind:"github",mode:"pat",pat:$pat,githubLogin:$login}}')
-    labels="${labels} + GitHub PAT"
-  fi
+  else seed_git=1; labels+=("GitHub PAT"); fi
 else echo "⏭️  LOCAL_DEV_ADMIN_GITHUB_PAT / _OWNER not set, skipping GitHub"; fi
 
-echo "🔗 Connecting: ${labels}"
+if [ "${#labels[@]}" -eq 0 ]; then
+  echo "=== seed-dev complete: nothing to connect ==="
+  exit 0
+fi
+
+joined=$(printf ' + %s' "${labels[@]}")
+echo "🔗 Connecting: ${joined# + }"
 resp=$(mktemp); trap 'rm -f "$resp"' EXIT
 # Body on stdin and the bearer in a process-substitution curl config: neither is on argv.
-code=$(curl -sS --max-time 60 -K <(printf 'header = "Authorization: Bearer %s"\n' "$token") \
-  -o "$resp" -w '%{http_code}' -X PATCH "${API_URL}/api/v1/config" \
-  -H 'Content-Type: application/json' -d @- <<<"$patch")
+code=$(ANTHROPIC_KEY="$ANTHROPIC_KEY" OAUTH_TOKEN="$OAUTH_TOKEN" GITHUB_PAT="$GITHUB_PAT" \
+  jq -nc --argjson llm "$seed_llm" --argjson sub "$seed_sub" --argjson git "$seed_git" --arg login "$GITHUB_OWNER" '
+    {}
+    + (if $llm == 1 then {llm: {kind: "anthropic", apiKey: env.ANTHROPIC_KEY}} else {} end)
+    + (if $sub == 1 then {agents: {runtime: "claude-code", subscription: {kind: "claude", token: env.OAUTH_TOKEN}}} else {} end)
+    + (if $git == 1 then {gitProvider: {kind: "github", mode: "pat", pat: env.GITHUB_PAT, githubLogin: $login}} else {} end)' \
+  | curl -sS --max-time 60 -K <(printf 'header = "Authorization: Bearer %s"\n' "$token") \
+    -o "$resp" -w '%{http_code}' -X PATCH "${API_URL}/api/v1/config" \
+    -H 'Content-Type: application/json' -d @-)
 case "$code" in
   2*) echo "✅ Connected (HTTP ${code})" ;;
   *)  echo "❌ PATCH /config failed (HTTP ${code}): $(head -c 300 "$resp" | jq -r '.message // .' 2>/dev/null)"; exit 1 ;;

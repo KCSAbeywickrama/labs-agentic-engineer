@@ -120,21 +120,31 @@ set -o errtrace
 # CURRENT_STEP is the last banner printed, so a failure names the phase it was
 # in. Every phase is idempotent (helm upgrade --install, kubectl apply), so the
 # recovery is to re-run the same command.
+#
+# The ERR trap only records the failing command; the EXIT trap reports it, and
+# only when the script really exits non-zero. errtrace makes command
+# substitutions inherit ERR, so a tolerated miss such as
+# `[ "$(kubectl get cm ...)" != ... ]` fires it in a subshell; printing there
+# would announce a failure while setup carries on.
 CURRENT_STEP="(start)"
+FAILED_CMD=""
+FAILED_LINE=""
 step() { CURRENT_STEP="$1"; echo "$1"; }
-on_error() {
-  local code=$? line="${BASH_LINENO[0]}" cmd="$BASH_COMMAND"
-  trap - ERR
+on_error() { FAILED_CMD="$BASH_COMMAND"; FAILED_LINE="${BASH_LINENO[0]}"; }
+on_exit() {
+  local code="${1:-$?}"
+  [ "$code" -eq 0 ] && return
   {
     echo ""
     echo "❌ setup-env-for-aectl.sh failed (exit ${code})"
     echo "   Phase:   ${CURRENT_STEP}"
-    echo "   Command: ${cmd}"
-    echo "   Line:    ${BASH_SOURCE[0]}:${line}"
+    [ -n "$FAILED_CMD" ] && echo "   Command: ${FAILED_CMD}"
+    [ -n "$FAILED_LINE" ] && echo "   Line:    ${BASH_SOURCE[0]}:${FAILED_LINE}"
     echo "   Recover: re-run make dev-env (each phase is idempotent)"
   } >&2
 }
 trap on_error ERR
+trap on_exit EXIT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================================
@@ -517,7 +527,8 @@ API_PLATFORM_GATEWAY_IMAGE_VERSION="1.2.1"
 API_PLATFORM_VALUES="$(mktemp)"
 BOOTSTRAP_DIR="$(mktemp -d)"
 UPSTREAM_VALUES_DIR="$(mktemp -d)"
-trap 'rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
+# Chained onto on_exit, not replacing it: a later `trap ... EXIT` would drop the failure report.
+trap 'code=$?; rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUES"; on_exit "$code"' EXIT
 
 # oc_values fetches one of the guide's own values files and re-domains it,
 # printing the path to the local copy. The guide hardcodes
