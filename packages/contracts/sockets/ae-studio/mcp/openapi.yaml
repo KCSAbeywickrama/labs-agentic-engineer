@@ -64,7 +64,9 @@ paths:
         The Issues chat's issue tools on one project, forwarded to aep-api's
         call-ae-studio-issues-mcp-tool for that project. `tools/list` answers
         what aep-api lists, kept to the pinned names (search_issues,
-        create_issue); `tools/call` of any other name is refused here. A
+        create_issue, classify_report); `tools/call` of any other name is
+        refused here. classify_report is answered by aep-api with the
+        platform's Jev key, which the pod never holds. A
         notification (no `id`) is accepted with 202 and no body.
       tags:
       - MCP

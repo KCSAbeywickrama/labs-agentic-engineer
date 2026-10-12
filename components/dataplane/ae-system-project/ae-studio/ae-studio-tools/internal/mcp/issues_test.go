@@ -30,9 +30,10 @@ import (
 )
 
 // The issue chats' lists are pinned: changing one is a reviewed decision,
-// not a side effect of what aep-api serves.
+// not a side effect of what aep-api serves. classify_report is the Issues
+// chat's report classifier, which aep-api answers with the platform's key.
 func TestIssueToolLists_Pinned(t *testing.T) {
-	if want := []string{"search_issues", "create_issue"}; !reflect.DeepEqual(IssuesTools, want) {
+	if want := []string{"search_issues", "create_issue", "classify_report"}; !reflect.DeepEqual(IssuesTools, want) {
 		t.Fatalf("IssuesTools = %v", IssuesTools)
 	}
 	want := []string{"get_issue", "list_components", "comment_issue", "edit_issue", "close_issue", "reopen_issue", "hand_to_coding_agent"}
@@ -147,5 +148,23 @@ func TestIssuesServer_ToolErrorKeepsItsCode(t *testing.T) {
 	out, err := IssuesServer{}.Call(context.Background(), NewIssuesUpstreams(f).Issue("shop", 3), IssueTools, "tools/call", json.RawMessage(`{"name":"get_issue"}`))
 	if err != nil || string(out) != result {
 		t.Fatalf("tools/call = %s, err %v", out, err)
+	}
+}
+
+// classify_report is forwarded on the Issues route only: an issue's chat
+// cannot reach the platform's classifier.
+func TestIssuesServer_ClassifyReportOnTheIssuesRouteOnly(t *testing.T) {
+	up := &listingUpstream{}
+	params := json.RawMessage(`{"name":"classify_report","arguments":{"message":"save does nothing"}}`)
+	if _, err := (IssuesServer{}).Call(context.Background(), up, IssuesTools, "tools/call", params); err != nil {
+		t.Fatal(err)
+	}
+	if up.params != `{"name":"classify_report","arguments":{"message":"save does nothing"}}` {
+		t.Fatalf("forwarded %s", up.params)
+	}
+	_, err := IssuesServer{}.Call(context.Background(), &listingUpstream{}, IssueTools, "tools/call", params)
+	var rpc *RPCError
+	if !errors.As(err, &rpc) || rpc.Code != codeInvalidParams {
+		t.Fatalf("an issue's route forwarded classify_report: %v", err)
 	}
 }

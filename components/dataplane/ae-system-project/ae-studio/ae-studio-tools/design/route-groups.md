@@ -126,7 +126,8 @@ pinned list per route (`IssuesTools`, `IssueTools`, pinned by
 `TestIssueToolLists_Pinned`): `tools/list` drops any other name `aep-api`
 lists, and `tools/call` of one is `-32602` before anything is forwarded.
 
-- **Issues chat:** `search_issues`, `create_issue`.
+- **Issues chat:** `search_issues`, `create_issue`, `classify_report` (aep-api
+  classifies with the platform's Jev key; the pod never holds it).
 - **An issue's chat:** `get_issue`, `list_components`, `comment_issue`,
   `edit_issue`, `close_issue`, `reopen_issue`, `hand_to_coding_agent`.
 

@@ -35,7 +35,9 @@ import (
 // TestIssueToolLists_Pinned pins them.
 
 // IssuesTools are the Issues chat's tools (the Issues page's agent).
-var IssuesTools = []string{"search_issues", "create_issue"}
+// classify_report is its report classifier: aep-api asks Jev with the
+// platform's key, which this pod never holds.
+var IssuesTools = []string{"search_issues", "create_issue", "classify_report"}
 
 // IssueTools are one issue's chat tools (that issue's agent).
 var IssueTools = []string{
