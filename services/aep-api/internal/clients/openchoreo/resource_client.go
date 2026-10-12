@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/httpx"
@@ -706,25 +707,66 @@ func (c *resourceClient) DeleteResource(ctx context.Context, namespace, name str
 	return nil
 }
 
-// resourceTypeList is the OC list envelope for (cluster)resourcetypes.
+// resourceTypeList is the OC list envelope for (cluster)resourcetypes: one
+// page of a cursor-paged list, with the cursor for the next page when there
+// is one.
 type resourceTypeList struct {
-	Items []ResourceType `json:"items"`
+	Items      []ResourceType  `json:"items"`
+	Pagination *listPagination `json:"pagination,omitempty"`
+}
+
+// listPagination is the cursor OC puts on a paged list reply; empty on the
+// last page.
+type listPagination struct {
+	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+// maxResourceTypePages bounds the cursor walk: a list that never ends is a
+// server fault, not a catalog.
+const maxResourceTypePages = 1000
+
+// listAllResourceTypes follows the list's cursor until it is exhausted. OC
+// pages the list twenty objects at a time in name order, and other projects'
+// own types share the namespace with the organization's records, so one page
+// shows an organization only the records whose names sort early: a record
+// past the twentieth name would be invisible to the Resources page, the
+// register name check, the design agent and the build alike.
+func (c *resourceClient) listAllResourceTypes(ctx context.Context, path, what string) ([]ResourceType, error) {
+	var all []ResourceType
+	cursor := ""
+	for page := 1; ; page++ {
+		target := path
+		if cursor != "" {
+			target += "?cursor=" + url.QueryEscape(cursor)
+		}
+		out := &resourceTypeList{}
+		if _, err := c.do(ctx, http.MethodGet, target, nil, out); err != nil {
+			return nil, fmt.Errorf("list %s: %w", what, err)
+		}
+		all = append(all, out.Items...)
+		next := ""
+		if out.Pagination != nil {
+			next = out.Pagination.NextCursor
+		}
+		if next == "" {
+			return all, nil
+		}
+		if next == cursor {
+			return nil, fmt.Errorf("list %s: pagination did not advance (cursor %q)", what, next)
+		}
+		if page >= maxResourceTypePages {
+			return nil, fmt.Errorf("list %s: more than %d pages", what, maxResourceTypePages)
+		}
+		cursor = next
+	}
 }
 
 func (c *resourceClient) ListClusterResourceTypes(ctx context.Context) ([]ResourceType, error) {
-	out := &resourceTypeList{}
-	if _, err := c.do(ctx, http.MethodGet, "/api/v1/clusterresourcetypes", nil, out); err != nil {
-		return nil, fmt.Errorf("list clusterresourcetypes: %w", err)
-	}
-	return out.Items, nil
+	return c.listAllResourceTypes(ctx, "/api/v1/clusterresourcetypes", "clusterresourcetypes")
 }
 
 func (c *resourceClient) ListResourceTypes(ctx context.Context, namespace string) ([]ResourceType, error) {
-	out := &resourceTypeList{}
-	if _, err := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resourcetypes", nil, out); err != nil {
-		return nil, fmt.Errorf("list resourcetypes in %q: %w", namespace, err)
-	}
-	return out.Items, nil
+	return c.listAllResourceTypes(ctx, nsBase(namespace)+"/resourcetypes", fmt.Sprintf("resourcetypes in %q", namespace))
 }
 
 func (c *resourceClient) GetResourceType(ctx context.Context, namespace, name string) (*ResourceType, error) {

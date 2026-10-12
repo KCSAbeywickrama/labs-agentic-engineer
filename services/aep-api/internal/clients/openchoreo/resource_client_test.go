@@ -740,6 +740,80 @@ func TestListResourceTypes_Success(t *testing.T) {
 	}
 }
 
+// OC pages the list by cursor, twenty objects in name order per page; the
+// client walks every page, or an organization's records past the twentieth
+// name are invisible everywhere.
+func TestListResourceTypes_FollowsTheCursorToTheEnd(t *testing.T) {
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/wc-abc/resourcetypes" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		cursor := r.URL.Query().Get("cursor")
+		cursors = append(cursors, cursor)
+		switch cursor {
+		case "":
+			writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "aws-s3"}}, {Metadata: OCObjectMeta{Name: "currency-service"}}}, Pagination: &listPagination{NextCursor: "page-2"}})
+		case "page-2":
+			writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "sendgrid"}}}, Pagination: &listPagination{NextCursor: "page-3"}})
+		case "page-3":
+			writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "servicenow-consultant-skills"}}}})
+		default:
+			t.Fatalf("unexpected cursor %q", cursor)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	got, err := c.ListResourceTypes(context.Background(), "wc-abc")
+	if err != nil {
+		t.Fatalf("ListResourceTypes: %v", err)
+	}
+	if len(got) != 4 || got[3].Metadata.Name != "servicenow-consultant-skills" {
+		t.Fatalf("every page must be read, got %d items: %+v", len(got), got)
+	}
+	if len(cursors) != 3 || cursors[0] != "" || cursors[1] != "page-2" || cursors[2] != "page-3" {
+		t.Fatalf("cursors must be followed in order, got %q", cursors)
+	}
+}
+
+func TestListClusterResourceTypes_FollowsTheCursor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clusterresourcetypes" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("cursor") == "" {
+			writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "postgres-cnpg"}}}, Pagination: &listPagination{NextCursor: "more"}})
+			return
+		}
+		writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "thunder-app"}}}, Pagination: &listPagination{}})
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	got, err := c.ListClusterResourceTypes(context.Background())
+	if err != nil {
+		t.Fatalf("ListClusterResourceTypes: %v", err)
+	}
+	if len(got) != 2 || got[1].Metadata.Name != "thunder-app" {
+		t.Fatalf("both pages must be read: %+v", got)
+	}
+}
+
+// A cursor that never advances is a server fault, answered with an error
+// rather than an endless walk.
+func TestListResourceTypes_StuckCursorFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, resourceTypeList{Items: []ResourceType{{Metadata: OCObjectMeta{Name: "x"}}}, Pagination: &listPagination{NextCursor: "stuck"}})
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	if _, err := c.ListResourceTypes(context.Background(), "wc-abc"); err == nil || !strings.Contains(err.Error(), "did not advance") {
+		t.Fatalf("want a pagination error, got %v", err)
+	}
+}
+
 func TestGetResourceType_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/wc-abc/resourcetypes/postgres-rt" || r.Method != http.MethodGet {
