@@ -40,6 +40,7 @@ func setMinimalEnv(t *testing.T) {
 		"AE_STUDIO_STORAGE_SIZE_LIMIT", "AE_STUDIO_STORAGE_EPHEMERAL_REQUEST",
 		"AE_STUDIO_STORAGE_BUDGET_BYTES", "AE_STUDIO_CPU_REQUEST_DESIGN_AGENT", "AE_STUDIO_CPU_REQUEST_COLLAB", "AE_STUDIO_CPU_REQUEST_STUDIO_TOOLS", "AE_STUDIO_PULL_SECRET_KEY", "AE_STUDIO_PULL_SECRET_PROPERTY",
 		"AE_STUDIO_WEBHOOK_RELAY_SEED", "AE_STUDIO_WEBHOOK_RELAY_IMAGE", "AE_STUDIO_WEBHOOK_RELAY_ENABLED",
+		"AE_STUDIO_JEV_API_KEY", "AE_STUDIO_JEV_REMOTE_KEY", "AE_STUDIO_JEV_REMOTE_PROPERTY", "AE_STUDIO_JEV_URL",
 		"CREDENTIAL_ENCRYPTION_KEY",
 	} {
 		t.Setenv(k, "")
@@ -81,6 +82,29 @@ func TestLoad_AEStudioParsed(t *testing.T) {
 	t.Setenv("AE_STUDIO_EXTRA_EGRESS", `{not json`)
 	if _, err := Load(); err == nil {
 		t.Fatal("malformed AE_STUDIO_EXTRA_EGRESS must fail boot (it is a deployment typo, not an absent feature)")
+	}
+}
+
+// The Jev key is optional: off unset; set, it needs the remote key the pods'
+// ExternalSecret reads it from (the property defaults to "value").
+func TestLoad_Jev(t *testing.T) {
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AEStudio.Jev.On() || cfg.AEStudio.Jev.RemoteProperty != "value" || slices.Contains(cfg.AEStudio.Missing(), "AE_STUDIO_JEV_REMOTE_KEY") {
+		t.Fatalf("unset Jev: on=%v property=%q missing=%v", cfg.AEStudio.Jev.On(), cfg.AEStudio.Jev.RemoteProperty, cfg.AEStudio.Missing())
+	}
+	t.Setenv("AE_STUDIO_JEV_API_KEY", "jev-secret")
+	t.Setenv("AE_STUDIO_JEV_URL", "https://jev.example/v1/systemone")
+	if cfg, _ = Load(); !cfg.AEStudio.Jev.On() || cfg.AEStudio.Jev.URL != "https://jev.example/v1/systemone" ||
+		!slices.Contains(cfg.AEStudio.Missing(), "AE_STUDIO_JEV_REMOTE_KEY") {
+		t.Fatalf("a key without its remote key must be reported missing: %v", cfg.AEStudio.Missing())
+	}
+	t.Setenv("AE_STUDIO_JEV_REMOTE_KEY", "aep/jev-api-key")
+	if cfg, _ = Load(); slices.Contains(cfg.AEStudio.Missing(), "AE_STUDIO_JEV_REMOTE_KEY") || cfg.AEStudio.Jev.RemoteKey != "aep/jev-api-key" {
+		t.Fatalf("remote key %q missing %v", cfg.AEStudio.Jev.RemoteKey, cfg.AEStudio.Missing())
 	}
 }
 

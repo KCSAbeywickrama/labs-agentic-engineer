@@ -70,7 +70,14 @@ func templateOf(t *testing.T, id string) json.RawMessage {
 // ("" = no relay) and returns its containers in order.
 func renderedContainers(t *testing.T, relayURL string) []podContainer {
 	t.Helper()
-	raw, err := json.Marshal(renderRT(t, templateOf(t, "deployment"), rtVars(relayURL)))
+	return renderedContainersOf(t, rtVars(relayURL))
+}
+
+// renderedContainersOf renders the deployment with vars and returns its
+// containers in order.
+func renderedContainersOf(t *testing.T, vars map[string]any) []podContainer {
+	t.Helper()
+	raw, err := json.Marshal(renderRT(t, templateOf(t, "deployment"), vars))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,5 +369,21 @@ func TestTemplate_CPURequestsFollowTheInstallConfig(t *testing.T) {
 		if got[name] != want {
 			t.Errorf("set %s cpu request = %v, want %s", name, got[name], want)
 		}
+	}
+}
+
+// The design agent's JEV_URL is the install's environmentConfigs.jevUrl ("" =
+// the agent's default); its key comes with the agent's secrets, not here.
+func TestTemplate_DesignAgentJevURL(t *testing.T) {
+	vars := rtVars("")
+	vars["environmentConfigs"].(map[string]any)["jevUrl"] = "https://jev.example/v1/systemone"
+	got := ""
+	for _, e := range byName(renderedContainersOf(t, vars))["ae-design-agent"].Env {
+		if e.Name == "JEV_URL" {
+			got = e.Value
+		}
+	}
+	if got != "https://jev.example/v1/systemone" {
+		t.Fatalf("JEV_URL = %q", got)
 	}
 }

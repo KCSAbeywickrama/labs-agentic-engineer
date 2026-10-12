@@ -126,6 +126,9 @@ spec:
           default: { image: "" }
           properties:
             image: { type: string, default: "" }
+        # The design agent's JEV_URL (the platform's Jev endpoint); "" = the agent's default. Its key rides
+        # parameters.secrets.designAgent (JEV_API_KEY) while the install has one.
+        jevUrl: { type: string, default: "" }
   resources:
     # Retire timing: a rotation retires the previous org-secret reference (and
     # its vault path) right after the row and stamp commit, before the
@@ -256,6 +259,7 @@ spec:
                     - { name: AE_ROOM_SOCKET, value: /run/ae/room/room.sock }
                     - { name: AE_SNAPSHOTS_DIR, value: /snapshots }
                     - { name: AE_MODEL_CONNECTION, value: "${parameters.modelConnection}" }
+                    - { name: JEV_URL, value: "${environmentConfigs.jevUrl}" }
                     - { name: AE_EXPECTED_SECRET_REV, value: "${size(parameters.secrets.designAgent.data) > 0 ? parameters.secrets.designAgent.rev : \"\"}" }
                     - { name: HOME, value: /tmp }
                     - { name: AE_LISTEN_PORT, value: "8080" }

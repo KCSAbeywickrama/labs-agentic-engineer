@@ -310,6 +310,10 @@ func (r *configReader) aeStudio() AEStudioConfig {
 	r.webhookRelay.flag = r.readWebhookRelayFlag()
 	r.webhookRelay.seed = r.readOptionalString("AE_STUDIO_WEBHOOK_RELAY_SEED", "")
 	c.WebhookRelayImage = r.readOptionalString("AE_STUDIO_WEBHOOK_RELAY_IMAGE", "")
+	c.Jev.APIKey = r.readOptionalString("AE_STUDIO_JEV_API_KEY", "")
+	c.Jev.RemoteKey = r.readOptionalString("AE_STUDIO_JEV_REMOTE_KEY", "")
+	c.Jev.RemoteProperty = r.readOptionalString("AE_STUDIO_JEV_REMOTE_PROPERTY", "value")
+	c.Jev.URL = r.readOptionalString("AE_STUDIO_JEV_URL", "")
 
 	egress := r.readOptionalString("AE_STUDIO_EXTRA_EGRESS", "[]")
 	if !json.Valid([]byte(egress)) {

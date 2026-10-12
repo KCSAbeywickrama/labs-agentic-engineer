@@ -355,7 +355,23 @@ type AEStudioConfig struct {
 	// WebhookRelayImage (AE_STUDIO_WEBHOOK_RELAY_IMAGE) is the relay
 	// container's image, needed whenever the relay is on.
 	WebhookRelayImage string
+
+	// Jev is the platform's one Jev key for every org's design agent.
+	Jev JevConfig
 }
+
+// JevConfig is the platform's one Jev (TypeSafe) key, which every org's
+// design agent reads as JEV_API_KEY. APIKey (AE_STUDIO_JEV_API_KEY) is its
+// value, a secret never logged nor written anywhere: aep-api only
+// fingerprints it into the agent's secret rev, so a new key rolls the pods.
+// RemoteKey and RemoteProperty (AE_STUDIO_JEV_REMOTE_KEY, _PROPERTY, default
+// "value") are where the pod's ExternalSecret reads it through the dataplane's
+// store; URL (AE_STUDIO_JEV_URL) is the endpoint, "" = the agent's default.
+// No APIKey: off, and the agent asks the issue kind itself.
+type JevConfig struct{ APIKey, RemoteKey, RemoteProperty, URL string }
+
+// On reports whether the key is set.
+func (j JevConfig) On() bool { return j.APIKey != "" }
 
 // Missing returns the env names Ensure needs and lacks, in a stable order.
 func (c AEStudioConfig) Missing() []string {
@@ -383,6 +399,9 @@ func (c AEStudioConfig) Missing() []string {
 	}
 	if len(c.WebhookRelaySeed) > 0 && c.WebhookRelayImage == "" {
 		missing = append(missing, "AE_STUDIO_WEBHOOK_RELAY_IMAGE")
+	}
+	if c.Jev.On() && c.Jev.RemoteKey == "" {
+		missing = append(missing, "AE_STUDIO_JEV_REMOTE_KEY")
 	}
 	return missing
 }

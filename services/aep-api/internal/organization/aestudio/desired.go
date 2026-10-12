@@ -130,6 +130,8 @@ type envConfigs struct {
 	WebhookRelay struct {
 		Image string `json:"image"`
 	} `json:"webhookRelay"`
+	// JevURL is the design agent's JEV_URL, "" = its default.
+	JevURL string `json:"jevUrl"`
 }
 
 // desiredState is everything the converge writes and the drift check
@@ -239,7 +241,7 @@ func (s *Service) desired(ctx context.Context, org string) (desiredState, error)
 	}
 	d.Params.GitHubOwner = login
 	d.Params.WebhookRelayURL = WebhookRelayURL(cfg.WebhookRelaySeed, org)
-	tools, agent, err := secretSets(ctx, s.oc, org, set)
+	tools, agent, err := secretSets(ctx, s.oc, org, set, cfg.Jev)
 	if err != nil {
 		return d, err
 	}
@@ -271,9 +273,13 @@ func isJSONArray(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &v) == nil && v != nil
 }
 
+// jevAPIKeyEnv is the design agent's env of the platform's Jev key.
+const jevAPIKeyEnv = "JEV_API_KEY"
+
 // secretSets builds both containers' ExternalSecret entries from the set
-// references. The Default key's entry exists only while its row does.
-func secretSets(ctx context.Context, oc OC, org string, set map[organization.OrgSecret]string) (tools, agent secretSet, err error) {
+// references, and the agent's from the platform's Jev key while it is set.
+// The Default key's entry exists only while its row does.
+func secretSets(ctx context.Context, oc OC, org string, set map[organization.OrgSecret]string, jev config.JevConfig) (tools, agent secretSet, err error) {
 	byName := map[string]*secretmanagersvc.SecretReference{}
 	names := map[container]map[string]bool{studioTools: {}, designAgent: {}}
 	tools.Data, agent.Data = []secretEntry{}, []secretEntry{}
@@ -305,8 +311,20 @@ func secretSets(ctx context.Context, oc OC, org string, set map[organization.Org
 			agent.Data = append(agent.Data, entry)
 		}
 	}
+	if jev.On() {
+		agent.Data = append(agent.Data, secretEntry{Env: jevAPIKeyEnv, Key: jev.RemoteKey, Property: jev.RemoteProperty})
+		names[designAgent][jevRevName(jev.APIKey)] = true
+	}
 	tools.Rev, agent.Rev = revOf(names[studioTools]), revOf(names[designAgent])
 	return tools, agent, nil
+}
+
+// jevRevName stands for the Jev key in the agent's rev: a fingerprint, so a
+// new key changes the rev (the platform path it is read from does not) while
+// the key itself never leaves aep-api.
+func jevRevName(apiKey string) string {
+	sum := sha256.Sum256([]byte(apiKey))
+	return "platform:jev:" + hex.EncodeToString(sum[:])
 }
 
 // entryFor is the spec.data entry of ref that fills key.
@@ -320,8 +338,9 @@ func entryFor(ref *secretmanagersvc.SecretReference, key string) (secretEntry, b
 }
 
 // revOf is the revision of a container's secrets: it changes exactly when
-// the set of reference names it reads changes, so a save (a new reference)
-// rolls the pod and a no-op save does not. No references: "".
+// the set of reference names it reads changes (the Jev key counted by its
+// fingerprint, jevRevName), so a save (a new reference) rolls the pod and a
+// no-op save does not. No references: "".
 func revOf(names map[string]bool) string {
 	if len(names) == 0 {
 		return ""
@@ -391,5 +410,6 @@ func envConfigsOf(cfg config.AEStudioConfig) envConfigs {
 	e.PullSecret.Property = cfg.PullSecret.Property
 	e.ExtraEgress = cfg.ExtraEgress
 	e.WebhookRelay.Image = cfg.WebhookRelayImage
+	e.JevURL = cfg.Jev.URL
 	return e
 }

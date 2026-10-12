@@ -268,3 +268,76 @@ func TestDesired_ToolsSecretHoldsNoPublisherClient(t *testing.T) {
 		t.Fatal("the publisher row must not feed the tools rev")
 	}
 }
+
+// The platform's one Jev key (AE_STUDIO_JEV_*) reaches every org's design
+// agent as JEV_API_KEY, read by its ExternalSecret from the platform path the
+// install names; the key's value never rides the parameters, but a new key
+// changes the agent's rev, so the pod rolls onto it.
+func TestDesired_JevKeyInTheAgentSecretWhileSet(t *testing.T) {
+	f := newFixture(t).withAllRefs()
+	f.svc.cfg.Jev.APIKey, f.svc.cfg.Jev.RemoteKey, f.svc.cfg.Jev.RemoteProperty = "jev-secret-1", "aep/jev-api-key", "value"
+	f.svc.cfg.Jev.URL = "https://jev.example/v1/systemone"
+	d, err := f.svc.desired(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := d.Params.Secrets.DesignAgent
+	if len(agent.Data) != 1 || agent.Data[0] != (secretEntry{Env: "JEV_API_KEY", Key: "aep/jev-api-key", Property: "value"}) || agent.Rev == "" {
+		t.Fatalf("agent secret %+v", agent)
+	}
+	p, _ := json.Marshal(d.Params)
+	e, _ := json.Marshal(d.EnvConfigs)
+	if strings.Contains(string(p)+string(e), "jev-secret-1") {
+		t.Fatal("the key's value must never ride the parameters or the env configs")
+	}
+	if !strings.Contains(string(e), `"jevUrl":"https://jev.example/v1/systemone"`) {
+		t.Errorf("env configs lack the Jev URL: %s", e)
+	}
+
+	same, _ := f.svc.desired(ctx, "default")
+	f.svc.cfg.Jev.APIKey = "jev-secret-2"
+	rotated, _ := f.svc.desired(ctx, "default")
+	if same.Params.Secrets.DesignAgent.Rev != agent.Rev || rotated.Params.Secrets.DesignAgent.Rev == agent.Rev {
+		t.Fatalf("revs %q %q %q: the same key keeps the rev, a new key changes it", agent.Rev, same.Params.Secrets.DesignAgent.Rev, rotated.Params.Secrets.DesignAgent.Rev)
+	}
+
+	f.withRef(organization.OrgSecretDefaultKey, "default-default-key-cccc0005")
+	both, _ := f.svc.desired(ctx, "default")
+	if envs := envsOf(both.Params.Secrets.DesignAgent); envs != "ANTHROPIC_API_KEY,JEV_API_KEY" {
+		t.Fatalf("with a Default key too: %s", envs)
+	}
+}
+
+func TestDesired_NoJevKeyNoJevEntry(t *testing.T) {
+	f := newFixture(t).withAllRefs().withRef(organization.OrgSecretDefaultKey, "default-default-key-cccc0005")
+	f.svc.cfg.Jev.RemoteKey, f.svc.cfg.Jev.RemoteProperty = "aep/jev-api-key", "value" // enabled, key not imported yet
+	d, err := f.svc.desired(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envs := envsOf(d.Params.Secrets.DesignAgent); envs != "ANTHROPIC_API_KEY" {
+		t.Fatalf("no Jev key, yet the agent reads %s", envs)
+	}
+	e, _ := json.Marshal(d.EnvConfigs)
+	if !strings.Contains(string(e), `"jevUrl":""`) {
+		t.Errorf("env configs %s, want jevUrl empty", e)
+	}
+}
+
+// A Jev key with no remote key to read it from would leave the agent's
+// ExternalSecret unrenderable: the Ensure reports "not configured" instead.
+func TestDesired_JevKeyNeedsItsRemoteKey(t *testing.T) {
+	f := newFixture(t).withAllRefs()
+	f.svc.cfg.Jev.APIKey = "jev-secret-1"
+	if st, err := f.svc.Status(userCtx(), "default"); err != nil || st.State != StateFailed {
+		t.Fatalf("state %s err %v", st.State, err)
+	}
+}
+
+func envsOf(s secretSet) string {
+	envs := make([]string, 0, len(s.Data))
+	for _, e := range s.Data {
+		envs = append(envs, e.Env)
+	}
+	return strings.Join(envs, ",")
+}

@@ -88,7 +88,7 @@ the mirrors or the reference store. Budget and eviction:
 
 | Container | Plain env | Secret env (from its ExternalSecret) |
 |---|---|---|
-| `ae-design-agent` | `AE_ORG_ID`, `AE_ORG_HANDLE`, `AE_IDP_ISSUER`, `AE_IDP_JWKS_URL`, `AE_USER_AUDIENCES`, `AE_MCP_SOCKET`, `AE_TURN_SOCKET`, `AE_ROOM_SOCKET`, `AE_SNAPSHOTS_DIR`, `AE_MODEL_CONNECTION`, `AE_EXPECTED_SECRET_REV` (`""` without a key), `AE_LISTEN_PORT`, `AE_HEALTH_PORT` | `ANTHROPIC_API_KEY`, `AE_SECRET_REV` |
+| `ae-design-agent` | `AE_ORG_ID`, `AE_ORG_HANDLE`, `AE_IDP_ISSUER`, `AE_IDP_JWKS_URL`, `AE_USER_AUDIENCES`, `AE_MCP_SOCKET`, `AE_TURN_SOCKET`, `AE_ROOM_SOCKET`, `AE_SNAPSHOTS_DIR`, `AE_MODEL_CONNECTION`, `JEV_URL` (`""` = the agent's default), `AE_EXPECTED_SECRET_REV` (`""` without a key), `AE_LISTEN_PORT`, `AE_HEALTH_PORT` | `ANTHROPIC_API_KEY`, `JEV_API_KEY` (while the install has a Jev key), `AE_SECRET_REV` |
 | `ae-collab` | `AE_ORG_ID`, `AE_ORG_HANDLE`, `AE_IDP_ISSUER`, `AE_IDP_JWKS_URL`, `AE_USER_AUDIENCES`, `AE_ALLOWED_ORIGINS`, `AE_FILES_SOCKET`, `AE_ROOM_SOCKET`, `AE_LISTEN_PORT`, `AE_HEALTH_PORT` | none |
 | `ae-studio-tools` | `AE_ORG_ID`, `AE_ORG_HANDLE`, `AE_IDP_ISSUER`, `AE_IDP_JWKS_URL`, `AE_IDP_TOKEN_URL`, `AE_USER_AUDIENCES`, `AE_M2M_CLIENT_ID`, `AEP_API_BASE_URL`, `AE_FILES_SOCKET`, `AE_MCP_SOCKET`, `AE_TURN_SOCKET`, `AE_STUDIO_DATA_DIR`, `AE_STORAGE_BUDGET_BYTES`, `AE_EXPECTED_SECRET_REV`, `AE_LISTEN_PORT`, `AE_HEALTH_PORT`, `AE_GITHUB_OWNER`, `AE_WEBHOOK_URL` | `GITHUB_PAT`, `GITHUB_WEBHOOK_SECRET`, `AE_STUDIO_CLIENT_ID`, `AE_STUDIO_CLIENT_SECRET`, `AE_SECRET_REV` |
 
@@ -98,6 +98,9 @@ checks `Origin` itself, because a WebSocket upgrade carries no CORS.
 `AE_WEBHOOK_URL` is the relay channel when `webhookRelayUrl` is set, else the
 `webhookUrl` output. The secret env names and the org secrets behind them are
 listed once, in `aep-api`'s `secretEnvs` (`organization/aestudio/desired.go`).
+`JEV_API_KEY` is the one platform secret among them: the install's Jev key,
+read from the platform path aep-api is configured with (`AE_STUDIO_JEV_*`,
+`deployments/README.md`), the same for every org.
 
 ## Routes, CORS, timeouts
 
@@ -146,7 +149,9 @@ A changed secret still rolls the pod through a revision:
 
 1. `aep-api` computes each container's `rev` from the set of org-secret
    reference names it reads (sha-256, first 16 hex). A save makes a new
-   reference, so it changes `rev`; a no-op save does not.
+   reference, so it changes `rev`; a no-op save does not. The Jev key's path
+   never changes, so the agent's `rev` counts a fingerprint of the key in its
+   place: a new key changes it.
 2. ESO stamps `AE_SECRET_REV` into the Secret (`mergePolicy: Merge`); the pod
    spec carries `AE_EXPECTED_SECRET_REV`. A new `rev` changes the pod
    template, so the pod rolls.
