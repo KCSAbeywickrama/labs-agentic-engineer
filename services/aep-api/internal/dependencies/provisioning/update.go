@@ -63,7 +63,15 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 		currentCells = s.catalogValuePlane.EnvCells(orgID, canonical)
 	}
 	if len(currentCells) == 0 {
-		return ExternalResourceView{}, apierr.Conflict("external resource " + canonical + " is a Project External resource")
+		if !found.Registered() {
+			return ExternalResourceView{}, apierr.Conflict("external resource " + canonical + " is a Project External resource")
+		}
+		// An organization record with no cells in the process-local plane is
+		// one whose plain values were lost on a restart, not a project's own
+		// resource. Rebuild the cells from the record, the way the list does,
+		// so the update can land new values; a secret left blank still has to
+		// be resent, since its value is not in this process either.
+		currentCells = s.synthesizeRegisteredEnvCells(ctx, orgID, *found)
 	}
 
 	keys, writes, envNames, valueByEnvKey, err := s.validateUpdateRequest(ctx, orgID, req, found.Config, currentCells)
