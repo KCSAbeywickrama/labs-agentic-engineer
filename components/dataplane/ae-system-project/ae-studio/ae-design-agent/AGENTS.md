@@ -45,12 +45,22 @@ are listed in a pin-only block (the agent pins them onto a component's
 `loadSkill` reports `refused` apart from `missing`, because a refusal that
 reads as "no such skill" invites the agent to skip pinning. A library with
 nothing pin-only renders the catalog byte-identically, keeping the cached
-instruction prefix.
+instruction prefix. A `chat`-audience skill (opt-in: `skills/issue-triage`,
+`skills/issue-work`) is an area chat's only: the design view (`designSkills`)
+does not list it, load it or advise pinning it, and it never reaches a coding run.
 
 **Tool sets** come from `TurnSpec.kind`, selected in `run-conversation-turn.ts`
-(the loop stays generic); callers never send a tool set. `files` (the default)
+(the loop stays generic); callers never send a tool set. An area chat's turn
+takes none: it runs the sub-agent (**Areas**, below). `files` (the default)
 is the file-mutation set (`src/agents/main/tools/files.ts`) over a
-`FileBundle`. `kind: "plan"` selects `task-plan` (`tools/task-plan.ts`:
+`FileBundle`, plus the one hand-off tool `hand_off({area, request})`
+(`tools/hand-off.ts`). Its `area` enum and description come from the area
+profiles that have a `handOff`, so a new target is a profile sentence, never
+code. The agent passes the user's own words (a request shaped as an answer is
+refused) and never does the area's work. The call does not run the area's
+agent: it ends the turn awaiting the user (`handOffStop`), and the console's
+Open sends `AREAS[area].command` (`@aep/agent-stream`; `/issue` for Issues)
+plus the request to that area's chat. `task-plan` does not carry it. `kind: "plan"` selects `task-plan` (`tools/task-plan.ts`:
 `planBuild` over a per-turn `BuildPlan` accumulator checked against the turn's
 plan scope, no file tools; `files` is read-only context). Register chat merges
 `draftExternalResource` onto the files set on the marketplace route.
@@ -58,6 +68,64 @@ plan scope, no file tools; `files` is read-only context). Register chat merges
 issue from the last ok `planBuild` when the turn completes. The plan
 tool contract and its JSON Schemas live in `@aep/agent-stream`; the planner
 side is in [`design/task-planner-contract-parity.md`](design/task-planner-contract-parity.md).
+
+**Areas** (full notes: [`design/agent-loop.md`](design/agent-loop.md#areas)). An
+area is a console page whose chat has a sub-agent of its own (Issues); a focus
+narrows it to one entity (an issue). A project has a chat
+(`src/conversations/chat.ts`) for its main (spec) chat, per area and per
+focus, each with its own current thread (`ThreadBook`, use case `""`,
+`issues`, `issue-<n>`) and its own running turn (`TurnDesk`). The `/v1` reads
+not addressed by a conversation id (`conversations/current`, `turns/active`)
+name the chat by `area` and `focus[kind]`/`focus[id]` (`chatFromQuery`); a
+bad query, or a retired `view`/`issueNumber`, is `400 invalid_chat`. A turn
+names its thread, whose chat the book knows. Only the main chat rotates.
+
+- **Profiles** (`src/areas/profiles.ts`): an area is data, never agent code.
+  An `AreaProfile` has a `base` scope and, per focus kind, an overlay whose
+  stated fields replace the base's; a scope names its tools (registry names),
+  its chat skills and `reportsBack`. `scopeFor(area, focus)` resolves one and
+  refuses an unknown tool or a write without a confirmation. A new area is a
+  profile, its tools in the registry, its skills with `audience: [chat]`, and
+  an `AREAS` entry in `@aep/agent-stream`.
+- **Tool registry** (`src/tools/registry.ts`): every tool a profile may name,
+  built-in or MCP, with `readOnly` and, for each write, its `confirm`
+  (question, go-ahead option, decline option, change layout). MCP names are a
+  contract: the scope and the gate match them by name. `gateConfirmations`
+  (`src/tools/gate.ts`, on `src/agents/confirmation.ts`) wraps every write: it
+  runs only when the turn's instruction is the single answer (never a batch)
+  to its own question with its go-ahead option, at most once per turn, and
+  only with the exact change shown on its card (the option's `description`
+  equals the call's `describeChange`). Every other write refuses.
+- **Sub-agent** (`buildSubAgent`, `src/areas/sub-agent.ts`): built per turn
+  from the resolved scope. It makes each named built-in from the registry and
+  takes each named MCP tool its chat's route listed; anything else is
+  dropped. The routes are on the tools socket (`mcpRoute`:
+  `/projects/{p}/issues/mcp`, `/projects/{p}/issues/{n}/mcp`), forwarded by
+  ae-studio-tools to aep-api; the model never names one. `classify_report`
+  is a built-in that aep-api answers on the route with the platform's key (no
+  pod holds one); any failure resolves to `unknown`, so the agent asks. A
+  sub-agent turn is a plain chat turn: no spec, no Room, no `/<skill>` flows,
+  no spec scope (a 400), no web search. Its usage record carries `area` and
+  `focus`.
+- **Prompt** (`src/areas/prompt.ts`): assembled per turn, never
+  model-written: the generic core, the area block (project, area, focus), the
+  scope's skills inlined, the catalog of the other chat skills (`loadSkill`
+  over `chatSkills`, `src/areas/skills.ts`), the confirmation table generated
+  from the registry, the narration policy. The procedure lives in
+  `skills/issue-triage` (the Issues chat) and `skills/issue-work` (an issue's
+  chat); the exact confirmation strings live in the registry only. A change to
+  either changes `test/fixtures/sub-agent-prompts/` (`UPDATE_PROMPT_SNAPSHOTS=1`).
+- **Branch notes**: a scope that reports back an `outcome-note` (the Issues
+  chat) leaves its turn's `outcome` (`src/areas/outcome.ts`) for the main
+  chat's next turn (`noteOutcome`, `takeBranchNotes`; `prompts/turn.ts`
+  `branchNotesNote`). It can echo untrusted issue text, so it is quoted on
+  one line.
+- **Issue threads** (the Issues area focused on an issue) exist only while the
+  issue is open: opening the thread or starting a turn reads the issue first
+  (`conversations/issue-state.ts`; closed is `409 issue_closed` and removes
+  the thread, unknown `404 issue_unknown`). aep-api removes a closed or
+  reopened issue's thread through the Turn socket's DELETE (**Run**, below);
+  `turns/issue-thread-removal.ts` is the one removal both paths use.
 
 ## Run
 
@@ -74,7 +142,9 @@ side is in [`design/task-planner-contract-parity.md`](design/task-planner-contra
   unreachable → 503 `idp_unavailable` (`Retry-After: 5`), all before route
   matching. The Turn socket (`AE_TURN_SOCKET`, mode 0660; a stale socket file
   is replaced, any other file refuses the start) serves `edge/turn-socket.ts`
-  for ae-studio-tools, whose mount is the gate. The health port
+  for ae-studio-tools, whose mount is the gate: `POST /turns` (kickoff and Plan)
+  and `DELETE /projects/{p}/issues/{n}/thread?before=` (aep-api removes a closed or
+  reopened issue's chat thread; a thread whose turn runs goes at that turn's end). The health port
   (`AE_HEALTH_PORT`, 9080, not routed) serves `/healthz` and `/readyz`. Start
   refuses when `AE_SECRET_REV` ≠ `AE_EXPECTED_SECRET_REV`.
 - **Turns** (start path, lock, replay, usage hand-off, shutdown, the `/v1` and
@@ -114,7 +184,7 @@ side is in [`design/task-planner-contract-parity.md`](design/task-planner-contra
   [text]` is a flow, `/start` takes the idea typed inline, else the lookup's
   `idea`; `/start` and flow turns list the lookup's references.
 - **Conversations**: `conversations/thread-book.ts` (one current thread per
-  project) and `conversations/marketplace-book.ts` (per-user marketplace
+  project chat) and `conversations/marketplace-book.ts` (per-user marketplace
   conversations); every in-process bound (rotation, eviction, caps) is in
   [`design/pod-memory-bounds.md`](design/pod-memory-bounds.md). Messages sit
   behind the `ConversationStore` port (in memory; a restart starts every thread
@@ -152,7 +222,13 @@ starts the real pod listeners with a local IdP and the fake tools socket.
 - Agent + SDK wiring (the `ToolLoopAgent` loop, tools, prompt, server) lives
   here; the client-safe fold + wire contracts live in `@aep/agent-stream`.
 - Latest Claude models by default (see the `claude-api` skill for model ids).
-- One agent per `src/agents/<name>/`; the loop (`run-turn.ts`) is shared.
+- Two agent factories, each making a `ToolLoopAgent` from its deps plus the
+  per-turn `AgentRunSettings` (`src/agents/run-settings.ts`): `createMainAgent`
+  (`src/agents/main/agent.ts`, the spec editor) and `buildSubAgent`
+  (`src/areas/sub-agent.ts`, every area chat). An area adds profile data and
+  skills, never agent code. The loop (`run-turn.ts`) is shared: it decides the
+  settings and streams whatever agent the caller's `agentFor` builds;
+  `run-conversation-turn.ts` picks the factory.
 - `src/` writes no files **on the turn path**; its only filesystem READS are the
   snapshot dirs (`load-workspace.ts`, paths derived solely by
   `snapshot-path.ts`). The one write is DevTools retention
