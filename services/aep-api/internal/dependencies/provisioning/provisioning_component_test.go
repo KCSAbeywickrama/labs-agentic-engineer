@@ -1878,6 +1878,51 @@ func TestProvisioningComponent_UpdateExternalResource_409ProjectExternal(t *test
 	}
 }
 
+// After an aep-api restart the process-local value plane is empty while the
+// organization's ResourceType still stands. An update must then land new
+// values rather than mistake the record for a Project External resource.
+func TestProvisioningComponent_UpdateExternalResource_RegisteredRecordAfterRestart(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+		{
+			Name:                    "stripe",
+			Description:             "Stripe payments",
+			Provider:                "Stripe",
+			ConsumptionInstructions: "Use the secret as Bearer.",
+			Scope:                   openchoreo.ExternalResourceScopeOrg,
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "api_key", Secret: true, Description: "Secret API key"},
+				{Key: "region", Secret: false, Description: "Account region"},
+			},
+		},
+	}}, &cValuePlane{})
+
+	// A secret left blank cannot be kept: its value is not in this process.
+	blank := registerBody()
+	blank.EnvValues[0].Value = ""
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, blank))
+	if resp.Code != 400 {
+		t.Fatalf("blank secret after restart: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	body := registerBody()
+	body.EnvValues[1].Value = "ap-southeast"
+	resp = h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 200 {
+		t.Fatalf("update after restart: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if region := findEnvCell(t, got.EnvCells, "default", "region"); region.Status != gen.EnvValueCellDTOStatusConfigured || region.Value != "ap-southeast" {
+		t.Fatalf("plain region default cell = %+v, want configured ap-southeast", region)
+	}
+	if apiKey := findEnvCell(t, got.EnvCells, "default", "api_key"); apiKey.Status != gen.EnvValueCellDTOStatusConfigured || apiKey.Value != "" {
+		t.Fatalf("secret api_key default cell = %+v, want configured with no value echoed", apiKey)
+	}
+}
+
 func TestProvisioningComponent_UpdateExternalResource_404Unknown(t *testing.T) {
 	t.Parallel()
 	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})

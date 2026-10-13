@@ -136,6 +136,38 @@ func TestCompleteRegistryCopies_LeavesEverythingElseAlone(t *testing.T) {
 	}
 }
 
+// An uploaded document keeps the admin's file name on the org record; the
+// project copy lands it under the canonical name for its type, the only name
+// the project gate accepts, with the registry path kept on the provenance.
+func TestRenderRegistryCopy_LandsTheCanonicalFileName(t *testing.T) {
+	for _, tc := range []struct{ contractType, registryPath, want string }{
+		{DependencyContractTypeOpenAPI, "currency-service/currency-rates.yaml", "openapi.yaml"},
+		{DependencyContractTypeGraphQL, "currency-service/currency-service.graphql", "schema.graphql"},
+		{DependencyContractTypeSDK, "currency-service/manifest.json", "sdk.json"},
+	} {
+		rec := registeredCurrency()
+		rec.Resource.Contract = &ResourceContract{Type: tc.contractType, Path: tc.registryPath}
+		completed, files, err := renderRegistryCopy(DependencyDefinition{Name: "currency-service"}, *rec, time.Now())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.contractType, err)
+		}
+		def, err := parseDependencyDefinitionJSON("currency-service", completed)
+		if err != nil {
+			t.Fatalf("%s: completed definition does not parse: %v\n%s", tc.contractType, err, completed)
+		}
+		if def.Resource.Contract == nil || def.Resource.Contract.Path != tc.want || def.Resource.Contract.Origin != DependencyContractOriginRegistry {
+			t.Fatalf("%s: contract must land as %q: %+v", tc.contractType, tc.want, def.Resource.Contract)
+		}
+		if def.Provenance == nil || def.Provenance.Registry != tc.registryPath {
+			t.Fatalf("%s: provenance must keep the registry path %q: %+v", tc.contractType, tc.registryPath, def.Provenance)
+		}
+		docPath := DesignDir + "/" + dependencyDirPrefix + "currency-service/" + tc.want
+		if files[docPath] != rec.Document || len(files) != 1 {
+			t.Fatalf("%s: the document must land at %s only: %v", tc.contractType, docPath, files)
+		}
+	}
+}
+
 func TestRenderRegistryCopy_RefusesAMisnamedRecord(t *testing.T) {
 	rec := registeredCurrency()
 	rec.Resource.Name = "fx-rates"

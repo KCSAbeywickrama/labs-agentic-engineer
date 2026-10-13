@@ -663,6 +663,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		codingagent.NewIDPPublisherResolver(orgSecretRepo),
 		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
 	)
+	// agentDeadlines is how long each cycle kind may run. The dispatcher, the
+	// run supervisor and the settler each derive their bound from this one
+	// value, which keeps them ordered: Job deadline < settler hold and landing
+	// timeout.
+	agentDeadlines := delivery.AgentDeadlines{
+		Coding:     cfg.CodingAgentDeadline,
+		Validation: cfg.CodingAgentValidationDeadline,
+	}
 	// The OpenChoreo Component dispatch path: one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
@@ -675,13 +683,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			WithImage(cfg.AgentRunnerImage).
 			WithOpenCodeImage(cfg.AgentRunnerImageOpenCode).
 			WithJobTTL(cfg.CodingAgentJobTTL).
-			WithCPURequest(cfg.CodingAgentCPURequest)
+			WithCPURequest(cfg.CodingAgentCPURequest).
+			WithDeadlines(agentDeadlines)
 		codingExecutor.WithOCDispatch(ocDispatcher)
 		slog.Info("coding executor: OpenChoreo component dispatch path enabled",
 			"runnerImage", cfg.AgentRunnerImage,
 			"runnerImageOpenCode", cfg.AgentRunnerImageOpenCode,
 			"jobTTL", cfg.CodingAgentJobTTL.String(),
-			"cpuRequest", cfg.CodingAgentCPURequest)
+			"cpuRequest", cfg.CodingAgentCPURequest,
+			"codingDeadline", agentDeadlines.For(delivery.CycleKindCoding).String(),
+			"validationDeadline", agentDeadlines.For(delivery.CycleKindValidation).String())
 	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
 	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same
@@ -697,7 +708,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// It is constructed HERE, after the coding executor, because the executor IS
 	// its agent dispatcher (delivery.MilestoneDispatcher): a supervisor with no
 	// dispatcher refuses to start runs, so the two must be wired together.
-	runSupervisor := run.NewSupervisor(temporalRuntime, runRuns{runs: milestoneRunRepo}, codingExecutor)
+	runSupervisor := run.NewSupervisor(temporalRuntime, runRuns{runs: milestoneRunRepo}, codingExecutor).
+		WithAgentDeadlines(agentDeadlines)
 	// The run-supervisor half of the project-delete cascade. Wired HERE rather
 	// than beside SetStageSources because the supervisor does not exist until the
 	// coding executor does: purging a project's run ROWS leaves the workflows that
@@ -1564,7 +1576,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (two no-pod reads a grace apart, the Job suspended), and suspends a
 	// closed cycle's Job nobody suspended (the backstop).
 	watchers = append(watchers, codingagent.NewComponentSettler(runtimeClient, componentClient, componentClient,
-		runCycleRepo, writeTargets, asServiceIdentity).WithGrace(cfg.CodingAgentSettleGrace))
+		runCycleRepo, writeTargets, asServiceIdentity).WithGrace(cfg.CodingAgentSettleGrace).WithDeadlines(agentDeadlines))
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a
 	// retry loop, so a Temporal server that is down at boot is not fatal — the

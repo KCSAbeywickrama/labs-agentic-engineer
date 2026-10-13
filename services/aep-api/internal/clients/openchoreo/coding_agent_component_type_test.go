@@ -20,6 +20,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/config"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestCodingAgentComponentType_Pins(t *testing.T) {
@@ -332,5 +333,26 @@ func TestCodingAgentComponentType_CPUCeilingMatchesLimit(t *testing.T) {
 	m, err := config.ParseCPUMillicores(limit["default"].(string))
 	if err != nil || m != config.CodingAgentCPUCeilingMillicores {
 		t.Fatalf("cpuLimit default %v = %dm, %v; config ceiling %dm", limit["default"], m, err, config.CodingAgentCPUCeilingMillicores)
+	}
+}
+
+// The schema's activeDeadlineSeconds maximum is the configured ceiling in whole
+// seconds, and never tighter than the default a dispatch without a deadline
+// gets — the schema must accept its own default.
+func TestCodingAgentComponentType_DeadlineCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		ceiling time.Duration
+		want    int
+	}{
+		{5 * time.Hour, 18000},
+		{90 * time.Minute, 5400},
+		{0, 3600},
+		{10 * time.Minute, 3600},
+	} {
+		spec, _ := CodingAgentComponentType(CodingAgentResources{DeadlineCeiling: tc.ceiling})["spec"].(map[string]any)
+		deadline, _ := mustFindSchemaProps(t, spec)["activeDeadlineSeconds"].(map[string]any)
+		if deadline["maximum"] != tc.want || deadline["default"] != 3600 {
+			t.Errorf("ceiling %s: activeDeadlineSeconds = %#v, want maximum %d default 3600", tc.ceiling, deadline, tc.want)
+		}
 	}
 }

@@ -151,6 +151,23 @@ func TestSaveGate_LeavesStrayPrototypeNamesAlone(t *testing.T) {
 
 // The extension allow-list is what lets prototype.tsx ride the bundle the gate
 // reads in the first place.
+// A dependency's GraphQL contract rides the bundle too: the read-time status
+// counts a contract only when its file is in the bundle, so a dropped
+// schema.graphql reads needs-contract whatever the definition says.
+func TestDesignBundleFilter_AdmitsGraphQLContracts(t *testing.T) {
+	for rel, want := range map[string]bool{
+		"dependencies/sales-entity-service/schema.graphql":  true,
+		"dependencies/sales-entity-service/schema.graphqls": true,
+		"dependencies/sales-entity-service/openapi.yaml":    true,
+		"dependencies/sales-entity-service/sdk.json":        true,
+		"dependencies/sales-entity-service/service.proto":   false,
+	} {
+		if got := designBundleFilter(rel); got != want {
+			t.Errorf("designBundleFilter(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
 func TestDesignBundleFilter_AdmitsPrototypeFiles(t *testing.T) {
 	for rel, want := range map[string]bool{
 		"components/web/prototype.json": true,

@@ -109,8 +109,8 @@ func (e *CodingExecutor) Dispatch(ctx context.Context, req delivery.MilestoneDis
 	})
 }
 
-// milestoneDispatchShape picks the runner's prompt, skill and deadline for a
-// cycle kind.
+// milestoneDispatchShape picks the runner's prompt and skill for a cycle kind.
+// Its deadline is the OCDispatcher's (AgentDeadlines.For the task kind).
 //
 // Validation is the only anchored kind: it swaps in the `validation-task` skill
 // (via AEP_TASK_KIND) and points the agent at its single issue. Every other kind
@@ -126,7 +126,6 @@ func milestoneDispatchShape(req delivery.MilestoneDispatch, repoURL string) (dis
 			prompt:          buildValidationPrompt(issueURL(repoURL, req.IssueNumber)),
 			componentName:   validationComponentSentinel,
 			taskKind:        validationTaskKind,
-			deadline:        validationDeadlineSeconds,
 			milestoneNumber: req.MilestoneNumber,
 			milestoneTitle:  req.MilestoneTitle,
 			validationIssue: req.IssueNumber,
@@ -139,7 +138,6 @@ func milestoneDispatchShape(req delivery.MilestoneDispatch, repoURL string) (dis
 	return dispatchShape{
 		prompt:          buildPrompt(req.MilestoneNumber, req.MilestoneTitle),
 		componentName:   milestoneComponentSentinel,
-		deadline:        codingDeadlineSeconds,
 		milestoneNumber: req.MilestoneNumber,
 		milestoneTitle:  req.MilestoneTitle,
 		specTag:         req.SpecTag,

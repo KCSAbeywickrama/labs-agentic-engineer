@@ -224,7 +224,7 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 		}
 
 		attemptCtx, stopDeadline := workflow.WithCancel(ctx)
-		deadline := workflow.NewTimer(attemptCtx, cycleLandingTimeout)
+		deadline := workflow.NewTimer(attemptCtx, l.landingTimeout)
 		expired := false
 		for !expired {
 			ending := l.awaitLanding(ctx, deadline)

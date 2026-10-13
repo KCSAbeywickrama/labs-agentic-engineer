@@ -33,6 +33,12 @@ import (
 // `startup_failed:not_applied` (design/oc-job-dispatch.md).
 const MaxCodingAgentJobTTL = 17 * time.Minute
 
+// MaxCodingAgentDeadline bounds CODING_AGENT_DEADLINE and
+// CODING_AGENT_VALIDATION_DEADLINE. Kubernetes sets no cap of its own; this
+// one keeps a mistyped value from holding an agent slot, and spending tokens,
+// for days.
+const MaxCodingAgentDeadline = 12 * time.Hour
+
 type Config struct {
 	ServerHost string
 	ServerPort int
@@ -226,6 +232,16 @@ type Config struct {
 	// Once a cycle is over its binding is suspended, so the Job OpenChoreo
 	// re-creates after the TTL never runs the runner again.
 	CodingAgentJobTTL time.Duration
+
+	// CodingAgentDeadline is how long a coding cycle (coding, fix, conflict)
+	// may run before Kubernetes kills its pod (CODING_AGENT_DEADLINE).
+	// CodingAgentValidationDeadline is the same for a validation cycle
+	// (CODING_AGENT_VALIDATION_DEADLINE). Each is at most
+	// MaxCodingAgentDeadline; zero (unset) is the platform default
+	// (delivery.AgentDeadlines: 5h and 2h). Every other bound on an agent's
+	// wall clock is derived from the two.
+	CodingAgentDeadline           time.Duration
+	CodingAgentValidationDeadline time.Duration
 
 	// CodingAgentCPURequest is the CPU each coding-agent Job requests, a CPU
 	// quantity ("500m", "0.25", "1") no greater than CodingAgentCPUCeiling.

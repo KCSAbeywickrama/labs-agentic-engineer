@@ -169,6 +169,13 @@ codingAgentRunner:
   # quantity such as 250m or 0.5, at most 3. Empty keeps the ComponentType's
   # 500m. Lower it on a CPU-starved dataplane. Memory is not tunable.
   cpuRequest: ""
+  # How long one cycle may run before Kubernetes kills its pod, as a Go
+  # duration: a coding cycle (coding, fix, conflict; CODING_AGENT_DEADLINE) and
+  # a validation cycle (CODING_AGENT_VALIDATION_DEADLINE). Empty keeps the
+  # platform defaults, 5h and 2h. At most 12h each. The run supervisor's landing
+  # timeout and the settler's hold are derived from these.
+  deadline: ""
+  validationDeadline: ""
 
 # Coding-agent dispatch wiring.
 #

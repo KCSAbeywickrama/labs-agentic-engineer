@@ -130,6 +130,26 @@ func TestAssembleDesign_HydratesARegistryCopy(t *testing.T) {
 	}
 }
 
+// A GraphQL contract counts the same way an OpenAPI one does, once its file
+// is in the bundle (the bundle filter admits `.graphql`).
+func TestAssembleDesign_GraphQLContractCountsWhenTheFileIsThere(t *testing.T) {
+	files := directoryDesignFiles()
+	delete(files, "dependencies/stripe/openapi.yaml")
+	files["dependencies/stripe/dependency.json"] = `{"name":"stripe","resource":{"ref":"stripe","name":"stripe","provider":"Stripe","contract":{"type":"graphql","path":"schema.graphql","origin":"registry"}}}`
+	files["dependencies/stripe/schema.graphql"] = "type Query { charge(id: String!): String }\n"
+	d, err := AssembleDesign(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dep := d.Components[0].Dependencies[0]
+	if dep.Contract != "schema.graphql" || dep.Style != DependencyStyleGraphQL || dep.ContractType != DependencyContractTypeGraphQL {
+		t.Fatalf("a GraphQL contract beside the definition must count: %+v", dep)
+	}
+	if status, reason := ComputeDependencyStatus(dep, RegistryHit{Registered: true}, OrgServiceHit{}); status != DependencyStatusResolved || reason != "" {
+		t.Fatalf("a registered GraphQL dependency with its schema must read resolved, got %s/%s", status, reason)
+	}
+}
+
 func TestAssembleDesign_ContractCountsOnlyWhenTheFileIsThere(t *testing.T) {
 	files := directoryDesignFiles()
 	delete(files, "dependencies/stripe/openapi.yaml")

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,10 +54,11 @@ type OCDispatchInputs struct {
 	// Runtime is the coding-agent runtime this cycle runs on. It picks the
 	// runner image and is stamped as the ComponentType's `runtime` parameter
 	// and the aep.wso2.com/runtime label. Empty means the platform default.
-	Runtime               orgconfig.AgentRuntime
-	Image                 string
-	ActiveDeadlineSeconds int
-	Env                   map[string]string
+	Runtime orgconfig.AgentRuntime
+	Image   string
+	// Env is the runner's plain env. The dispatcher adds the run's deadline
+	// (envRunDeadline) to it.
+	Env map[string]string
 	// SecretEnv is refs-only (anthropic/github/publisher/external) — values
 	// never written by the BFF.
 	SecretEnv []SecretEnvRef
@@ -139,6 +141,10 @@ type OCDispatcher struct {
 	jobTTLSeconds int
 	// resources tunes the ComponentType ensured before every dispatch.
 	resources openchoreo.CodingAgentResources
+	// deadlines bounds every cycle's wall clock: the Job's
+	// activeDeadlineSeconds, the runner's own deadline and the schema's
+	// maximum all derive from it here, so the three cannot disagree.
+	deadlines delivery.AgentDeadlines
 }
 
 // runnerImage is one runtime's runner image and the deploy setting it comes
@@ -195,6 +201,14 @@ func (d *OCDispatcher) WithJobTTL(ttl time.Duration) *OCDispatcher {
 	return d
 }
 
+// WithDeadlines sets how long each cycle kind may run
+// (CODING_AGENT_DEADLINE, CODING_AGENT_VALIDATION_DEADLINE). The zero value is
+// the platform default.
+func (d *OCDispatcher) WithDeadlines(deadlines delivery.AgentDeadlines) *OCDispatcher {
+	d.deadlines = deadlines
+	return d
+}
+
 // WithCPURequest sets the CPU request default the ComponentType carries
 // (CODING_AGENT_CPU_REQUEST); empty keeps the schema default.
 func (d *OCDispatcher) WithCPURequest(quantity string) *OCDispatcher {
@@ -219,10 +233,14 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (OCDis
 		return OCDispatchResult{}, err
 	}
 
-	if err := d.oc.EnsureComponentType(ctx, in.OrgID, openchoreo.CodingAgentComponentType(d.resources)); err != nil {
+	resources := d.resources
+	resources.DeadlineCeiling = d.deadlines.Ceiling()
+	if err := d.oc.EnsureComponentType(ctx, in.OrgID, openchoreo.CodingAgentComponentType(resources)); err != nil {
 		return OCDispatchResult{}, fmt.Errorf("oc dispatch: ensure ComponentType: %w", err)
 	}
 
+	// One number, two consumers: the cluster's kill and the run's own stop.
+	deadlineSeconds := int(d.deadlines.For(in.Kind) / time.Second)
 	image := d.resolveImage(in)
 	labels := d.markers(in)
 	desc := fmt.Sprintf("AEP internal: agent run cycle %s.", in.CycleID)
@@ -237,7 +255,7 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (OCDis
 		AutoBuild:   false,
 		AutoDeploy:  false,
 		Labels:      labels,
-		Parameters:  componentParameters(in, d.jobTTLSeconds),
+		Parameters:  componentParameters(in, deadlineSeconds, d.jobTTLSeconds),
 	}
 	component, err := d.oc.CreateComponent(ctx, in.OrgID, in.ProjectID, req)
 	if err != nil {
@@ -250,7 +268,7 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (OCDis
 	if err := d.oc.EnsureWorkload(ctx, in.OrgID, in.ProjectID, openchoreo.WorkloadInput{
 		ComponentName: in.RunName,
 		Image:         image,
-		Env:           workloadEnv(in),
+		Env:           workloadEnv(in, deadlineSeconds),
 		Labels:        labels,
 	}); err != nil {
 		return OCDispatchResult{}, fmt.Errorf("oc dispatch: workload for %q: %w", in.RunName, err)
@@ -350,12 +368,13 @@ func (d *OCDispatcher) markers(in OCDispatchInputs) map[string]string {
 
 // componentParameters are the ComponentType parameters this cycle sets. The
 // runtime is always stamped, so the rendered Job's label states the runtime
-// rather than inheriting the schema's default. The Job TTL is the dispatcher's
-// configuration, the same for every cycle.
-func componentParameters(in OCDispatchInputs, jobTTLSeconds int) map[string]any {
-	params := map[string]any{"runtime": string(runtimeOrDefault(in.Runtime))}
-	if in.ActiveDeadlineSeconds > 0 {
-		params["activeDeadlineSeconds"] = in.ActiveDeadlineSeconds
+// rather than inheriting the schema's default. The deadline is always stamped
+// too: the schema's 1h default is too short for any cycle kind. The Job TTL is
+// the dispatcher's configuration, the same for every cycle.
+func componentParameters(in OCDispatchInputs, deadlineSeconds, jobTTLSeconds int) map[string]any {
+	params := map[string]any{
+		"runtime":               string(runtimeOrDefault(in.Runtime)),
+		"activeDeadlineSeconds": deadlineSeconds,
 	}
 	if jobTTLSeconds > 0 {
 		params["ttlSecondsAfterFinished"] = jobTTLSeconds
@@ -375,11 +394,23 @@ func releaseNameFor(projectID, runName string) string {
 	return openchoreo.ScopedComponentName(projectID, runName) + "-release"
 }
 
-func workloadEnv(in OCDispatchInputs) []openchoreo.WorkflowEnvVarRef {
-	out := make([]openchoreo.WorkflowEnvVarRef, 0, len(in.Env)+len(in.SecretEnv))
+// envRunDeadline hands the run its OWN deadline, so it can end itself rather
+// than be ended. It is the same number as the Job's activeDeadlineSeconds: when
+// that one passes, the pod is killed mid-sentence and explains nothing — no
+// result line, no watchdog snapshot, and for a run with background subagents
+// no way to tell "still working" from "wedged". Handing it to the runner is
+// what buys the moment it needs to stop its tasks and say so on the feed. The
+// runner subtracts its own margin (`runDeadlineFromEnv`); the margin is not
+// this layer's to know, and duplicating it here would let the two drift apart
+// silently.
+const envRunDeadline = "AEP_RUN_DEADLINE_SECONDS"
+
+func workloadEnv(in OCDispatchInputs, deadlineSeconds int) []openchoreo.WorkflowEnvVarRef {
+	out := make([]openchoreo.WorkflowEnvVarRef, 0, len(in.Env)+len(in.SecretEnv)+1)
 	for k, v := range in.Env {
 		out = append(out, openchoreo.WorkflowEnvVarRef{Key: k, Value: v})
 	}
+	out = append(out, openchoreo.WorkflowEnvVarRef{Key: envRunDeadline, Value: strconv.Itoa(deadlineSeconds)})
 	for _, s := range in.SecretEnv {
 		name, key := s.SecretName, s.SecretKey
 		out = append(out, openchoreo.WorkflowEnvVarRef{

@@ -313,16 +313,6 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		// Unconditional, and deliberately not tied to whether a key was resolved
 		// below — see envEvalKeyManaged.
 		envEvalKeyManaged: "1",
-		// The run's OWN deadline, so it can end itself rather than be ended.
-		// The same number this dispatch puts on the Job's activeDeadlineSeconds
-		// below: when that one passes, the pod is killed mid-sentence and
-		// explains nothing — no result line, no watchdog snapshot, and for a run
-		// with background subagents no way to tell "still working" from
-		// "wedged". Handing it to the runner is what buys the moment it needs to
-		// stop its tasks and say so on the feed. The runner subtracts its own
-		// margin (`runDeadlineFromEnv`); the margin is not this layer's to know,
-		// and duplicating it here would let the two drift apart silently.
-		"AEP_RUN_DEADLINE_SECONDS": strconv.FormatInt(disp.deadline, 10),
 	}
 	env[envAgentRuntime] = string(agent.Runtime)
 	// The model connection the credential is for, and its model, copied onto
@@ -359,18 +349,17 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	env[envPublisherTokenURL] = tokenURL
 	secretEnv = append(secretEnv, pub...)
 	res, err := e.ocJobs.Dispatch(ctx, OCDispatchInputs{
-		OrgID:                 in.orgID,
-		ProjectID:             in.projectID,
-		CycleID:               in.correlationID,
-		RunID:                 in.runID,
-		MilestoneNumber:       disp.milestoneNumber,
-		MilestoneTitle:        disp.milestoneTitle,
-		Kind:                  disp.taskKind,
-		RunName:               codingAgentRunNameFor(in.projectID, in.correlationID),
-		Runtime:               agent.Runtime,
-		ActiveDeadlineSeconds: int(disp.deadline),
-		Env:                   env,
-		SecretEnv:             secretEnv,
+		OrgID:           in.orgID,
+		ProjectID:       in.projectID,
+		CycleID:         in.correlationID,
+		RunID:           in.runID,
+		MilestoneNumber: disp.milestoneNumber,
+		MilestoneTitle:  disp.milestoneTitle,
+		Kind:            disp.taskKind,
+		RunName:         codingAgentRunNameFor(in.projectID, in.correlationID),
+		Runtime:         agent.Runtime,
+		Env:             env,
+		SecretEnv:       secretEnv,
 	})
 	if err != nil {
 		return delivery.AgentLaunch{}, err
@@ -610,22 +599,6 @@ const envValidationIssue = "AEP_VALIDATION_ISSUE"
 // clone's specs/ to it (B2).
 const envSpecTag = "AEP_SPEC_TAG"
 
-// validationDeadlineSeconds bounds a validation run (2h): a browser boots once
-// and every scenario in specs/validation/acceptance/ is then driven through it
-// in sequence, which is longer than a coding run.
-const validationDeadlineSeconds int64 = 7200
-
-// codingDeadlineSeconds bounds an ordinary coding run (3h). A coding cycle no
-// longer ends at "the code compiles": on top of working the milestone's whole
-// issue set it boots what it built and drives it through a browser
-// verification wave, then heals whatever that wave finds. That does not fit in
-// an hour, and the old 1h bound did not fail the run honestly — it reaped the
-// pod mid-verification, so a cycle that was still making progress died with no
-// verdict of its own. 3h is also the ComponentType schema's maximum
-// (openchoreo.CodingAgentComponentType): a longer value here would be rejected
-// at dispatch, not silently clamped.
-const codingDeadlineSeconds int64 = 10800
-
 // taskKindOrDefault normalizes the runner's AEP_TASK_KIND: empty → the coding
 // default so existing (implementation) dispatch is unchanged.
 func taskKindOrDefault(kind string) string {
@@ -642,10 +615,6 @@ type dispatchShape struct {
 	prompt        string
 	componentName string
 	taskKind      string // "" (coding) | "validation"
-	// deadline is the cycle's activeDeadlineSeconds. Every dispatch names one
-	// (0 would fall back to the ComponentType schema's 1h default, which is too
-	// short for either kind); it must stay within the schema's maximum.
-	deadline int64
 	// The milestone the cycle works, carried for the human-facing display name
 	// on the created Component. A cycle spans a milestone's whole working set,
 	// so the milestone (and the cycle kind) is what names it — not an issue.

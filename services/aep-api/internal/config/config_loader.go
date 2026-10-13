@@ -150,6 +150,10 @@ func Load() (Config, error) {
 		ObserverLogRetention: r.readOptionalDuration("OBSERVER_LOG_RETENTION", 72*time.Hour),
 		// Finished cycle Jobs are deleted after this; see Config.CodingAgentJobTTL.
 		CodingAgentJobTTL: r.readBoundedDuration("CODING_AGENT_JOB_TTL", 600*time.Second, MaxCodingAgentJobTTL),
+		// See Config.CodingAgentDeadline. Unset is zero: the default is the
+		// delivery domain's, not this loader's.
+		CodingAgentDeadline:           r.readOptionalDeadline("CODING_AGENT_DEADLINE", MaxCodingAgentDeadline),
+		CodingAgentValidationDeadline: r.readOptionalDeadline("CODING_AGENT_VALIDATION_DEADLINE", MaxCodingAgentDeadline),
 		// See Config.CodingAgentCPURequest.
 		CodingAgentCPURequest: r.readOptionalCPU("CODING_AGENT_CPU_REQUEST", "500m", CodingAgentCPUCeilingMillicores),
 	}
@@ -426,6 +430,19 @@ func (r *configReader) readBoundedDuration(key string, defaultVal, max time.Dura
 	if d > max {
 		r.errors = append(r.errors, fmt.Errorf("%s: above the maximum of %s", key, max))
 		return defaultVal
+	}
+	return d
+}
+
+// readOptionalDeadline returns the env's duration, zero when unset. A value
+// that does not parse, is not positive, or exceeds max records an error naming
+// the key only.
+func (r *configReader) readOptionalDeadline(key string, max time.Duration) time.Duration {
+	failed := len(r.errors)
+	d := r.readBoundedDuration(key, 0, max)
+	if len(r.errors) == failed && (d < 0 || (d == 0 && os.Getenv(key) != "")) {
+		r.errors = append(r.errors, fmt.Errorf("%s: must be a positive duration", key))
+		return 0
 	}
 	return d
 }

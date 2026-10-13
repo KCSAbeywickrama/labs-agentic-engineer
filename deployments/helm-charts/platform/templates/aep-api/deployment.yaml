@@ -171,6 +171,16 @@ spec:
             - name: CODING_AGENT_CPU_REQUEST
               value: {{ .Values.codingAgentRunner.cpuRequest | quote }}
             {{- end }}
+            {{- if .Values.codingAgentRunner.deadline }}
+            # How long a coding cycle may run (Go duration).
+            - name: CODING_AGENT_DEADLINE
+              value: {{ .Values.codingAgentRunner.deadline | quote }}
+            {{- end }}
+            {{- if .Values.codingAgentRunner.validationDeadline }}
+            # How long a validation cycle may run (Go duration).
+            - name: CODING_AGENT_VALIDATION_DEADLINE
+              value: {{ .Values.codingAgentRunner.validationDeadline | quote }}
+            {{- end }}
             {{- $ae := default dict .Values.aeStudio }}
             # AE Studio (all optional at boot; see values.yaml aeStudio).
             - name: AE_STUDIO_INTERNAL_CLIENT_ID

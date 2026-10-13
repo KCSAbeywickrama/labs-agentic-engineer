@@ -271,3 +271,43 @@ func TestLoad_CodingAgentCPURequest(t *testing.T) {
 		}
 	}
 }
+
+// CODING_AGENT_DEADLINE and CODING_AGENT_VALIDATION_DEADLINE are unset by
+// default (zero: the delivery domain's defaults apply), take a Go duration, and
+// refuse anything non-positive or past MaxCodingAgentDeadline naming the key.
+func TestLoad_CodingAgentDeadlines(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("CODING_AGENT_DEADLINE", "")
+	t.Setenv("CODING_AGENT_VALIDATION_DEADLINE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CodingAgentDeadline != 0 || cfg.CodingAgentValidationDeadline != 0 {
+		t.Fatalf("unset deadlines = %v / %v, want zero", cfg.CodingAgentDeadline, cfg.CodingAgentValidationDeadline)
+	}
+
+	t.Setenv("CODING_AGENT_DEADLINE", "5h")
+	t.Setenv("CODING_AGENT_VALIDATION_DEADLINE", "150m")
+	if cfg, err = Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CodingAgentDeadline != 5*time.Hour || cfg.CodingAgentValidationDeadline != 150*time.Minute {
+		t.Fatalf("deadlines = %v / %v, want 5h / 2h30m", cfg.CodingAgentDeadline, cfg.CodingAgentValidationDeadline)
+	}
+
+	for _, key := range []string{"CODING_AGENT_DEADLINE", "CODING_AGENT_VALIDATION_DEADLINE"} {
+		for _, bad := range []string{"0", "-1h", "13h", "five hours"} {
+			t.Setenv("CODING_AGENT_DEADLINE", "")
+			t.Setenv("CODING_AGENT_VALIDATION_DEADLINE", "")
+			t.Setenv(key, bad)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("%s=%q: Load succeeded", key, bad)
+			}
+			if !strings.Contains(err.Error(), key) || strings.Count(err.Error(), key) != 1 {
+				t.Fatalf("%s=%q: error must name the key once, got %v", key, bad, err)
+			}
+		}
+	}
+}

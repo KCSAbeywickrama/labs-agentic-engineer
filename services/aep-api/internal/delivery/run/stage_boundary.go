@@ -116,8 +116,8 @@ const (
 
 	// deployReadyTimeout bounds the wait for a cycle's components to serve.
 	//
-	// The loop's second real deadline, and the only other one besides
-	// cycleLandingTimeout. It exists because a ReleaseBinding never terminates:
+	// The loop's second real deadline, and the only other one besides the
+	// cycle landing timeout. It exists because a ReleaseBinding never terminates:
 	// a build always finishes, so awaitBuilds can wait forever safely, but an
 	// image that will never pull and a rollout thirty seconds from Ready are
 	// indistinguishable from outside. Generous enough to cover a cold image pull
@@ -125,12 +125,10 @@ const (
 	// fix issue inside one coffee break rather than hanging the version.
 	deployReadyTimeout = 15 * time.Minute
 
-	// cycleLandingTimeout is how long ONE dispatch has to land a merged pull
-	// request before the supervisor calls it agent death and spends a
-	// re-dispatch. It is the only deadline in the loop, and it exists because
-	// "the agent died" (including a Job that exited without opening a pull
-	// request) is a named failure class with a named budget.
-	cycleLandingTimeout = 2 * time.Hour
+	// legacyCycleLandingTimeout is the landing timeout of a run started before
+	// RunInput.LandingTimeout existed: Temporal replays it with the zero value,
+	// and it must keep the timer it was started with.
+	legacyCycleLandingTimeout = 2 * time.Hour
 )
 
 // RunInput starts a supervisor over one milestone. Everything in it is already
@@ -157,6 +155,15 @@ type RunInput struct {
 	Kind         string `json:"kind,omitempty"`
 	Origin       string `json:"origin"`
 	CycleCeiling int    `json:"cycleCeiling,omitempty"`
+	// LandingTimeout is how long ONE dispatch has to land a merged pull request
+	// before the loop calls it agent death and spends a re-dispatch: "the agent
+	// died" (including a Job that exited without opening a pull request) is a
+	// named failure class with a named budget. It is
+	// delivery.AgentDeadlines.LandingTimeout, so it outlives every Job the run
+	// can launch, snapshotted at start like the budgets so a config change
+	// cannot retroactively re-time a live run. Zero is
+	// legacyCycleLandingTimeout.
+	LandingTimeout time.Duration `json:"landingTimeout,omitempty"`
 	// ValidationAttempts pins how many times this VERSION may be judged. Zero
 	// means the platform default, and it MUST: a workflow input lives in Temporal
 	// history, so an execution started before this field existed replays with the
@@ -280,6 +287,8 @@ type loop struct {
 	// is spent by the first fatal verdict, which settles the run before the loop
 	// reaches the repair mint.
 	maxValidationAttempts int
+	// landingTimeout is the input's LandingTimeout, resolved once at start.
+	landingTimeout time.Duration
 	// lastReportDigest fingerprints the PREVIOUS attempt's report, read off its
 	// cycle row. A repeat whose report digests the same learned nothing, so the
 	// chain stops instead of spending the rest of the allowance on the same
@@ -324,9 +333,14 @@ func newLoop(ctx workflow.Context, in RunInput) *loop {
 	if attempts <= 0 {
 		attempts = delivery.RunMaxValidationAttempts
 	}
+	landing := in.LandingTimeout
+	if landing <= 0 {
+		landing = legacyCycleLandingTimeout
+	}
 	return &loop{
 		in:                    in,
 		maxValidationAttempts: attempts,
+		landingTimeout:        landing,
 		cancel:                workflow.GetSignalChannel(ctx, delivery.SigRunCancel),
 		workable:              workflow.GetSignalChannel(ctx, delivery.SigRunWorkable),
 		noWork:                workflow.GetSignalChannel(ctx, delivery.SigRunNoWork),

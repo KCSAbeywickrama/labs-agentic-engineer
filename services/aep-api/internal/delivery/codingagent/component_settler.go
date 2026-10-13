@@ -44,7 +44,7 @@ package codingagent
 // The BACKSTOP suspends a closed cycle whose Job nobody suspended. A cycle can
 // close on the merge webhook before its pod exits, so a MERGE-closed cycle's
 // Running or Pending pod is left to the watcher (which suspends at terminal,
-// after the usage line) until backstopCeiling past the close, and "no pod"
+// after the usage line) until backstopHold past the close, and "no pod"
 // counts only once an earlier pass noted it too: one empty tree read must not
 // kill a Running pod. A terminal pod is suspended on sight. Every other close
 // is suspended at once whatever its pod is doing: a cancel (its cancel-time
@@ -73,11 +73,9 @@ const (
 	// defaultSettleGrace is the minimum distance between the two "no pod" reads
 	// (CODING_AGENT_SETTLE_GRACE).
 	defaultSettleGrace = 5 * time.Minute
-	// backstopCeiling is how long after a merge-closed cycle the backstop leaves
-	// a Running or Pending pod alone (it may still be writing its usage line;
-	// no other close is held): the schema's deadline ceiling, past which
-	// Kubernetes has killed the pod anyway, plus a margin.
-	backstopCeiling = time.Duration(openchoreo.CodingAgentDeadlineCeilingSeconds)*time.Second + 10*time.Minute
+	// backstopMargin is how far past the deadline ceiling the backstop's hold
+	// reaches (see ComponentSettler.backstopHold).
+	backstopMargin = 10 * time.Minute
 )
 
 // settleStore is the cycle state the settler reads and writes.
@@ -110,7 +108,9 @@ type ComponentSettler struct {
 	asService func(ctx context.Context) context.Context
 
 	grace time.Duration
-	now   func() time.Time
+	// deadlines bounds how long any cycle's pod can run; see backstopHold.
+	deadlines delivery.AgentDeadlines
+	now       func() time.Time
 
 	// unsupported records the cycles whose release cannot render suspend, learnt
 	// from the first ErrSuspendUnsupported. A closed cycle's release never
@@ -159,6 +159,21 @@ func (s *ComponentSettler) WithGrace(d time.Duration) *ComponentSettler {
 		s.grace = d
 	}
 	return s
+}
+
+// WithDeadlines sets the cycle deadlines the backstop's hold is derived from.
+// The zero value is the platform default. Returns the receiver.
+func (s *ComponentSettler) WithDeadlines(d delivery.AgentDeadlines) *ComponentSettler {
+	s.deadlines = d
+	return s
+}
+
+// backstopHold is how long after a merge-closed cycle the backstop leaves a
+// Running or Pending pod alone (it may still be writing its usage line; no
+// other close is held): the deadline ceiling, past which Kubernetes has killed
+// the pod anyway, plus a margin.
+func (s *ComponentSettler) backstopHold() time.Duration {
+	return s.deadlines.Ceiling() + backstopMargin
 }
 
 // WithClock replaces the clock (tests). Returns the receiver.
@@ -314,7 +329,7 @@ func (s *ComponentSettler) jobHeld(ctx context.Context, cycle *delivery.RunCycle
 	if cycle.JobSuspendedAt != nil || s.unsupported[cycle.ID] {
 		return true
 	}
-	if !backstopDue(cycle, pod, now) {
+	if !backstopDue(cycle, pod, now, s.backstopHold()) {
 		return false
 	}
 	err := s.jobs.SuspendJobBinding(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, cycle.Environment)
@@ -359,11 +374,11 @@ func (s *ComponentSettler) jobHeld(ctx context.Context, cycle *delivery.RunCycle
 // (pod_gone_at), because one empty tree read can hide a Running pod; a
 // Running or Pending pod at once unless the cycle MERGED. Only a merge-closed
 // cycle's agent may still be writing a result line worth keeping, so only its
-// live pod is held, until backstopCeiling past the close. Any other close (a
+// live pod is held, until hold past the close. Any other close (a
 // spent budget, a conflict, no work, a landing timeout: Finish with no merge
 // SHA) has nothing to wait for, and its Pending pod would start an agent on
 // the closed cycle once the cluster has room.
-func backstopDue(cycle *delivery.RunCycle, pod openchoreo.RuntimePod, now time.Time) bool {
+func backstopDue(cycle *delivery.RunCycle, pod openchoreo.RuntimePod, now time.Time, hold time.Duration) bool {
 	if cycle.AgentReason == delivery.CycleReasonCancelled || delivery.IsStartupFailure(cycle.AgentReason) {
 		return true
 	}
@@ -377,7 +392,7 @@ func backstopDue(cycle *delivery.RunCycle, pod openchoreo.RuntimePod, now time.T
 	if cycle.MergeSHA == "" {
 		return true
 	}
-	return cycle.EndedAt != nil && now.Sub(*cycle.EndedAt) > backstopCeiling
+	return cycle.EndedAt != nil && now.Sub(*cycle.EndedAt) > hold
 }
 
 // markDeleted records the Component as deleted and forgets the cycle's
