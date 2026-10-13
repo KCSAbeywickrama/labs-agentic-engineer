@@ -70,6 +70,8 @@ export type ItemBody =
   /** A component's design.json, or a service's with its contract. */
   | { kind: "contract"; source: Source<"contract"> }
   | { kind: "prototype"; component: string }
+  /** An ai-agent's agent.afm.md, as written. */
+  | { kind: "agent"; afm: string }
   /** An external dependency: what it is, then its assumptions. */
   | { kind: "dependency"; name: string; markdown: string }
   | { kind: "acceptance"; path: string; content: string };
@@ -207,7 +209,18 @@ export function designItems(files: Readonly<Record<string, string>>): DesignItem
         }),
       );
     } else if (agent !== undefined) {
-      out.push(documentItem(`agent-${c.name}`, `${dir}agent.afm.md`, "Agent", agent, "business", { title: `${c.name} › Agent`, nested: true }));
+      out.push(
+        item({
+          key: `agent-${c.name}`,
+          path: `${dir}agent.afm.md`,
+          label: "Agent",
+          title: `${c.name} › Agent`,
+          nested: true,
+          list: "business",
+          hashOf: { text: agent },
+          body: { kind: "agent", afm: agent },
+        }),
+      );
     }
   }
 
@@ -263,7 +276,7 @@ export function designItems(files: Readonly<Record<string, string>>): DesignItem
 /** Each Overview review list, in its own order: the business one (prototypes, agents, then roles), the technical one (as generated). */
 export function reviewLists(items: readonly DesignItem[]): Record<ReviewList, DesignItem[]> {
   const business = items.filter((i) => i.list === "business");
-  const rank = (i: DesignItem) => (i.body.kind === "prototype" ? 0 : i.key.startsWith("agent-") ? 1 : 2);
+  const rank = (i: DesignItem) => (i.body.kind === "prototype" ? 0 : i.body.kind === "agent" ? 1 : 2);
   return {
     business: [...business].sort((a, b) => rank(a) - rank(b)),
     technical: items.filter((i) => i.list === "technical"),

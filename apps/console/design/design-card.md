@@ -19,7 +19,7 @@ order Design makes them, an item showing only once its file exists:
     <component>                  components/<c>/design.json  (DesignView)
       › Prototype                prototype.json + .tsx       (a web application)
       › Contract                 openapi.yaml                (DesignView + OpenApiView, a service)
-      › Agent                    agent.afm.md                (DocumentView, an ai-agent)
+      › Agent                    agent.afm.md                (AgentView's tabs, an ai-agent)
     Dependencies › <name>        dependencies/<n>/dependency.json (+ assumptions.md), then
                                  what blocks a build (`dep-F3`, DependencyView)
     Flows › <title>              flows/<slug>.md             (DocumentView)
