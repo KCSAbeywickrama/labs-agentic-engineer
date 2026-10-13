@@ -507,7 +507,9 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 // things, in this order:
 //
 //  1. Nothing was ever dispatched by a run that FILLED this milestone — planning
-//     produced no work, so the version is delivered without ever being judged.
+//     produced no work, so the version is delivered without ever being judged,
+//     provided it reads serving (refuseUnlessServing); otherwise it fails
+//     `version-incomplete`.
 //  2. Nothing was ever dispatched by a run that adopted somebody else's
 //     milestone — the emptiness is not evidence, so park.
 //  3. The last cycle ended badly and NOTHING came back to recover it. The
@@ -548,7 +550,11 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context, ends bookends) (settled b
 			}
 			return false, RunResult{}, nil
 		}
-		// Planning landed and produced nothing to work. Delivered, and unjudged.
+		// Planning landed and produced nothing to work. Delivered, and unjudged —
+		// once the version is read serving: closed Tasks are not built software.
+		if settled, res, err := l.refuseUnlessServing(ctx); settled {
+			return true, res, err
+		}
 		if verr := l.setVerdict(ctx, noCycle, ValidationOutcome{Verdict: delivery.ValidationVerdictSkipped}); verr != nil {
 			return true, l.result(), verr
 		}

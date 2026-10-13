@@ -3105,6 +3105,32 @@ func TestPlanningPhase_EmptyPlanSettlesDelivered(t *testing.T) {
 		"a version nothing will ever judge — no task was filed — has nothing left to wait for")
 }
 
+// An empty milestone is "delivered" only when the version is SERVING.
+//
+// Live on 2026-10-13: the agent's pull request merged while the platform's
+// webhook was not reaching it, so no cycle ever recorded the merge and no build
+// fanned out. The person cancelled and rebuilt. The merge had already closed
+// every Task ("Resolves #18"), so the cancel closed nothing, the rebuild
+// reopened nothing, and the run read an empty working set with no cycle behind
+// it — and settled `succeeded` over two components that had never been built.
+// The zero-cycle ending asks serving(V) exactly as the after-cycle one does.
+func TestPlanningPhase_EmptyMilestoneOverAnUnbuiltVersionIsNotDelivered(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{}) // every Task already closed
+	h.versionIs(
+		delivery.ComponentState{Component: "motor-claims-api", State: delivery.ComponentStateUnbuilt},
+		delivery.ComponentState{Component: "motor-claims-webapp", State: delivery.ComponentStateUnbuilt},
+	)
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v4", Rebuild: true})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonVersionIncomplete)
+	require.Equal(t, 0, h.dispatchCount())
+	require.Empty(t, res.ValidationVerdict, "an undelivered version is not `skipped`: nothing was delivered to judge")
+	require.Equal(t, 0, h.closed, "the milestone stays open: the version still owes its components")
+}
+
 // dedupeStates collapses repeated run-state writes so a test can assert the
 // oscillation rather than the write count.
 func dedupeStates(states []string) []string {

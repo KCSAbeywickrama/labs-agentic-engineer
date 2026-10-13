@@ -500,7 +500,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   writes, which is what lets the pass run every cycle.
 - **A version is delivered when it is SERVING, asserted rather than inferred.** The boundary re-reads
   the version state and requires every design component `serving` before it mints the validation task;
-  anything else settles `version-incomplete` naming what was not. "Deployed-green" used to be inferred
+  anything else settles `version-incomplete` naming what was not. A dev run that dispatched nothing
+  asks the same question before it settles `succeeded`/`skipped`: Tasks closed by a merge the platform
+  never saw leave an empty milestone over components nothing built. "Deployed-green" used to be inferred
   from an empty working set plus a green last cycle — neither of which is a statement about a component
   the cycles never touched. By the loop's own invariants the failure should be unreachable, which is
   exactly why it must be loud rather than silent.
