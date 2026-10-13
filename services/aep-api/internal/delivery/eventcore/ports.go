@@ -154,17 +154,28 @@ type RepoRef struct {
 	OrgID     string
 	ProjectID string
 	FullName  string // "owner/name"
-	// HasHook is false for a project repository whose row holds no hook id:
-	// the rows the sweep's hook repair ensures a hook for. Platform repos
-	// (skills, resource docs) carry no hook by design and read true.
+	// HookExempt marks a platform repository (skills, resource docs): it
+	// carries no hook by design, so the hook repair never touches it.
+	HookExempt bool
+	// HasHook is true when the row holds a hook id; a project row without
+	// one is what the hook repair ensures a hook for.
 	HasHook bool
+	// HookRev is the config rev the stored hook was last ensured at (""
+	// when the row predates revs): the hook repair re-ensures the hook when
+	// it is not the org's current one.
+	HookRev string
 }
 
-// HookEnsurer installs a project repository's hook through the org's AE
-// Studio pod and persists its id (idempotent: an existing hook to the pod's
-// URL is answered as is). sourcecontrol.WebhookService satisfies it.
+// HookEnsurer ensures a project repository's hook through the org's AE
+// Studio pod and persists its id and config rev; sourcecontrol.WebhookService
+// satisfies it.
 type HookEnsurer interface {
+	// Register ensures the project's hook carries the pod's current config
+	// (its stored hook reconfigured in place, re-created when GitHub lost it).
 	Register(ctx context.Context, orgID, projectID string) (*int64, error)
+	// HookRev answers the config rev a hook of the org ensured now is stored
+	// at. No GitHub call.
+	HookRev(ctx context.Context, orgID string) (string, error)
 }
 
 // ComponentResources is what the wiring-conformance check compares against: a

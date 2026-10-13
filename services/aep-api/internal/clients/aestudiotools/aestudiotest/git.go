@@ -109,6 +109,8 @@ type repoState struct {
 	milestones []*sourcecontrol.Milestone
 	labels     map[string]string
 	hooks      map[int64][]string
+	// hookRevs is each pod-ensured hook's config rev.
+	hookRevs map[int64]string
 	// podHook is the id of the hook delivering to the pod's own URL (0: none);
 	// every other hook belongs to another integration.
 	podHook int64
@@ -116,12 +118,13 @@ type repoState struct {
 
 func newRepoState() *repoState {
 	return &repoState{
-		commits: map[string]*commit{},
-		tags:    map[string]sourcecontrol.TagInfo{},
-		issues:  map[int]*issue{},
-		pulls:   map[int]*pull{},
-		labels:  map[string]string{},
-		hooks:   map[int64][]string{},
+		commits:  map[string]*commit{},
+		tags:     map[string]sourcecontrol.TagInfo{},
+		issues:   map[int]*issue{},
+		pulls:    map[int]*pull{},
+		labels:   map[string]string{},
+		hooks:    map[int64][]string{},
+		hookRevs: map[int64]string{},
 	}
 }
 

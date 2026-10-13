@@ -234,7 +234,9 @@ func (l eventcoreRepoLister) ListAll(ctx context.Context) ([]eventcore.RepoRef, 
 		}
 		out = append(out, eventcore.RepoRef{
 			OrgID: rows[i].OrgID, ProjectID: rows[i].ProjectID, FullName: owner + "/" + name,
-			HasHook: rows[i].WebhookID != nil || sourcecontrol.IsPlatformRepo(rows[i].ProjectID),
+			HookExempt: sourcecontrol.IsPlatformRepo(rows[i].ProjectID),
+			HasHook:    rows[i].WebhookID != nil,
+			HookRev:    rows[i].WebhookConfigRev,
 		})
 	}
 	return out, nil
@@ -242,29 +244,43 @@ func (l eventcoreRepoLister) ListAll(ctx context.Context) ([]eventcore.RepoRef, 
 
 // activeOrgHooks is the sweep's hook repair gated on the org's GitHub
 // connection: an org whose credential is missing or not active gets no hook
-// (ErrAEStudioAbsent, so the sweep passes the org by this tick), whatever
-// its pod's state, so a disconnect is never undone by the repair.
+// and no rev read (ErrAEStudioAbsent, so the sweep passes the org by this
+// tick), whatever its pod's state, so a disconnect is never undone by the
+// repair.
 type activeOrgHooks struct {
-	hooks interface {
-		Register(ctx context.Context, orgID, projectID string) (*int64, error)
-	}
+	hooks eventcore.HookEnsurer
 	creds interface {
 		Status(ctx context.Context, ocOrgID string) (*organization.Projection, error)
 	}
 }
 
 func (a activeOrgHooks) Register(ctx context.Context, orgID, projectID string) (*int64, error) {
+	if err := a.connected(ctx, orgID); err != nil {
+		return nil, err
+	}
+	return a.hooks.Register(ctx, orgID, projectID)
+}
+
+func (a activeOrgHooks) HookRev(ctx context.Context, orgID string) (string, error) {
+	if err := a.connected(ctx, orgID); err != nil {
+		return "", err
+	}
+	return a.hooks.HookRev(ctx, orgID)
+}
+
+// connected answers nil when the org's GitHub credential is active.
+func (a activeOrgHooks) connected(ctx context.Context, orgID string) error {
 	p, err := a.creds.Status(ctx, orgID)
 	var nf *organization.NotFoundError
 	switch {
 	case errors.As(err, &nf):
-		return nil, sourcecontrol.ErrAEStudioAbsent
+		return sourcecontrol.ErrAEStudioAbsent
 	case err != nil:
-		return nil, fmt.Errorf("%w: read the GitHub connection: %w", sourcecontrol.ErrAEStudioUnavailable, err)
+		return fmt.Errorf("%w: read the GitHub connection: %w", sourcecontrol.ErrAEStudioUnavailable, err)
 	case p.Status != organization.CredentialStatusActive:
-		return nil, sourcecontrol.ErrAEStudioAbsent
+		return sourcecontrol.ErrAEStudioAbsent
 	}
-	return a.hooks.Register(ctx, orgID, projectID)
+	return nil
 }
 
 // projectLister projects the same repository onto the deployment converge

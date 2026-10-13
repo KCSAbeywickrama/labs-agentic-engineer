@@ -109,21 +109,23 @@ func (h Handler) CreateRepo(ctx context.Context, req gen.CreateRepoRequestObject
 }
 
 // RegisterHook ensures the studio's hook on the repository with these
-// events: GitHub creates it, or, when a hook for the pod's URL exists, its
-// whole config (URL, content type, TLS check and this pod's signing secret)
-// and its events are replaced, so a hook left signed with an older secret
-// is re-keyed. A failed replace fails the call (aep-api's retry ensures
-// again).
+// events (Client.EnsureWebhook): the stored hook the request names is
+// reconfigured in place, else one is created or the hook for the pod's URL
+// reconfigured, so a hook left on an older URL or signed with an older
+// secret is re-pointed and re-keyed. A failed reconfigure fails the call
+// (aep-api's retry ensures again). The answer carries the pod's config rev.
 func (h Handler) RegisterHook(ctx context.Context, req gen.RegisterHookRequestObject) (gen.RegisterHookResponseObject, error) {
-	events := hookEvents(req.Body.Events)
-	id, existed, err := h.gh.RegisterWebhook(ctx, req.Owner, req.Repo, events)
-	if err == nil && existed {
-		err = h.gh.ReconfigureWebhook(ctx, req.Owner, req.Repo, id, events)
-	}
+	id, err := h.gh.EnsureWebhook(ctx, req.Owner, req.Repo, req.Body.HookID, hookEvents(req.Body.Events))
 	if err != nil {
 		return h.problem(ctx, "register-hook", req.Owner, req.Repo, err)
 	}
-	return gen.RegisterHook200JSONResponse{ID: id}, nil
+	return gen.RegisterHook200JSONResponse{ID: id, ConfigRev: h.gh.HookConfigRev()}, nil
+}
+
+// GetHookConfig answers the rev of the config every hook this pod ensures
+// carries. No GitHub call.
+func (h Handler) GetHookConfig(context.Context, gen.GetHookConfigRequestObject) (gen.GetHookConfigResponseObject, error) {
+	return gen.GetHookConfig200JSONResponse{ConfigRev: h.gh.HookConfigRev()}, nil
 }
 
 // hookEvents is the contract's event enum as GitHub's event names.

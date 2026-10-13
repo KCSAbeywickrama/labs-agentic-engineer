@@ -72,7 +72,7 @@ func (conflictRepoSvc) EnsureBareRepo(context.Context, string, string, string) (
 func (conflictRepoSvc) GetRepo(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("GetRepo not expected")
 }
-func (conflictRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
+func (conflictRepoSvc) SetWebhookID(context.Context, string, string, int64, string) error {
 	panic("SetWebhookID not expected")
 }
 func (conflictRepoSvc) BeginDelete(context.Context, string, string) error { return nil }

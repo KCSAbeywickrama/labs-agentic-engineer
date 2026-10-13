@@ -364,9 +364,13 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `AbandonRun` (project delete) therefore terminates ALL THREE ids: the rows are purged in the same
   teardown, so there is nothing left to ask which ever existed, and a kind missed leaves a supervisor
   retrying forever against a repository that is gone.
-- **The reconcile sweep repairs missing repo hooks first** (`sweep_hooks.go`, `WithHookEnsurer`): each
-  pass ensures a hook for every ready project row with no hook id (a create-time registration that
-  failed). An org whose AE Studio is absent or not serving waits for the next pass; any other
+- **The reconcile sweep repairs missing and stale repo hooks first** (`sweep_hooks.go`,
+  `WithHookEnsurer`): each pass ensures a hook for every ready project row with no hook id (a
+  create-time registration that failed), and re-ensures every stored hook whose row's
+  `webhook_config_rev` is not the org's current one (one `get-hook-config` pod call per org per pass,
+  no GitHub call; the rev names the pod's delivery URL and webhook secret, so a moved relay channel, a
+  new secret or a row from before revs re-syncs the hook in place: `reason` `missing` or `stale` on
+  `eventcore.hook_repaired`). Platform repos are exempt. An org whose AE Studio is absent or not serving waits for the next pass; any other
   permanent refusal (repository gone, owner refused) skips that row for the life of the process with one
   value-free `eventcore.hook_repair_skipped {org, project, reason}`; a transient failure retries next
   pass (logged as a code and GitHub status, never the error text). A row skipped for good is forgotten

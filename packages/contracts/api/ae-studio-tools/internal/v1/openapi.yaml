@@ -1429,8 +1429,16 @@ paths:
       summary: Ensure the studio's webhook on the repository
       description: |-
         The hook delivers to the studio's webhook URL, signed with its secret
-        (both the pod's, never the request's). When GitHub already holds a hook
-        for that URL, its events are replaced by these: one call is an ensure.
+        (both the pod's, never the request's). One call is an ensure, and it
+        always leaves the hook carrying the pod's whole config (URL, content
+        type, secret) with these events, active:
+        - hookId set (the hook the caller stored): that hook is reconfigured
+          in place, whatever URL it had; GitHub no longer holding it (404)
+          falls through to the create below.
+        - otherwise a hook is created, or, when GitHub already holds one for
+          the pod's URL, that hook is reconfigured.
+        The answer carries the hook's id (a new one after a re-create) and
+        the pod's configRev.
       tags:
       - Hooks
       parameters:
@@ -1460,6 +1468,33 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '502':
           $ref: '#/components/responses/GitHubAPIError'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /hooks/config:
+    get:
+      operationId: get-hook-config
+      summary: The revision of the hook config this studio installs
+      description: |-
+        configRev names the delivery URL and signing secret every hook
+        register-hook installs carries, without revealing either. It changes
+        when either changes (a moved relay channel, a new webhook secret), so
+        a caller that stored the configRev a hook was ensured with knows that
+        hook is stale without reading it from GitHub. No GitHub call.
+      tags:
+      - Hooks
+      parameters:
+      - $ref: '#/components/parameters/ImpersonateOrg'
+      responses:
+        '200':
+          description: The current config revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookConfig'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
   /repos/{owner}/{repo}/hooks/{hookId}:
@@ -2671,14 +2706,35 @@ components:
             - push
             - issue_comment
             - issues
+        hookId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The hook the caller stored for this repository, to be
+            reconfigured in place (re-created when GitHub no longer has it).
     Hook:
       type: object
       required:
       - id
+      - configRev
       properties:
         id:
           type: integer
           format: int64
+        configRev:
+          $ref: '#/components/schemas/HookConfigRev'
+    HookConfig:
+      type: object
+      required:
+      - configRev
+      properties:
+        configRev:
+          $ref: '#/components/schemas/HookConfigRev'
+    HookConfigRev:
+      type: string
+      description: 16 hex characters of HMAC-SHA256 keyed by the webhook
+        secret over the delivery URL; neither can be recovered from it.
+      pattern: '^[0-9a-f]{16}$'
     SkillsMirrorRequest:
       type: object
       additionalProperties: false

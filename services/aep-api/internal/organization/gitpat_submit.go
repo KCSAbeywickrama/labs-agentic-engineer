@@ -75,8 +75,37 @@ func (s *Service) submitGitPAT(ctx context.Context, org, pat string) error {
 		slog.ErrorContext(ctx, "ae_studio_not_configured", "org", org, "reason", "no AE Studio converger")
 		return nil
 	}
+	s.resyncRepoHooks(ctx, org)
 	s.converger.Trigger(ctx, org)
 	return nil
+}
+
+// RepoHookResyncer asks for every repo hook of an org to be re-ensured with
+// its AE Studio's current config (delivery URL, webhook secret);
+// sourcecontrol.WebhookService satisfies it.
+type RepoHookResyncer interface {
+	ResyncOrg(ctx context.Context, org string) error
+}
+
+// WithRepoHookResync wires the submit's hook re-sync. Nil skips it.
+func (s *Service) WithRepoHookResync(r RepoHookResyncer) *Service {
+	s.hookResync = r
+	return s
+}
+
+// resyncRepoHooks marks the org's repo hooks for re-sync: a (re)connect is
+// the user's lever when deliveries fail, so every stored hook is re-ensured
+// by the sweep's hook repair, in place, with the pod's config, even one
+// whose stored rev says it is current (a hook edited by hand). Best effort:
+// the connection is saved either way, and a hook whose pod config really
+// moved is re-synced by the repair regardless.
+func (s *Service) resyncRepoHooks(ctx context.Context, org string) {
+	if s.hookResync == nil {
+		return
+	}
+	if err := s.hookResync.ResyncOrg(ctx, org); err != nil {
+		slog.WarnContext(ctx, "ae_studio.hook_resync_failed", "org", org, "error", err)
+	}
 }
 
 // ensureWebhookSecret generates the org's GitHub webhook secret (32 random

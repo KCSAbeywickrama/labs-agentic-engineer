@@ -60,6 +60,12 @@ type GitRepository struct {
 	// Populated at repo provision. Used to deregister on repo cleanup or
 	// re-register on rotation.
 	WebhookID *int64 `json:"webhookId,omitempty"`
+	// WebhookConfigRev is the config rev (the org pod's delivery URL and
+	// signing secret, and the subscribed events) the hook was last ensured
+	// at; "" before it was first recorded, or when a reconnect asked for a
+	// re-sync. The sweep's hook repair re-ensures a hook whose rev is not
+	// the org's current one.
+	WebhookConfigRev string `gorm:"column:webhook_config_rev;not null;default:''" json:"-"`
 	// OcSecretRefName is unused on new rows: a build references the org's
 	// github-pat SecretReference (BuildCredentialsService), not a per-repo
 	// one. Retained for the JSON contract and as a column on older rows.

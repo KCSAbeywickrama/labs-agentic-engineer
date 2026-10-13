@@ -157,10 +157,9 @@ silence the warning. With the relay on, `aectl platform update` (and
 `aectl platform install --reuse-secrets`) also creates the relay seed `aep/webhook-relay-seed` in OpenBao when it is missing (create-only:
 an existing seed is never rewritten, and the value is never printed); every
 org's channel URL is derived from it. GitHub hooks of projects created before
-the upgrade keep the URL they were created with, which no longer receives
-anything (no hook is migrated): re-create such a project, or disconnect and
-reconnect the org's GitHub in Settings, which forgets the org's hook ids so the
-sweep's hook repair installs every project's hook on the relay URL.
+the upgrade are re-pointed by aep-api's hook repair once the org's `ae-studio`
+pod runs on the relay (see
+[Runs wait for a merged PR](#runs-wait-for-a-merged-pr-webhooks-401-or-go-nowhere)).
 
 **The Jev key (issue classification).** The platform holds one Jev (TypeSafe)
 key. aep-api alone reads it, and classifies reports (bug, feature, improvement)
@@ -413,6 +412,41 @@ probe keeps it Ready, so aep-api logs `run: worker start failed, re-dialing
 ./tools/aectl/aectl-skaffold platform sync-clients   # ESO sync, Postgres role (+ its clients), Thunder clients
 ```
 
+### Runs wait for a merged PR (webhooks 401 or go nowhere)
+
+A repository hook GitHub holds carries a delivery URL and a signing secret
+from the time it was last ensured. When the org's relay channel moves (a new
+relay seed, a rotated `CREDENTIAL_ENCRYPTION_KEY` under a derived key) or its
+webhook secret changes (an OpenBao wipe and the GitHub token re-entered), the
+hook posts to a channel nobody reads, or `ae-studio-tools` answers 401
+`signature_invalid` at `/webhooks/github` (`webhook.rejected` in its log).
+Either way `aep-api` hears nothing: a coding cycle's PR merges on GitHub while
+the run keeps waiting for it, and new issues are only picked up by the sweep.
+
+`aep-api` heals it without help. Each repository row stores the config rev its
+hook was ensured at (`git_repositories.webhook_config_rev`: the pod's URL and
+secret as an HMAC, plus the subscribed events). The reconcile sweep (every
+60 s) asks each org's pod for its current rev (`get-hook-config`, no GitHub
+call) and re-ensures every hook whose rev differs, PATCHing the stored hook in
+place with the pod's URL, secret, content type, events and `active`, or
+creating it again when GitHub no longer has it (log
+`eventcore.hook_repaired {reason: stale}`). Saving the GitHub token in
+Settings (a reconnect) clears the org's revs, so every hook is re-ensured on
+the next pass even when nothing changed on the platform's side (a hook edited
+by hand).
+
+To check a repository by hand, compare the hook with the relay container's
+channel (no secret is printed):
+
+```bash
+gh api repos/<owner>/<repo>/hooks --jq '.[] | {id, url: .config.url, active}'
+kubectl -n <org dataplane ns> get deploy -o json | jq -r '[.items[].spec.template.spec.containers[] | select(.name=="webhook-relay").args[1]][0]'
+```
+
+A delivery made while the hook was stale is not replayed by the re-sync; the
+run's landing timer re-dispatches the cycle. Redeliver it from the hook's
+Recent Deliveries once the hook is current to land it at once.
+
 ## Tear down
 
 ```bash
@@ -535,7 +569,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    that `org_secrets` names but no Secret feeds has no surviving copy:
    re-enter it in Settings (the GitHub token regenerates the webhook secret
    and both org clients; the model key and the Claude token are re-saved on
-   their cards). Do not delete `org_secrets` rows by hand.
+   their cards; the org's repository hooks are re-keyed with the new secret
+   by aep-api's hook repair once the pod rolls). Do not delete `org_secrets`
+   rows by hand.
 5. **aep-api's OpenBao access.** The wipe also took aep-api's write-only
    policy `aep-api-writer` and its Kubernetes-auth role `aep-api`; until they
    are back every secret write aep-api makes fails (log event

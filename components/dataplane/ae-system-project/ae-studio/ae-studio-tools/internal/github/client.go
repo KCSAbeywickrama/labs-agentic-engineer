@@ -30,6 +30,9 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -625,6 +628,41 @@ func (c *Client) ReconfigureWebhook(ctx context.Context, owner, repo string, hoo
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/hooks/%d", owner, repo, hookID)
 	payload := map[string]any{"active": true, "events": events, "config": c.hookConfig()}
 	return c.doJSON(ctx, http.MethodPatch, url, payload, nil, http.StatusOK)
+}
+
+// EnsureWebhook leaves one hook on owner/repo carrying this pod's whole
+// config (URL and secret) and events, active, and answers its id. storedID
+// (0: none) is the hook the caller remembers: it is reconfigured in place
+// whatever URL it had, so a moved delivery URL or a new secret re-points
+// that hook rather than adding a second one beside it. A stored hook GitHub
+// no longer has (404) is created again; a hook created, or found by the
+// pod's URL, is then reconfigured when it already existed.
+func (c *Client) EnsureWebhook(ctx context.Context, owner, repo string, storedID int64, events []string) (int64, error) {
+	if storedID > 0 {
+		err := c.ReconfigureWebhook(ctx, owner, repo, storedID, events)
+		if !IsHTTPStatus(err, http.StatusNotFound) {
+			return storedID, err
+		}
+	}
+	id, existed, err := c.RegisterWebhook(ctx, owner, repo, events)
+	if err == nil && existed {
+		err = c.ReconfigureWebhook(ctx, owner, repo, id, events)
+	}
+	return id, err
+}
+
+// hookConfigRevDomain separates the config rev's HMAC from any other use of
+// the webhook secret.
+const hookConfigRevDomain = "aep-hook-config/v1\n"
+
+// HookConfigRev names the config every hook of this pod carries (its
+// delivery URL and signing secret) without revealing either: 16 hex of
+// HMAC-SHA256 keyed by the secret over the URL. A caller that stored the rev
+// a hook was ensured at knows the hook is stale when the rev moves.
+func (c *Client) HookConfigRev() string {
+	mac := hmac.New(sha256.New, []byte(c.cfg.HookSecret))
+	mac.Write([]byte(hookConfigRevDomain + c.cfg.HookURL))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 // DeleteWebhook removes the hook with the id the platform stored at

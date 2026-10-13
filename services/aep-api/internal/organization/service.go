@@ -114,6 +114,7 @@ type Service struct {
 	orgSecrets    *OrgSecretWriter
 	secretRefs    OrgSecretRefReader
 	converger     StudioConverger
+	hookResync    RepoHookResyncer
 }
 
 // NewService wires the orchestrator. Any dependency may be nil in narrow test

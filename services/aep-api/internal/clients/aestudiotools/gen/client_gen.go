@@ -357,12 +357,26 @@ type Head struct {
 
 // Hook defines model for Hook.
 type Hook struct {
-	ID int64 `json:"id"`
+	// ConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+	ConfigRev HookConfigRev `json:"configRev"`
+	ID        int64         `json:"id"`
 }
+
+// HookConfig defines model for HookConfig.
+type HookConfig struct {
+	// ConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+	ConfigRev HookConfigRev `json:"configRev"`
+}
+
+// HookConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+type HookConfigRev = string
 
 // HookEventsRequest defines model for HookEventsRequest.
 type HookEventsRequest struct {
 	Events []HookEventsRequestEvents `json:"events"`
+
+	// HookID The hook the caller stored for this repository, to be reconfigured in place (re-created when GitHub no longer has it).
+	HookID int64 `json:"hookId,omitempty,omitzero"`
 }
 
 // HookEventsRequestEvents defines model for HookEventsRequest.Events.
@@ -794,6 +808,12 @@ type aeOnlyContextKey string
 
 // GetGithubIdentityParams defines parameters for GetGithubIdentity.
 type GetGithubIdentityParams struct {
+	// XImpersonateOrg The org the call acts for; must be the pod's org id.
+	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
+}
+
+// GetHookConfigParams defines parameters for GetHookConfig.
+type GetHookConfigParams struct {
 	// XImpersonateOrg The org the call acts for; must be the pod's org id.
 	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
 }
@@ -1255,6 +1275,9 @@ type ClientInterface interface {
 	// GetGithubIdentity request
 	GetGithubIdentity(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetHookConfig request
+	GetHookConfig(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateRepoWithBody request with any body
 	CreateRepoWithBody(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1410,6 +1433,18 @@ type ClientInterface interface {
 
 func (c *Client) GetGithubIdentity(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetGithubIdentityRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetHookConfig(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHookConfigRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2102,6 +2137,46 @@ func NewGetGithubIdentityRequest(server string, params *GetGithubIdentityParams)
 	}
 
 	operationPath := fmt.Sprintf("/github/identity")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Impersonate-Org", params.XImpersonateOrg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Impersonate-Org", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetHookConfigRequest generates requests for GetHookConfig
+func NewGetHookConfigRequest(server string, params *GetHookConfigParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/hooks/config")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5207,6 +5282,9 @@ type ClientWithResponsesInterface interface {
 	// GetGithubIdentityWithResponse request
 	GetGithubIdentityWithResponse(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*GetGithubIdentityResponse, error)
 
+	// GetHookConfigWithResponse request
+	GetHookConfigWithResponse(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*GetHookConfigResponse, error)
+
 	// CreateRepoWithBodyWithResponse request with any body
 	CreateRepoWithBodyWithResponse(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRepoResponse, error)
 
@@ -5389,6 +5467,39 @@ func (r GetGithubIdentityResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetGithubIdentityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetHookConfigResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *HookConfig
+	ApplicationProblemJSON401 *Problem
+	ApplicationProblemJSON403 *Problem
+	ApplicationProblemJSON503 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHookConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHookConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHookConfigResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6834,6 +6945,15 @@ func (c *ClientWithResponses) GetGithubIdentityWithResponse(ctx context.Context,
 	return ParseGetGithubIdentityResponse(rsp)
 }
 
+// GetHookConfigWithResponse request returning *GetHookConfigResponse
+func (c *ClientWithResponses) GetHookConfigWithResponse(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*GetHookConfigResponse, error) {
+	rsp, err := c.GetHookConfig(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHookConfigResponse(rsp)
+}
+
 // CreateRepoWithBodyWithResponse request with arbitrary body returning *CreateRepoResponse
 func (c *ClientWithResponses) CreateRepoWithBodyWithResponse(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRepoResponse, error) {
 	rsp, err := c.CreateRepoWithBody(ctx, params, contentType, body, reqEditors...)
@@ -7370,6 +7490,53 @@ func ParseGetGithubIdentityResponse(rsp *http.Response) (*GetGithubIdentityRespo
 			return nil, err
 		}
 		response.ApplicationProblemJSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetHookConfigResponse parses an HTTP response from a GetHookConfigWithResponse call
+func ParseGetHookConfigResponse(rsp *http.Response) (*GetHookConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHookConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HookConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Problem

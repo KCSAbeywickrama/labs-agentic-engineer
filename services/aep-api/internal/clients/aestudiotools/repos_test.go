@@ -48,9 +48,24 @@ func TestRepoAndHookOps_RequestAndReply(t *testing.T) {
 		{
 			name: "register hook", method: "POST", path: "/repos/acme/greeter/hooks",
 			body:  `{"events":["pull_request","push","issue_comment","issues"]}`,
-			reply: `{"id":42}`, want: int64(42),
+			reply: `{"id":42,"configRev":"0123456789abcdef"}`, want: sourcecontrol.EnsuredHook{ID: 42, ConfigRev: "0123456789abcdef"},
 			call: func(ctx context.Context, a *Adapter) (any, error) {
-				return a.RegisterWebhook(ctx, trunkRef, platformHookEvents)
+				return a.RegisterWebhook(ctx, trunkRef, 0, platformHookEvents)
+			},
+		},
+		{
+			name: "register hook over the stored one", method: "POST", path: "/repos/acme/greeter/hooks",
+			body:  `{"events":["push"],"hookId":42}`,
+			reply: `{"id":43,"configRev":"0123456789abcdef"}`, want: sourcecontrol.EnsuredHook{ID: 43, ConfigRev: "0123456789abcdef"},
+			call: func(ctx context.Context, a *Adapter) (any, error) {
+				return a.RegisterWebhook(ctx, trunkRef, 42, []string{"push"})
+			},
+		},
+		{
+			name: "hook config rev", method: "GET", path: "/hooks/config",
+			reply: `{"configRev":"0123456789abcdef"}`, want: "0123456789abcdef",
+			call: func(ctx context.Context, a *Adapter) (any, error) {
+				return a.HookConfigRev(ctx, "default")
 			},
 		},
 		{
@@ -83,10 +98,10 @@ func TestRepoAndHookOps_RequestAndReply(t *testing.T) {
 func TestHookOps_RefuseAnUnknownEventWithoutACall(t *testing.T) {
 	p, srv := newPodStub(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
 	a := newAdapter(t, fixedTarget(srv.URL, "ou-123"), &countingTokens{})
-	if _, err := a.RegisterWebhook(context.Background(), trunkRef, []string{"push", "release"}); err == nil {
+	if _, err := a.RegisterWebhook(context.Background(), trunkRef, 0, []string{"push", "release"}); err == nil {
 		t.Fatal("want a refusal of release")
 	}
-	if _, err := a.RegisterWebhook(context.Background(), trunkRef, []string{"*"}); err == nil {
+	if _, err := a.RegisterWebhook(context.Background(), trunkRef, 0, []string{"*"}); err == nil {
 		t.Fatal("want a refusal of *")
 	}
 	if len(p.requests()) != 0 {

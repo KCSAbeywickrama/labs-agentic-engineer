@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -384,6 +385,86 @@ func TestRegisterHook_CreatesWithoutAPatch(t *testing.T) {
 		if r.Method == http.MethodPost && !strings.Contains(r.Body, `"url":"https://x/webhooks/github"`) {
 			t.Fatalf("register body %s", r.Body)
 		}
+	}
+}
+
+// podHooks is a handler whose hooks deliver to podURL signed with "s".
+const podURL = "https://x/webhooks/github"
+
+func podHooks(gh *githubtest.Stub) Handler {
+	return NewHandler(New(Config{APIBase: gh.URL(), Token: staticToken("t"), HookURL: podURL, HookSecret: "s"}), WithOwner("acme"))
+}
+
+func registerHook(t *testing.T, h Handler, hookID int64, names ...string) gen.RegisterHook200JSONResponse {
+	t.Helper()
+	resp, _ := h.RegisterHook(context.Background(), gen.RegisterHookRequestObject{Owner: "acme", Repo: "greeter",
+		Body: &gen.RegisterHookJSONRequestBody{Events: events(names...), HookID: hookID}})
+	ok, isOK := resp.(gen.RegisterHook200JSONResponse)
+	if !isOK {
+		t.Fatalf("register-hook answered %#v", resp)
+	}
+	return ok
+}
+
+// TestRegisterHook_ReconfiguresTheStoredHookInPlace: a stored hook left on
+// an old URL (a moved relay channel) and an old secret (a new webhook
+// secret) is PATCHed in place with the pod's URL and secret; no second hook
+// is created beside it.
+func TestRegisterHook_ReconfiguresTheStoredHookInPlace(t *testing.T) {
+	gh := githubtest.NewStub(t)
+	stale := gh.SeedHook("acme", "greeter", "https://smee.io/old-channel", "old-secret", []string{"push"})
+	got := registerHook(t, podHooks(gh), stale, "push", "issues")
+	if got.ID != stale {
+		t.Fatalf("id %d, want the stored hook %d", got.ID, stale)
+	}
+	if u, sec := gh.HookURL("acme", "greeter", stale), gh.HookSecret("acme", "greeter", stale); u != podURL || sec != "s" {
+		t.Fatalf("hook config url=%q secret-current=%v, want the pod's", u, sec == "s")
+	}
+	if ev := gh.HookEvents("acme", "greeter", stale); !slices.Equal(ev, []string{"push", "issues"}) {
+		t.Fatalf("events %v", ev)
+	}
+	if ids := gh.HookIDs("acme", "greeter"); !slices.Equal(ids, []int64{stale}) {
+		t.Fatalf("hooks %v, want only the stored one", ids)
+	}
+	for _, r := range gh.Requests() {
+		if r.Method == http.MethodPost {
+			t.Fatal("a stored hook GitHub still has is reconfigured, never re-created")
+		}
+	}
+}
+
+// TestRegisterHook_RecreatesAStoredHookGitHubNoLongerHas: a stored id GitHub
+// answers 404 for (deleted by hand, reaped) falls through to a create; the
+// answer is the new hook's id.
+func TestRegisterHook_RecreatesAStoredHookGitHubNoLongerHas(t *testing.T) {
+	gh := githubtest.NewStub(t)
+	gh.SeedRepo("acme", "greeter")
+	got := registerHook(t, podHooks(gh), 4242, "push")
+	if got.ID == 4242 || gh.HookURL("acme", "greeter", got.ID) != podURL || gh.HookSecret("acme", "greeter", got.ID) != "s" {
+		t.Fatalf("got id %d, want a new hook with the pod's config", got.ID)
+	}
+}
+
+// TestHookConfig_RevNamesTheURLAndSecret: the config rev register-hook
+// answers is get-hook-config's, changes with the URL or the secret, and
+// is neither.
+func TestHookConfig_RevNamesTheURLAndSecret(t *testing.T) {
+	gh := githubtest.NewStub(t)
+	gh.SeedRepo("acme", "greeter")
+	rev := func(url, secret string) string {
+		h := NewHandler(New(Config{APIBase: gh.URL(), Token: staticToken("t"), HookURL: url, HookSecret: secret}), WithOwner("acme"))
+		resp, _ := h.GetHookConfig(context.Background(), gen.GetHookConfigRequestObject{})
+		return resp.(gen.GetHookConfig200JSONResponse).ConfigRev
+	}
+	base := rev(podURL, "s")
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(base) || base != rev(podURL, "s") {
+		t.Fatalf("rev %q is not a stable 16-hex value", base)
+	}
+	if base == rev("https://smee.io/other", "s") || base == rev(podURL, "s2") {
+		t.Fatal("the rev must change with the URL and with the secret")
+	}
+	if got := registerHook(t, podHooks(gh), 0, "push"); got.ConfigRev != base {
+		t.Fatalf("register-hook rev %q, want get-hook-config's %q", got.ConfigRev, base)
 	}
 }
 

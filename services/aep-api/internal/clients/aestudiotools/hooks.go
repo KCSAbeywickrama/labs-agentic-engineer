@@ -26,6 +26,7 @@ import (
 	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/clients/aestudiotools/gen"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // hookEventNames are the only events the platform's hook carries (the pod's
@@ -49,21 +50,36 @@ func hookEvents(events []string) (gen.HookEventsRequest, error) {
 	return req, nil
 }
 
-// RegisterWebhook ensures the platform's hook on ref carries events (created,
-// or an existing one's events replaced) and answers its id.
-func (a *Adapter) RegisterWebhook(ctx context.Context, ref RepoRef, events []string) (int64, error) {
+// RegisterWebhook ensures the platform's hook on ref carries the pod's
+// config and events: storedID's hook reconfigured in place (re-created when
+// GitHub lost it), else one created or the hook to the pod's URL
+// reconfigured. It answers the hook's id and the pod's config rev.
+func (a *Adapter) RegisterWebhook(ctx context.Context, ref RepoRef, storedID int64, events []string) (sourcecontrol.EnsuredHook, error) {
 	if err := validRef(ref); err != nil {
-		return 0, err
+		return sourcecontrol.EnsuredHook{}, err
 	}
 	body, err := hookEvents(events)
 	if err != nil {
-		return 0, err
+		return sourcecontrol.EnsuredHook{}, err
+	}
+	if storedID > 0 {
+		body.HookID = storedID
 	}
 	var reply gen.Hook
 	err = a.do(ctx, ref.Org, "register-hook", &reply, func(ctx context.Context, c *gen.Client, org string, auth gen.RequestEditorFn) (*http.Response, error) {
 		return c.RegisterHook(ctx, ref.Owner, ref.Repo, &gen.RegisterHookParams{XImpersonateOrg: org}, body, auth)
 	})
-	return reply.ID, err
+	return sourcecontrol.EnsuredHook{ID: reply.ID, ConfigRev: reply.ConfigRev}, err
+}
+
+// HookConfigRev answers the rev of the config the org's pod installs on
+// every hook it ensures.
+func (a *Adapter) HookConfigRev(ctx context.Context, org string) (string, error) {
+	var reply gen.HookConfig
+	err := a.do(ctx, org, "get-hook-config", &reply, func(ctx context.Context, c *gen.Client, impersonateOrg string, auth gen.RequestEditorFn) (*http.Response, error) {
+		return c.GetHookConfig(ctx, &gen.GetHookConfigParams{XImpersonateOrg: impersonateOrg}, auth)
+	})
+	return reply.ConfigRev, err
 }
 
 // DeleteWebhook removes the hook; one already gone is success.

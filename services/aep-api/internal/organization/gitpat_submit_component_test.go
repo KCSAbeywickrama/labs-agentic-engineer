@@ -212,7 +212,8 @@ func (t *submitThunder) holds(entityID string) string {
 	return t.secrets[entityID]
 }
 
-// submitStudio fakes the disconnect's hook and studio steps (logged).
+// submitStudio fakes the disconnect's hook and studio steps and the
+// submit's hook re-sync (logged).
 type submitStudio struct{ log *submitLog }
 
 func (s submitStudio) UnregisterOrg(context.Context, string) error {
@@ -220,6 +221,7 @@ func (s submitStudio) UnregisterOrg(context.Context, string) error {
 	return nil
 }
 func (s submitStudio) ForgetOrg(context.Context, string) error { s.log.add("forget-hooks"); return nil }
+func (s submitStudio) ResyncOrg(context.Context, string) error { s.log.add("resync-hooks"); return nil }
 func (s submitStudio) Remove(context.Context, string) error    { s.log.add("remove-studio"); return nil }
 func (s submitStudio) Release(string)                          {}
 
@@ -308,7 +310,7 @@ func newSubmitFixture(t *testing.T, opts ...submitOption) *submitFixture {
 	disconnect := organization.NewOrgDisconnectService(credSvc, nil).
 		WithRepoHooks(studio).WithStudioRemover(studio).WithGitHubSecretsRemover(refWriter.RemoveGitHubSecrets)
 	svc := organization.NewService(credSvc, disconnect, idpSvc, organization.PlatformIDPConfig{Issuer: platformIss, JWKSURL: platformJWKS}).
-		WithAEStudio(orgSecrets, converger).WithOrgSecretRefs(rows)
+		WithAEStudio(orgSecrets, converger).WithOrgSecretRefs(rows).WithRepoHookResync(studio)
 
 	// The submit's log lines, captured to check what they say and that no
 	// secret value is among them.
@@ -359,7 +361,7 @@ func TestSubmit_Sequence(t *testing.T) {
 	if err := f.patch(ctx, "ghorg", "pat-1"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"validate", "connect", "write:github-pat", "write:github-webhook-secret", "ensure:publisher", "write:ae-publisher-client", "ensure:studio", "write:ae-studio-client", "converge"}
+	want := []string{"validate", "connect", "write:github-pat", "write:github-webhook-secret", "ensure:publisher", "write:ae-publisher-client", "ensure:studio", "write:ae-studio-client", "resync-hooks", "converge"}
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("calls %v\nwant  %v", f.calls, want)
 	}
@@ -377,7 +379,9 @@ func TestSubmit_Sequence(t *testing.T) {
 	if f.writes["github-pat"] != 1 {
 		t.Fatalf("one resubmit writes one github-pat reference, got %d", f.writes["github-pat"])
 	}
-	want = []string{"validate", "connect", "write:github-pat", "ensure:publisher", "ensure:studio", "converge"}
+	// A reconnect re-syncs the org's repo hooks: the repair re-ensures each
+	// with the pod's config, so a hook left stale by hand is healed too.
+	want = []string{"validate", "connect", "write:github-pat", "ensure:publisher", "ensure:studio", "resync-hooks", "converge"}
 	if !slices.Equal(f.calls, want) {
 		t.Fatalf("resubmit calls %v\nwant  %v", f.calls, want)
 	}
@@ -514,7 +518,7 @@ func TestSubmit_DisconnectRemovesTheGitHubSecretsAndReconnectRestoresThem(t *tes
 	if err := f.patch(ctx, "ghorg", "pat-2"); err != nil {
 		t.Fatalf("reconnect: %v", err)
 	}
-	for _, step := range []string{"write:github-pat", "write:github-webhook-secret", "converge"} {
+	for _, step := range []string{"write:github-pat", "write:github-webhook-secret", "resync-hooks", "converge"} {
 		if !slices.Contains(f.calls, step) {
 			t.Fatalf("reconnect calls %v lack %s", f.calls, step)
 		}

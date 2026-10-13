@@ -45,12 +45,17 @@ type RepoRepository interface {
 	ListByOrg(ctx context.Context, ocOrgID string) ([]GitRepository, error)
 	Create(ctx context.Context, repo *GitRepository) error
 	Update(ctx context.Context, repo *GitRepository) error
-	// SetWebhookIDIfReady stores hookID on the (org, project) row only while
-	// it is `ready`, as a column update (never re-inserting a row a
-	// concurrent delete dropped). It reports whether a row took it.
-	SetWebhookIDIfReady(ctx context.Context, ocOrgID, projectID string, hookID int64) (bool, error)
-	// ClearWebhookIDs forgets the hook id of every row of the org.
+	// SetWebhookIDIfReady stores hookID and the config rev it was ensured
+	// at on the (org, project) row only while it is `ready`, as a column
+	// update (never re-inserting a row a concurrent delete dropped). It
+	// reports whether a row took it.
+	SetWebhookIDIfReady(ctx context.Context, ocOrgID, projectID string, hookID int64, configRev string) (bool, error)
+	// ClearWebhookIDs forgets the hook id (and its rev) of every row of the
+	// org.
 	ClearWebhookIDs(ctx context.Context, ocOrgID string) error
+	// ClearWebhookConfigRevs forgets the config rev of every row of the org,
+	// keeping the hook ids, so the hook repair re-ensures each hook in place.
+	ClearWebhookConfigRevs(ctx context.Context, ocOrgID string) error
 	// SetStatusIf moves the (org, project) row from status `from` to `to` as
 	// a column update, and reports whether it did.
 	SetStatusIf(ctx context.Context, ocOrgID, projectID, from, to string) (bool, error)
@@ -146,17 +151,23 @@ func (r *repoRepository) Update(ctx context.Context, repo *GitRepository) error 
 	return r.db.WithContext(ctx).Save(repo).Error
 }
 
-func (r *repoRepository) SetWebhookIDIfReady(ctx context.Context, ocOrgID, projectID string, hookID int64) (bool, error) {
+func (r *repoRepository) SetWebhookIDIfReady(ctx context.Context, ocOrgID, projectID string, hookID int64, configRev string) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&GitRepository{}).
 		Where("org_id = ? AND project_id = ? AND status = ?", ocOrgID, projectID, RepoStatusReady).
-		Update("webhook_id", hookID)
+		Updates(map[string]any{"webhook_id": hookID, "webhook_config_rev": configRev})
 	return res.RowsAffected > 0, res.Error
 }
 
 func (r *repoRepository) ClearWebhookIDs(ctx context.Context, ocOrgID string) error {
 	return r.db.WithContext(ctx).Model(&GitRepository{}).
 		Where("org_id = ? AND webhook_id IS NOT NULL", ocOrgID).
-		Update("webhook_id", nil).Error
+		Updates(map[string]any{"webhook_id": nil, "webhook_config_rev": ""}).Error
+}
+
+func (r *repoRepository) ClearWebhookConfigRevs(ctx context.Context, ocOrgID string) error {
+	return r.db.WithContext(ctx).Model(&GitRepository{}).
+		Where("org_id = ? AND webhook_config_rev <> ''", ocOrgID).
+		Update("webhook_config_rev", "").Error
 }
 
 func (r *repoRepository) SetStatusIf(ctx context.Context, ocOrgID, projectID, from, to string) (bool, error) {

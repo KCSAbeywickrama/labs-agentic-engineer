@@ -127,6 +127,34 @@ func (s *Stub) HookSecret(owner, repo string, id int64) string {
 	return ""
 }
 
+// HookURL is the delivery URL hook id on owner/repo was last given, ""
+// when there is no such hook.
+func (s *Stub) HookURL(owner, repo string, id int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.model.repos[repoKey(owner, repo)]; ok {
+		for _, h := range r.hooks {
+			if h.id == id {
+				return h.url
+			}
+		}
+	}
+	return ""
+}
+
+// HookIDs are the ids of every hook on owner/repo, in creation order.
+func (s *Stub) HookIDs(owner, repo string) []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []int64
+	if r, ok := s.model.repos[repoKey(owner, repo)]; ok {
+		for _, h := range r.hooks {
+			ids = append(ids, h.id)
+		}
+	}
+	return ids
+}
+
 // SeedHook installs a hook to url signed with secret on owner/repo (one a
 // previous AE Studio left) and answers its id.
 func (s *Stub) SeedHook(owner, repo, url, secret string, events []string) int64 {

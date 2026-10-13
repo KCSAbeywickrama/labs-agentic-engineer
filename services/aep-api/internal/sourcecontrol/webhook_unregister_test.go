@@ -222,7 +222,7 @@ func TestWebhookRegister_RefusesARowBeingDeleted(t *testing.T) {
 // is being installed: the id cannot be stored.
 type goneOnPersist struct{ *fakeRepoRepo }
 
-func (goneOnPersist) SetWebhookIDIfReady(context.Context, string, string, int64) (bool, error) {
+func (goneOnPersist) SetWebhookIDIfReady(context.Context, string, string, int64, string) (bool, error) {
 	return false, nil
 }
 

@@ -141,6 +141,13 @@ flowchart LR
   A ready project row with no hook id is what the eventcore sweep's hook repair ensures a hook for;
   platform repos (`IsPlatformRepo`: project ids starting with `_`, the skills and resource-docs repos)
   carry none.
+- **A stored hook is re-synced when the pod's config moves.** `Register` hands the pod the stored hook
+  id, so the pod reconfigures THAT hook in place (URL, content type, secret, events, active; re-created
+  when GitHub answers 404) rather than adding a second one beside a hook still posting to an old relay
+  channel. The row stores the hook's config rev (`webhook_config_rev`: the pod's `configRev`, an HMAC of
+  its delivery URL under its webhook secret, folded with the subscribed events); `HookRev` answers the
+  rev a hook ensured now would get, and the hook repair re-ensures every row whose rev differs.
+  `ResyncOrg` (a gitpat (re)submit) clears the org's revs and keeps the ids, so every hook is re-ensured.
 - **`DeleteRepo` trashes before it drops.** The pod's mirror and reference documents go first
   (`TrashOps`), because the row is what names the repository; a trash the pod cannot do is logged
   (`repo.trash_failed`) and the row goes anyway. The GitHub repository is never deleted.

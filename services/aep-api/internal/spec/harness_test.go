@@ -62,10 +62,11 @@ func (s *stubRepoRepo) GetByOrgAndSlug(context.Context, string, string) (*source
 func (s *stubRepoRepo) ListAllReady(context.Context) ([]sourcecontrol.GitRepository, error) {
 	return nil, nil
 }
-func (s *stubRepoRepo) SetWebhookIDIfReady(context.Context, string, string, int64) (bool, error) {
+func (s *stubRepoRepo) SetWebhookIDIfReady(context.Context, string, string, int64, string) (bool, error) {
 	panic("not used")
 }
-func (s *stubRepoRepo) ClearWebhookIDs(context.Context, string) error { panic("not used") }
+func (s *stubRepoRepo) ClearWebhookIDs(context.Context, string) error        { panic("not used") }
+func (s *stubRepoRepo) ClearWebhookConfigRevs(context.Context, string) error { panic("not used") }
 func (s *stubRepoRepo) SetStatusIf(context.Context, string, string, string, string) (bool, error) {
 	panic("not used")
 }

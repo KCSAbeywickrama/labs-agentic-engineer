@@ -918,7 +918,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// The gitpat submit writes the org secrets, then converges AE Studio.
 		WithAEStudio(orgSecretWriter, aeStudio).
 		// A section reads as configured only when its reference rows exist.
-		WithOrgSecretRefs(orgSecretRepo)
+		WithOrgSecretRefs(orgSecretRepo).
+		// A (re)connect re-syncs the org's repo hooks with its pod's config.
+		WithRepoHookResync(webhookRegService)
 
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).

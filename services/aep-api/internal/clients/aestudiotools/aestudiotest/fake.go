@@ -83,6 +83,7 @@ const (
 
 	// Hooks.
 	OpRegisterWebhook = "register-webhook"
+	OpHookConfigRev   = "hook-config-rev"
 	OpDeleteWebhook   = "delete-webhook"
 )
 
@@ -129,6 +130,7 @@ type Fake struct {
 	script       []aestudiotools.TurnEvent
 	clock        time.Time
 	nextHookID   int64
+	hookRevs     map[string]string // org → hook config rev (SetHookConfigRev)
 }
 
 var (

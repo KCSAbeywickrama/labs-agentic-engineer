@@ -338,10 +338,10 @@ func TestRepoRepository_HookIDAndDeleteMarkAreColumnUpdates(t *testing.T) {
 	mkRepo(t, repo, &sourcecontrol.GitRepository{OrgID: "orga", ProjectID: "p1", RepoURL: "https://github.com/a/p1", Status: "ready"})
 	mkRepo(t, repo, &sourcecontrol.GitRepository{OrgID: "orgb", ProjectID: "p2", RepoURL: "https://github.com/b/p2", Status: "ready"})
 
-	if took, err := repo.SetWebhookIDIfReady(ctx, "orga", "p1", 7); err != nil || !took {
+	if took, err := repo.SetWebhookIDIfReady(ctx, "orga", "p1", 7, "r"); err != nil || !took {
 		t.Fatalf("store on a ready row: took=%v err=%v", took, err)
 	}
-	if took, err := repo.SetWebhookIDIfReady(ctx, "orga", "gone", 8); err != nil || took {
+	if took, err := repo.SetWebhookIDIfReady(ctx, "orga", "gone", 8, "r"); err != nil || took {
 		t.Fatalf("store on no row: took=%v err=%v", took, err)
 	}
 	if got, _ := repo.GetByOrgAndProjectID(ctx, "orga", "gone"); got != nil {
@@ -354,14 +354,14 @@ func TestRepoRepository_HookIDAndDeleteMarkAreColumnUpdates(t *testing.T) {
 	if moved, _ := repo.SetStatusIf(ctx, "orga", "p1", sourcecontrol.RepoStatusReady, sourcecontrol.RepoStatusDeleting); moved {
 		t.Fatal("a second mark moved a row that is not ready")
 	}
-	if took, _ := repo.SetWebhookIDIfReady(ctx, "orga", "p1", 9); took {
+	if took, _ := repo.SetWebhookIDIfReady(ctx, "orga", "p1", 9, "r"); took {
 		t.Fatal("a deleting row took a hook id")
 	}
 	if rows, _ := repo.ListAllReady(ctx); len(rows) != 1 || rows[0].ProjectID != "p2" {
 		t.Fatalf("ListAllReady = %v, want only orgb/p2", rows)
 	}
 
-	if _, err := repo.SetWebhookIDIfReady(ctx, "orgb", "p2", 10); err != nil {
+	if _, err := repo.SetWebhookIDIfReady(ctx, "orgb", "p2", 10, "r"); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.ClearWebhookIDs(ctx, "orga"); err != nil {
@@ -370,7 +370,14 @@ func TestRepoRepository_HookIDAndDeleteMarkAreColumnUpdates(t *testing.T) {
 	if got, _ := repo.GetByOrgAndProjectID(ctx, "orga", "p1"); got.WebhookID != nil {
 		t.Fatalf("orga/p1 keeps hook id %d", *got.WebhookID)
 	}
-	if got, _ := repo.GetByOrgAndProjectID(ctx, "orgb", "p2"); got.WebhookID == nil || *got.WebhookID != 10 {
-		t.Fatal("another org's hook id was cleared")
+	if got, _ := repo.GetByOrgAndProjectID(ctx, "orgb", "p2"); got.WebhookID == nil || *got.WebhookID != 10 || got.WebhookConfigRev != "r" {
+		t.Fatal("another org's hook id or rev was cleared")
+	}
+	// A reconnect's re-sync forgets the revs and keeps the ids.
+	if err := repo.ClearWebhookConfigRevs(ctx, "orgb"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.GetByOrgAndProjectID(ctx, "orgb", "p2"); got.WebhookID == nil || *got.WebhookID != 10 || got.WebhookConfigRev != "" {
+		t.Fatalf("after ClearWebhookConfigRevs: id=%v rev=%q, want 10 and \"\"", got.WebhookID, got.WebhookConfigRev)
 	}
 }
