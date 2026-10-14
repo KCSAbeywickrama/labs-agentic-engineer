@@ -43,6 +43,22 @@
 # performs the registration with a properly scoped token and installs the chart
 # with bootstrap.enabled=false. The same compensation setup-agent-manager.sh
 # already applies to Agent Manager's other charts.
+#
+# ── Why the API selector is set here ─────────────────────────────────────────
+# The chart's `apiGateway.apiSelector` defaults to `scope: Cluster`: the gateway
+# claims EVERY RestApi in the cluster. The gateway-operator does not refuse a
+# RestApi two gateways match — it programs it onto one of them, silently, and
+# after this install that one is the AI gateway. Every API deployed from then on
+# 404s on the environment's API Platform gateway, which is where every URL the
+# platform hands out, the webapp proxies and the validation probes point.
+# Nothing fails at deploy time: the pod is Ready, the RestApi is Accepted, and
+# the route is on the wrong gateway. The AI gateway's own routes come from the
+# Agent Manager control plane, not from RestApi CRs, so it needs none of them;
+# it gets the same label selector the API Platform gateway uses
+# (`design/agent-manager-convergence.md`, the APIGateway row), on its own name,
+# which no trait stamps today. A cluster that already ran with the default keeps
+# the RestApis it adopted until they are re-created: delete them and the
+# renderedrelease controller re-applies them onto the labelled gateway.
 
 set -euo pipefail
 
@@ -78,6 +94,9 @@ AI_GATEWAY_CHART_VERSION="${AI_GATEWAY_CHART_VERSION:-0.14.0-rc1}"
 NS="${ORG_NAME}-${ENV_NAME}"
 GW_NAME="ai-gateway-${ORG_NAME}-${ENV_NAME}"
 RELEASE="$GW_NAME"
+# The label the gateway-operator matches a RestApi to a gateway by; the
+# api-configuration trait stamps it with the API Platform gateway's name.
+RESTAPI_TARGET_LABEL="gateway.api-platform.wso2.com/restapi-target"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-600s}"
 
 # In-cluster for the runtime's own control-plane calls; public for ours, because
@@ -229,6 +248,7 @@ helm upgrade --install "$RELEASE" \
     --set "gateway.environment=${ENV_NAME}" \
     --set "gateway.vhost=${VHOST}" \
     --set "apiGateway.namespace=${NS}" \
+    --set-json "apiGateway.apiSelector={\"scope\":\"LabelSelector\",\"matchLabels\":{\"${RESTAPI_TARGET_LABEL}\":\"${GW_NAME}\"}}" \
     --set "bootstrap.enabled=false" \
     --timeout 15m >/dev/null
 

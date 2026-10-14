@@ -259,9 +259,16 @@ object, `aectl platform install` stops on it: see
   gateway** is the LLM proxy an agent calls outbound, and guardrails run on the
   second. `scripts/setup-environment-aigateway.sh` registers it with `amp-api`,
   installs `wso2-amp-ai-gateway-extension` into `<org>-<env>` with
-  `bootstrap.enabled=false`, and writes the binding onto the OpenChoreo
+  `bootstrap.enabled=false` and its `apiSelector` pinned to a label match on
+  its own name (the chart's default is `scope: Cluster`, which claims every
+  RestApi in the cluster and leaves the API Platform gateway answering 404 for
+  every API deployed afterwards), and writes the binding onto the OpenChoreo
   `Environment` as annotations — endpoint, internal endpoint, admin URL,
-  gateway id, secret path. **The binding record is the contract**, exactly as
+  gateway id, secret path. `make dev-update` does not re-run it: an install
+  made before the selector was pinned gets it by re-running the script, which
+  is idempotent, and then deleting the RestApis the AI gateway had adopted so
+  the renderedrelease controller re-creates them on the API Platform gateway.
+  **The binding record is the contract**, exactly as
   it is for Thunder (`design/two-tier-thunder.md`): `aep-api` reads it to
   decide whether an environment is governed at all, and an environment without
   one deploys agents straight onto the org's model connection, as before Agent
