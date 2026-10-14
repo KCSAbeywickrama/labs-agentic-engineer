@@ -97,6 +97,9 @@ RELEASE="$GW_NAME"
 # The label the gateway-operator matches a RestApi to a gateway by; the
 # api-configuration trait stamps it with the API Platform gateway's name.
 RESTAPI_TARGET_LABEL="gateway.api-platform.wso2.com/restapi-target"
+# The selector this gateway is installed with and checked against afterwards:
+# a label match on its own name, which no trait stamps, so it selects nothing.
+API_SELECTOR="{\"scope\":\"LabelSelector\",\"matchLabels\":{\"${RESTAPI_TARGET_LABEL}\":\"${GW_NAME}\"}}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-600s}"
 
 # In-cluster for the runtime's own control-plane calls; public for ours, because
@@ -248,7 +251,7 @@ helm upgrade --install "$RELEASE" \
     --set "gateway.environment=${ENV_NAME}" \
     --set "gateway.vhost=${VHOST}" \
     --set "apiGateway.namespace=${NS}" \
-    --set-json "apiGateway.apiSelector={\"scope\":\"LabelSelector\",\"matchLabels\":{\"${RESTAPI_TARGET_LABEL}\":\"${GW_NAME}\"}}" \
+    --set-json "apiGateway.apiSelector=${API_SELECTOR}" \
     --set "bootstrap.enabled=false" \
     --timeout 15m >/dev/null
 
@@ -256,18 +259,18 @@ wait_for_deployment_available "$NS" "${RELEASE}-gw-controller" "$WAIT_TIMEOUT"
 wait_for_deployment_available "$NS" "${RELEASE}-gw-gateway-runtime" "$WAIT_TIMEOUT"
 echo "   ✅ gateway runtime serving"
 
-# The selector the operator holds, read back rather than trusted: a chart
-# version that renames `apiGateway.apiSelector` would take the override above
-# as an unused value and keep its Cluster default, and nothing would say so
+# The selector the operator holds, read back rather than trusted and compared
+# whole: a chart version that renames `apiGateway.apiSelector` would take the
+# override above as an unused value and keep its Cluster default, and one that
+# adds entries of its own would narrow what was asked for; nothing would say so
 # until the next deploy 404s. `aectl platform status` reports the same under
 # Gateways for a cluster that drifted after install.
-SELECTOR="$(kubectl -n "$NS" get "apigateways.gateway.api-platform.wso2.com/${GW_NAME}" \
-    -o jsonpath="{.spec.apiSelector.scope} {.spec.apiSelector.matchLabels.${RESTAPI_TARGET_LABEL//./\\.}}")" \
+INSTALLED_SELECTOR="$(kubectl -n "$NS" get "apigateways.gateway.api-platform.wso2.com/${GW_NAME}" \
+    -o jsonpath='{.spec.apiSelector}')" \
     || fail "Could not read APIGateway ${NS}/${GW_NAME} back after the install."
-SELECTOR_SCOPE="${SELECTOR%% *}"
-SELECTOR_TARGET="${SELECTOR#* }"
-[ "$SELECTOR_SCOPE" = "LabelSelector" ] && [ "$SELECTOR_TARGET" = "$GW_NAME" ] \
-    || fail "APIGateway ${NS}/${GW_NAME} selects scope=${SELECTOR_SCOPE:-unset} ${RESTAPI_TARGET_LABEL}=${SELECTOR_TARGET:-unset}, not LabelSelector on its own name." \
+python3 -c 'import json, sys; sys.exit(0 if json.loads(sys.argv[1] or "{}") == json.loads(sys.argv[2]) else 1)' \
+    "$INSTALLED_SELECTOR" "$API_SELECTOR" \
+    || fail "APIGateway ${NS}/${GW_NAME} selects ${INSTALLED_SELECTOR:-nothing}, not ${API_SELECTOR}." \
             "With scope Cluster it claims every RestApi in the cluster — see 'Why the API selector is set here' above. The chart's apiGateway.apiSelector value may have moved in ${AI_GATEWAY_CHART_VERSION}."
 echo "   ✅ API selector pinned to ${GW_NAME}"
 
