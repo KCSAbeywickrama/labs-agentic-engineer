@@ -131,6 +131,17 @@ func runPlatformStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Gateways section: the API Platform gateways and the routing faults no
+	// controller reports (platform_status_gateways.go).
+	ui.Section("Gateways")
+	if applier, err := k8s.NewApplier(kubeconfig); err != nil {
+		ui.Warn(fmt.Sprintf("could not connect for gateways: %v", err))
+	} else if report, err := buildGatewayReport(ctx, applier); err != nil {
+		ui.Warn(fmt.Sprintf("could not read API Platform gateways: %v", err))
+	} else {
+		printGatewayReport(report)
+	}
+
 	// Config section
 	ui.Section("Config")
 	_, err = client.CoreV1().ConfigMaps(platformStatusNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})

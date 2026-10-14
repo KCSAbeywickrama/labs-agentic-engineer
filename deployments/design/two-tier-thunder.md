@@ -241,6 +241,9 @@ Two more properties, both deliberate:
 
 Checks 5 and 10–13 are this design's invariants. None of them fails loudly on
 its own: a binding that drifts fails at one consumer, one 401 at a time.
+The script itself went with the Compose path (b1a7fed81): the gateway half of
+check 5 lives on as the Gateways section of `aectl platform status`; the rest
+has no command in this repository today.
 
 - **5** — every `Environment` has a Programmed `api-platform-<org>-<env>`, and
   every `RestApi`'s `restapi-target` label names an existing gateway.
@@ -260,12 +263,6 @@ its own: a binding that drifts fails at one consumer, one 401 at a time.
   and it carries a composed value rather than the placeholder its file holds in
   Git. Check 8 asserts the *effect* on the running IdP; 13 asserts the bundle
   that produced it, which is where a renumbered publisher document shows up.
-
-Run it after any change to either tier:
-
-```
-bash deployments/scripts/verify-convergence.sh
-```
 
 ## Facts that cost a day each
 
