@@ -241,6 +241,8 @@ Two more properties, both deliberate:
 
 Checks 5 and 10–13 are this design's invariants. None of them fails loudly on
 its own: a binding that drifts fails at one consumer, one 401 at a time.
+The script itself went with the Compose path (b1a7fed81); check 5's gateway
+half lives on as the Gateways section of `aectl platform status`.
 
 - **5** — every `Environment` has a Programmed `api-platform-<org>-<env>`, and
   every `RestApi`'s `restapi-target` label names an existing gateway.

@@ -46,16 +46,18 @@ func (f *fakeAPIPlatform) List(_ context.Context, _, kind, _ string) ([]unstruct
 // shape both the API Platform and the AI gateway installs produce.
 func labelGateway(ns, name, target, phase string) unstructured.Unstructured {
 	return gatewayObject(ns, name, phase, map[string]interface{}{
-		"scope":       apiSelectorScopeLabel,
+		"scope":       string(scopeLabel),
 		"matchLabels": map[string]interface{}{restAPITargetLabel: target},
 	})
 }
 
 // clusterGateway is an APIGateway on the AI gateway chart's default selector.
 func clusterGateway(ns, name string) unstructured.Unstructured {
-	return gatewayObject(ns, name, "Ready", map[string]interface{}{"scope": apiSelectorScopeCluster})
+	return gatewayObject(ns, name, "Ready", map[string]interface{}{"scope": string(scopeCluster)})
 }
 
+// The selector map holds plain strings, as a decoded object does: a typed
+// constant would fail unstructured's string assertion.
 func gatewayObject(ns, name, phase string, selector map[string]interface{}) unstructured.Unstructured {
 	return unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": apiPlatformGatewayAPIVersion, "kind": "APIGateway",
@@ -103,7 +105,7 @@ func TestBuildGatewayReport_ConvergedClusterHasNoFaults(t *testing.T) {
 	if len(r.Gateways) != 2 || r.Gateways[0].Name != "ai-gateway-default-development" {
 		t.Fatalf("expected both gateways sorted by name, got %+v", r.Gateways)
 	}
-	if r.Gateways[0].Scope != apiSelectorScopeLabel || r.Gateways[0].Phase != "Ready" {
+	if r.Gateways[0].Scope != scopeLabel || r.Gateways[0].Phase != "Ready" {
 		t.Fatalf("expected scope and phase read from the object, got %+v", r.Gateways[0])
 	}
 }
@@ -130,6 +132,19 @@ func TestBuildGatewayReport_ClusterScopedGatewayIsAFault(t *testing.T) {
 	}
 }
 
+func TestBuildGatewayReport_OnlyAClusterScopedGatewayStillServes(t *testing.T) {
+	r := mustReport(t, &fakeAPIPlatform{
+		gateways: []unstructured.Unstructured{clusterGateway("default-development", "ai-gateway-default-development")},
+		apis:     []unstructured.Unstructured{restAPI("dp-default-p70", "p70-hello-api-http", "api-platform-default-development")},
+	})
+	if len(r.Faults) != 2 {
+		t.Fatalf("expected the gateway and the RestApi reported, got %q", r.Faults)
+	}
+	if !strings.Contains(r.Faults[1], "only the Cluster-scoped ai-gateway-default-development can serve it") {
+		t.Fatalf("the unserved line must not claim nothing serves it while a Cluster gateway exists, got %q", r.Faults[1])
+	}
+}
+
 func TestBuildGatewayReport_UnservedRestApiIsAFault(t *testing.T) {
 	r := mustReport(t, &fakeAPIPlatform{
 		gateways: []unstructured.Unstructured{
@@ -144,7 +159,7 @@ func TestBuildGatewayReport_UnservedRestApiIsAFault(t *testing.T) {
 	if len(r.Faults) != 2 {
 		t.Fatalf("expected the stale and the unlabelled RestApi reported, got %q", r.Faults)
 	}
-	if !strings.Contains(r.Faults[0], "stale-target-http") || !strings.Contains(r.Faults[0], `"api-platform-default"`) {
+	if !strings.Contains(r.Faults[0], "stale-target-http") || !strings.Contains(r.Faults[0], `"api-platform-default"`) || !strings.Contains(r.Faults[0], "nothing serves it") {
 		t.Fatalf("fault should name the RestApi and the label it carries, got %q", r.Faults[0])
 	}
 	if !strings.Contains(r.Faults[1], "unlabelled-http") || !strings.Contains(r.Faults[1], `""`) {
@@ -168,9 +183,9 @@ func TestBuildGatewayReport_TwoGatewaysOnOneLabelIsAFault(t *testing.T) {
 }
 
 func TestBuildGatewayReport_NamespacedGatewaySelectsItsNamespaces(t *testing.T) {
-	own := gatewayObject("team-a", "team-a-gw", "Ready", map[string]interface{}{"scope": apiSelectorScopeNamespaced})
+	own := gatewayObject("team-a", "team-a-gw", "Ready", map[string]interface{}{"scope": string(scopeNamespaced)})
 	named := gatewayObject("default-development", "shared-gw", "Ready", map[string]interface{}{
-		"scope": apiSelectorScopeNamespaced, "namespaces": []interface{}{"team-b", "team-c"},
+		"scope": string(scopeNamespaced), "namespaces": []interface{}{"team-b", "team-c"},
 	})
 	r := mustReport(t, &fakeAPIPlatform{
 		gateways: []unstructured.Unstructured{own, named},
@@ -187,7 +202,7 @@ func TestBuildGatewayReport_NamespacedGatewaySelectsItsNamespaces(t *testing.T) 
 
 func TestBuildGatewayReport_MatchExpressionsCount(t *testing.T) {
 	gw := gatewayObject("default-development", "expr-gw", "Ready", map[string]interface{}{
-		"scope": apiSelectorScopeLabel,
+		"scope": string(scopeLabel),
 		"matchExpressions": []interface{}{map[string]interface{}{
 			"key": restAPITargetLabel, "operator": "In", "values": []interface{}{"expr-gw"},
 		}},
@@ -198,6 +213,17 @@ func TestBuildGatewayReport_MatchExpressionsCount(t *testing.T) {
 	})
 	if len(r.Faults) != 0 {
 		t.Fatalf("a matchExpressions selector should select the RestApi, got %q", r.Faults)
+	}
+}
+
+func TestBuildGatewayReport_UnknownScopeIsNamed(t *testing.T) {
+	gw := gatewayObject("default-development", "odd-gw", "Ready", map[string]interface{}{"scope": "Regional"})
+	r := mustReport(t, &fakeAPIPlatform{
+		gateways: []unstructured.Unstructured{gw},
+		apis:     []unstructured.Unstructured{restAPI("dp-default-p70", "p70-hello-api-http", "odd-gw")},
+	})
+	if len(r.Faults) != 2 || !strings.Contains(r.Faults[0], `scope "Regional"`) {
+		t.Fatalf("an unknown scope must be reported by name, not swallowed, got %q", r.Faults)
 	}
 }
 
