@@ -256,6 +256,20 @@ wait_for_deployment_available "$NS" "${RELEASE}-gw-controller" "$WAIT_TIMEOUT"
 wait_for_deployment_available "$NS" "${RELEASE}-gw-gateway-runtime" "$WAIT_TIMEOUT"
 echo "   ✅ gateway runtime serving"
 
+# The selector the operator holds, read back rather than trusted: a chart
+# version that renames `apiGateway.apiSelector` would take the override above
+# as an unused value and keep its Cluster default, and nothing would say so
+# until the next deploy 404s. `aectl platform status` reports the same under
+# Gateways for a cluster that drifted after install.
+SELECTOR_SCOPE="$(kubectl -n "$NS" get "apigateways.gateway.api-platform.wso2.com/${GW_NAME}" \
+    -o jsonpath='{.spec.apiSelector.scope}')"
+SELECTOR_TARGET="$(kubectl -n "$NS" get "apigateways.gateway.api-platform.wso2.com/${GW_NAME}" \
+    -o jsonpath="{.spec.apiSelector.matchLabels.${RESTAPI_TARGET_LABEL//./\\.}}")"
+[ "$SELECTOR_SCOPE" = "LabelSelector" ] && [ "$SELECTOR_TARGET" = "$GW_NAME" ] \
+    || fail "APIGateway ${NS}/${GW_NAME} selects scope=${SELECTOR_SCOPE:-unset} ${RESTAPI_TARGET_LABEL}=${SELECTOR_TARGET:-unset}, not LabelSelector on its own name." \
+            "With scope Cluster it claims every RestApi in the cluster — see 'Why the API selector is set here' above. The chart's apiGateway.apiSelector value may have moved in ${AI_GATEWAY_CHART_VERSION}."
+echo "   ✅ API selector pinned to ${GW_NAME}"
+
 # ── 6. The binding record ────────────────────────────────────────────────────
 # aep-api runs OUTSIDE the cluster, so the Environment's annotations are the one
 # projection of this record it can read — the same reason this environment's
