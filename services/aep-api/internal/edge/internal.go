@@ -89,6 +89,13 @@ type InternalDeps struct {
 	// the observer's recorded alerts.
 	SREHandoffAuth *auth.SREHandoffVerifier
 	SREHandoffMCP  http.Handler
+	// IssuesMCP serves the issue tools of the AE Studio pod's Issues and
+	// issue chats (sourcecontrol/issues.NewUserMCPHandler) on
+	// POST /internal/v1/ae-studio/projects/{projectName}/issues/mcp and
+	// .../issues/{issueNumber}/mcp, behind auth.IssuesMCPGate (the pod's
+	// ae-studio-<org> client token; the project and issue from the path). nil
+	// leaves both routes unmounted.
+	IssuesMCP http.Handler
 }
 
 // internalServer implements igen.StrictServerInterface.
@@ -123,6 +130,11 @@ func newInternalV1Handler(deps InternalDeps) http.Handler {
 	}
 	if deps.SREHandoffAuth != nil && deps.SREHandoffMCP != nil {
 		mux.Handle("POST "+internalV1+"/sre-handoff/mcp", deps.SREHandoffAuth.Middleware(deps.SREHandoffMCP))
+	}
+	if deps.IssuesMCP != nil {
+		issues := auth.IssuesMCPGate(deps.StudioClients, deps.IssuesMCP)
+		mux.Handle("POST "+internalV1+"/ae-studio/projects/{projectName}/issues/mcp", issues)
+		mux.Handle("POST "+internalV1+"/ae-studio/projects/{projectName}/issues/{issueNumber}/mcp", issues)
 	}
 	igen.HandlerWithOptions(strict, igen.StdHTTPServerOptions{
 		BaseURL:          internalV1,
@@ -248,6 +260,8 @@ var internalOpGates = map[string]internalOpGate{
 //	ae-studio/                 AE Studio pod   ae-studio-<org> client token, binds its recorded org (no cycle)
 //	mcp                        runner, pod     route miss here: own gate (auth.MCPGate), publisher or recorded ae-studio-<org> token, binds the verified org
 //	sre-handoff/mcp            SRE agent       route miss here: own gate (auth.SREHandoffVerifier), install-time handoff key; org per tool call, verified against observer alerts
+//	ae-studio/projects/{p}/issues[/{n}]/mcp
+//	                           AE Studio pod   route miss here: own gate (auth.IssuesMCPGate), recorded ae-studio-<org> token; the project (and issue) from the path
 //	any other embedded op      -               denied (401)
 //
 // A route miss passes through untouched: the inner mux answers 404 or 405, or

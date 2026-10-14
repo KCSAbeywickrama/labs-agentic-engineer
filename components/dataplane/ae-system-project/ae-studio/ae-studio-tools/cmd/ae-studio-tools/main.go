@@ -152,6 +152,9 @@ func run() error {
 	}
 	// The project resolver: aep-api on every request.
 	resolver := projects.NewAEPAPIResolver(aepAPI)
+	// The agent's Turn socket: the turns aep-api starts, and an issue's chat
+	// thread aep-api has removed.
+	turnSocket := turns.NewClient(cfg.TurnSocket)
 	// The usage outbox: finished turns' records to aep-api's
 	// record-turn-usage, for the process lifetime.
 	usageOutbox := startUsageOutbox(usage.New(usage.NewAEPAPIPost(aepAPI)))
@@ -165,6 +168,9 @@ func run() error {
 			Remote:   mcp.RemoteGit{Owner: cfg.GitHubOwner, Token: cfg.GitHubPAT},
 			Upstream: mcp.NewAEPAPIUpstream(aepAPI),
 		},
+		// The Issues and issue chats' issue tools, forwarded to aep-api's
+		// surface of the route's project (and issue).
+		IssuesUpstreams: mcp.NewIssuesUpstreams(aepAPI),
 		Snapshots: reader,
 		Usage:     usageOutbox.sender,
 	}
@@ -215,8 +221,10 @@ func run() error {
 			// project's .claude/skills, authored as the gitpat user.
 			Skills:   skills.NewHandler(skills.NewMirror(engine, skills.WithAuthor(commitAuthor)), repo.GitHubCloneURL, cfg.GitHubOwner),
 			Projects: resolver,
-			// The turns aep-api starts run on the agent's Turn socket.
-			Turns: turns.Relay{Turns: turns.NewClient(cfg.TurnSocket)},
+			// The turns aep-api starts run on the agent's Turn socket, and
+			// an issue's chat thread is removed there too.
+			Turns:   turns.Relay{Turns: turnSocket},
+			Threads: turnSocket,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

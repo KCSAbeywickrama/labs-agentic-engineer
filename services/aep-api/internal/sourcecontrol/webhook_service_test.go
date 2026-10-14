@@ -79,7 +79,8 @@ func TestWebhookRegister_HappyPathRegistersTheEventsAndPersistsID(t *testing.T) 
 func TestWebhookRegister_OneEnsureCallReplacesTheEvents(t *testing.T) {
 	t.Parallel()
 	wh, _, f := newWebhookSvcOnFake(t)
-	old, err := f.RegisterWebhook(testContext(), widgets, []string{"push"})
+	oldHook, err := f.RegisterWebhook(testContext(), widgets, 0, []string{"push"})
+	old := oldHook.ID
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +120,103 @@ func TestWebhookRegister_IsIdempotent(t *testing.T) {
 	}
 	if got := storedWebhookID(t, repo, "org1", "proj1"); got == nil || *got != *first {
 		t.Fatalf("persisted WebhookID = %v, want %d", got, *first)
+	}
+}
+
+// storedHook reads the persisted hook id and config rev off the fake row.
+func storedHook(t *testing.T, repo *fakeRepoRepo) (int64, string) {
+	t.Helper()
+	rec, err := repo.GetByOrgAndProjectID(context.Background(), "org1", "proj1")
+	if err != nil || rec == nil || rec.WebhookID == nil {
+		t.Fatalf("repo record: rec=%v err=%v", rec, err)
+	}
+	return *rec.WebhookID, rec.WebhookConfigRev
+}
+
+// The hook repair's case: the org's pod moved onto another config (its
+// relay channel moved, its webhook secret changed), so the stored hook no
+// longer delivers to the pod's URL. Register hands the pod the STORED id, so
+// that hook is reconfigured in place (no second hook beside it, posting to
+// the dead channel), and the row stores the rev the hook now carries,
+// which is the rev HookRev answers.
+func TestWebhookRegister_ReconfiguresTheStoredHookAtTheCurrentConfig(t *testing.T) {
+	t.Parallel()
+	wh, repo, f := newWebhookSvcOnFake(t)
+	first, err := wh.Register(testContext(), "org1", "proj1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, staleRev := storedHook(t, repo)
+	f.SetHookConfigRev("org1", "fedcba9876543210")
+
+	again, err := wh.Register(testContext(), "org1", "proj1")
+	if err != nil || *again != *first {
+		t.Fatalf("Register = (%v, %v), want the stored hook %d", again, err, *first)
+	}
+	if hooks := f.HookEvents(widgets); len(hooks) != 1 {
+		t.Fatalf("hooks = %v, want the stored one only", hooks)
+	}
+	if got := f.HookConfigRevs(widgets)[*first]; got != "fedcba9876543210" {
+		t.Fatalf("hook config rev %q, want the pod's current config", got)
+	}
+	id, rev := storedHook(t, repo)
+	current, err := wh.HookRev(testContext(), "org1")
+	if err != nil || id != *first || rev != current || rev == staleRev {
+		t.Fatalf("stored (%d, %q), want (%d, HookRev %q), changed from %q (err %v)", id, rev, *first, current, staleRev, err)
+	}
+}
+
+// A stored hook GitHub no longer has (deleted by hand, reaped) is created
+// again, and the new id replaces the stored one.
+func TestWebhookRegister_RecreatesAStoredHookGitHubLost(t *testing.T) {
+	t.Parallel()
+	wh, repo, f := newWebhookSvcOnFake(t)
+	lost := int64(4242)
+	if _, err := repo.SetWebhookIDIfReady(testContext(), "org1", "proj1", lost, "old"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := wh.Register(testContext(), "org1", "proj1")
+	if err != nil || *got == lost {
+		t.Fatalf("Register = (%v, %v), want a new hook", got, err)
+	}
+	if id, _ := storedHook(t, repo); id != *got || len(f.HookEvents(widgets)) != 1 {
+		t.Fatalf("stored %d, hooks %v, want the new hook %d", id, f.HookEvents(widgets), *got)
+	}
+}
+
+// The rev covers the subscribed events as well as the pod's config, so a
+// release that changes the subscription re-syncs every hook.
+func TestWebhookHookRev_FollowsThePodsConfig(t *testing.T) {
+	t.Parallel()
+	wh, _, f := newWebhookSvcOnFake(t)
+	before, err := wh.HookRev(testContext(), "org1")
+	if err != nil || before == "" || before == aestudiotest.DefaultHookConfigRev {
+		t.Fatalf("HookRev = (%q, %v), want the pod rev folded with the events", before, err)
+	}
+	f.SetHookConfigRev("org1", "fedcba9876543210")
+	if after, _ := wh.HookRev(testContext(), "org1"); after == before {
+		t.Fatal("HookRev must move with the pod's config")
+	}
+	f.FailOrg("org1", sourcecontrol.ErrAEStudioUnavailable)
+	if _, err := wh.HookRev(testContext(), "org1"); !errors.Is(err, sourcecontrol.ErrAEStudioUnavailable) {
+		t.Fatalf("err = %v, want the pod's", err)
+	}
+}
+
+// A reconnect asks for a re-sync: every row of the org keeps its hook id
+// and loses its rev, so the hook repair re-ensures each in place.
+func TestWebhookResyncOrg_ForgetsTheRevsAndKeepsTheIDs(t *testing.T) {
+	t.Parallel()
+	wh, repo, _ := newWebhookSvcOnFake(t)
+	first, err := wh.Register(testContext(), "org1", "proj1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wh.ResyncOrg(testContext(), "org1"); err != nil {
+		t.Fatal(err)
+	}
+	if id, rev := storedHook(t, repo); id != *first || rev != "" {
+		t.Fatalf("stored (%d, %q), want (%d, \"\")", id, rev, *first)
 	}
 }
 

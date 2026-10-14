@@ -213,20 +213,8 @@ func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult,
 // deployment mints a fix issue that keeps the working set non-empty. It is the
 // case that survives being unreachable that this exists for.
 func (l *loop) deliverVersion(ctx workflow.Context) (RunResult, error) {
-	version, err := l.readVersionState(ctx)
-	if isNoWriteTarget(err) {
-		// The project's pipeline stopped naming a write target after the last
-		// cycle: a configuration fault the read has recorded, settled as the
-		// deploy stage settles it.
-		return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
-	}
-	if err != nil {
-		return l.result(), err
-	}
-	if !version.Serving() {
-		workflow.GetLogger(ctx).Error("the milestone has no work left and the version is not serving",
-			"milestone", l.in.MilestoneNumber, "tag", l.in.Tag, "notServing", version.Describe())
-		return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonVersionIncomplete)
+	if settled, res, err := l.refuseUnlessServing(ctx); settled {
+		return res, err
 	}
 	issue, err := l.ensureValidationIssue(ctx)
 	if err != nil {
@@ -246,4 +234,34 @@ func (l *loop) deliverVersion(ctx workflow.Context) (RunResult, error) {
 	workflow.GetLogger(ctx).Info("version deployed-green; filed its validation task",
 		"milestone", l.in.MilestoneNumber, "validationIssue", issue)
 	return l.settle(ctx, delivery.RunStateSucceeded, "")
+}
+
+// refuseUnlessServing is the delivery gate both empty-milestone endings share:
+// it reads the version and, unless every component in the design is serving,
+// settles the run failed (`version-incomplete`, or `no-write-target` when the
+// read could not name an environment). settled=false means the version serves
+// and the caller may deliver it.
+//
+// The zero-cycle ending needs it as much as deliverVersion does. A milestone
+// whose Tasks are all closed says nothing about whether their work was ever
+// built: a merge the platform never saw closes them too, and no cycle exists to
+// fan its builds out.
+func (l *loop) refuseUnlessServing(ctx workflow.Context) (settled bool, res RunResult, err error) {
+	version, err := l.readVersionState(ctx)
+	if isNoWriteTarget(err) {
+		// The project's pipeline stopped naming a write target: a configuration
+		// fault the read has recorded, settled as the deploy stage settles it.
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+		return true, res, err
+	}
+	if err != nil {
+		return true, l.result(), err
+	}
+	if !version.Serving() {
+		workflow.GetLogger(ctx).Error("the milestone has no work left and the version is not serving",
+			"milestone", l.in.MilestoneNumber, "tag", l.in.Tag, "notServing", version.Describe())
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonVersionIncomplete)
+		return true, res, err
+	}
+	return false, RunResult{}, nil
 }

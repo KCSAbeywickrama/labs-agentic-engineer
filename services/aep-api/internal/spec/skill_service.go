@@ -94,7 +94,7 @@ type skillMetadata struct {
 
 // skillAepMetadata is the platform namespace inside `metadata`. `kind` names
 // the skill kind: platform | org | imported. `audience` names the agent(s)
-// this skill's guidance is written for: design | coding (ADR-0013); see
+// this skill's guidance is written for: design | coding | chat (ADR-0013); see
 // frontmatterAudience for the parse/default rule.
 type skillAepMetadata struct {
 	Kind     string   `yaml:"kind,omitempty"`
@@ -119,10 +119,11 @@ func frontmatterKind(fm skillFrontmatter) string {
 }
 
 // frontmatterAudience derives a skill's audience from its frontmatter:
-// `metadata.aep.audience`, filtered to the two recognised values (design,
-// coding — unrecognised entries are dropped rather than becoming a third
+// `metadata.aep.audience`, filtered to the recognised values (design, coding,
+// chat — unrecognised entries are dropped rather than becoming another
 // audience). An empty or absent list — including one that named only
-// unrecognised values — resolves to BOTH: narrowing is opt-in, so an unmarked
+// unrecognised values — resolves to design and coding (chat is opt-in only):
+// narrowing is opt-in, so an unmarked
 // SKILL.md (and any an org authors without knowing the field exists) stays
 // readable by whoever asks. Mirrors the TS agents service's
 // conversation/load-workspace.ts audience derivation (ADR-0013), which Go
@@ -131,7 +132,7 @@ func frontmatterAudience(fm skillFrontmatter) []string {
 	out := make([]string, 0, len(fm.Metadata.Aep.Audience))
 	for _, a := range fm.Metadata.Aep.Audience {
 		switch strings.TrimSpace(a) {
-		case SkillAudienceDesign, SkillAudienceCoding:
+		case SkillAudienceDesign, SkillAudienceCoding, SkillAudienceChat:
 			out = append(out, strings.TrimSpace(a))
 		}
 	}

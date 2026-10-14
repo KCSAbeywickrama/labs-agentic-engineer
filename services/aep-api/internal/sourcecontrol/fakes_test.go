@@ -146,7 +146,7 @@ func (f *fakeRepoRepo) Update(_ context.Context, repo *sourcecontrol.GitReposito
 	return nil
 }
 
-func (f *fakeRepoRepo) SetWebhookIDIfReady(_ context.Context, orgID, projectID string, hookID int64) (bool, error) {
+func (f *fakeRepoRepo) SetWebhookIDIfReady(_ context.Context, orgID, projectID string, hookID int64, configRev string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r, ok := f.rows[repoKey(orgID, projectID)]
@@ -154,7 +154,7 @@ func (f *fakeRepoRepo) SetWebhookIDIfReady(_ context.Context, orgID, projectID s
 		return false, nil
 	}
 	id := hookID
-	r.WebhookID = &id
+	r.WebhookID, r.WebhookConfigRev = &id, configRev
 	return true, nil
 }
 
@@ -163,7 +163,18 @@ func (f *fakeRepoRepo) ClearWebhookIDs(_ context.Context, orgID string) error {
 	defer f.mu.Unlock()
 	for _, r := range f.rows {
 		if r.OrgID == orgID {
-			r.WebhookID = nil
+			r.WebhookID, r.WebhookConfigRev = nil, ""
+		}
+	}
+	return nil
+}
+
+func (f *fakeRepoRepo) ClearWebhookConfigRevs(_ context.Context, orgID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.rows {
+		if r.OrgID == orgID {
+			r.WebhookConfigRev = ""
 		}
 	}
 	return nil

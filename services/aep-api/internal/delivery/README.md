@@ -79,7 +79,7 @@ outside that lock is the duplicate-issue race the lock exists to close.
 | Sub-package | Owns | Reaches the root for |
 |---|---|---|
 | `build` (buildpipe) | the whole-spec gate + the version's tag cut (its NAME comes from the request — console ADR-0030), **the milestone plan path** (mint the version's milestone, supersede the previous version into it, admit the run row, then plan its build issue and mint its gates), the version ledger, dependency preflight — which also answers what the version is called and changes, since the click makes one request | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
-| `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, run in the org's AE Studio pod (`aestudiotools.Turns`; the pod's `task-op` events drive the tap, every event a Temporal heartbeat through the root `WithProgress`/`ReportProgress`), which mints the version's one **build issue** (an ordered checklist, ADR-0050) **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
+| `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, run in the org's AE Studio pod (`aestudiotools.Turns`; the pod's `task-op` events drive the tap, every event a Temporal heartbeat through the root `WithProgress`/`ReportProgress`), which mints the version's one **build issue** (an ordered checklist, ADR-0050) **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg, and the hand-off to the coding agent (`promote-from-issue`: the console's Issue card, the issue agent's `hand_to_coding_agent`), which adopts the issue armed or answers 409 with why not | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
 | `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal (and builds a merge whose fan-out was lost) | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR — three workflows over one shared loop: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the version's judgement, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
@@ -364,9 +364,13 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `AbandonRun` (project delete) therefore terminates ALL THREE ids: the rows are purged in the same
   teardown, so there is nothing left to ask which ever existed, and a kind missed leaves a supervisor
   retrying forever against a repository that is gone.
-- **The reconcile sweep repairs missing repo hooks first** (`sweep_hooks.go`, `WithHookEnsurer`): each
-  pass ensures a hook for every ready project row with no hook id (a create-time registration that
-  failed). An org whose AE Studio is absent or not serving waits for the next pass; any other
+- **The reconcile sweep repairs missing and stale repo hooks first** (`sweep_hooks.go`,
+  `WithHookEnsurer`): each pass ensures a hook for every ready project row with no hook id (a
+  create-time registration that failed), and re-ensures every stored hook whose row's
+  `webhook_config_rev` is not the org's current one (one `get-hook-config` pod call per org per pass,
+  no GitHub call; the rev names the pod's delivery URL and webhook secret, so a moved relay channel, a
+  new secret or a row from before revs re-syncs the hook in place: `reason` `missing` or `stale` on
+  `eventcore.hook_repaired`). Platform repos are exempt. An org whose AE Studio is absent or not serving waits for the next pass; any other
   permanent refusal (repository gone, owner refused) skips that row for the life of the process with one
   value-free `eventcore.hook_repair_skipped {org, project, reason}`; a transient failure retries next
   pass (logged as a code and GitHub status, never the error text). A row skipped for good is forgotten
@@ -496,7 +500,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   writes, which is what lets the pass run every cycle.
 - **A version is delivered when it is SERVING, asserted rather than inferred.** The boundary re-reads
   the version state and requires every design component `serving` before it mints the validation task;
-  anything else settles `version-incomplete` naming what was not. "Deployed-green" used to be inferred
+  anything else settles `version-incomplete` naming what was not. A dev run that dispatched nothing
+  asks the same question before it settles `succeeded`/`skipped`: Tasks closed by a merge the platform
+  never saw leave an empty milestone over components nothing built. "Deployed-green" used to be inferred
   from an empty working set plus a green last cycle — neither of which is a statement about a component
   the cycles never touched. By the loop's own invariants the failure should be unreachable, which is
   exactly why it must be loud rather than silent.
@@ -632,7 +638,10 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   comment on somebody's own record is not suppression of anything (the sweep skips a cancelled increment
   whole, and a note is not work to it in any case). A TASK run's cancel reaches only the bugs and
   conflicts it was working and leaves the milestone open: the version it works is the DEPLOYED one and is
-  not being withdrawn. A VALIDATION run closes nothing through this path — its own consequence is the
+  not being withdrawn. That includes an issue a person HANDED OVER (`promote-from-issue`, from the console
+  or by the issue's agent): adoption arms it, so it is an armed bug like any other, and cancelling the
+  task run working it closes the person's issue with the rest — handing it over again means reopening it.
+  A hand-off also clears an `aep:halted` on the issue, being the person's decision to try again. A VALIDATION run closes nothing through this path — its own consequence is the
   task it ADOPTED, closed on every ending by `settleJudged`, and that scoping is what keeps a cancel
   arriving before the first read from closing a task the run never adopted. Nothing is REVERTED by any of it:
   merged commits stay on `main` and promoted components keep serving, so closing the milestone is a

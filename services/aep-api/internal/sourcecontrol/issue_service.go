@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // IssueService creates and lists GitHub issues on project repositories.
@@ -51,6 +53,9 @@ type IssueService interface {
 	// phase to write the LLM-authored body after the placeholder issue was
 	// created.
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
+	// EditIssueTitle replaces the issue's title. Used by an issue's agent
+	// (edit_issue).
+	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
 	// SetIssueMilestone assigns an existing issue to a milestone by NUMBER —
 	// adoption moving a bare issue into the deployed version's milestone.
 	SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error
@@ -128,6 +133,9 @@ type issueService struct {
 	// Skipping a repeat is safe because label creation is monotone — nothing in
 	// the platform deletes a label — and a process restart re-ensures anyway.
 	ensuredLabels sync.Map // "org/owner/repo\x00name\x00color" → struct{}
+	// recent bridges GitHub's list lag: it holds issues this process filed in
+	// the last minute so ListIssues can show them before GitHub's list does.
+	recent recentIssues
 }
 
 // keyedMutex is a per-key mutex pool that deletes a key's entry once no
@@ -234,7 +242,7 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 		unlock := s.lockRepoCreates(ref)
 		defer unlock()
 
-		existing, listErr := s.github.ListIssues(ctx, ref, []string{label})
+		existing, listErr := s.listWithRecent(ctx, ref, []string{label})
 		if listErr != nil {
 			// Best-effort: a failed lookup must not block filing the issue; at
 			// worst we regress to a possible duplicate.
@@ -258,7 +266,38 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 
 	// GitHub Projects v2 is dropped (tasks-github-native §4): no lazy board
 	// create/link/add on issue creation. Tasks are plain GitHub issues.
-	return s.github.CreateIssue(ctx, ref, req)
+	result, err := s.github.CreateIssue(ctx, ref, req)
+	if err != nil {
+		return nil, err
+	}
+	s.rememberCreated(ref, req, result)
+	return result, nil
+}
+
+// rememberCreated records a freshly filed issue for ListIssues' read-your-writes.
+func (s *issueService) rememberCreated(ref RepoRef, req CreateIssueRequest, result *IssueResult) {
+	if result == nil {
+		return
+	}
+	s.recent.remember(ref.Owner, ref.Repo, IssueInfo{
+		Number: result.Number,
+		Title:  req.Title,
+		Body:   req.Body,
+		URL:    result.URL,
+		State:  "open",
+		Labels: slices.Clone(req.Labels),
+	})
+}
+
+// listWithRecent is the host's issue list plus what this process filed inside
+// the host's indexing lag. Every read that decides something from the list
+// (the listing itself, the dedupe lookups) goes through it.
+func (s *issueService) listWithRecent(ctx context.Context, ref RepoRef, labels []string) ([]IssueInfo, error) {
+	issues, err := s.github.ListIssues(ctx, ref, labels)
+	if err != nil {
+		return nil, err
+	}
+	return s.recent.merge(ref.Owner, ref.Repo, labels, issues), nil
 }
 
 // ensureLabels pre-creates every label that this process has not already
@@ -330,7 +369,7 @@ func (s *issueService) ListIssues(ctx context.Context, orgID, projectID string, 
 	if err != nil {
 		return nil, err
 	}
-	issues, err := s.github.ListIssues(ctx, ref, labels)
+	issues, err := s.listWithRecent(ctx, ref, labels)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +415,14 @@ func (s *issueService) CloseIssue(ctx context.Context, orgID, projectID string, 
 		}
 	}
 
-	return s.github.CloseIssue(ctx, ref, number)
+	if err := s.github.CloseIssue(ctx, ref, number); err != nil {
+		return err
+	}
+	closedAt := s.recent.clock().UTC().Format(time.RFC3339)
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) {
+		i.State, i.StateReason, i.ClosedAt = "closed", "completed", closedAt
+	})
+	return nil
 }
 
 func (s *issueService) ReopenIssue(ctx context.Context, orgID, projectID string, number int) error {
@@ -384,7 +430,13 @@ func (s *issueService) ReopenIssue(ctx context.Context, orgID, projectID string,
 	if err != nil {
 		return err
 	}
-	return s.github.ReopenIssue(ctx, ref, number)
+	if err := s.github.ReopenIssue(ctx, ref, number); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) {
+		i.State, i.StateReason, i.ClosedAt = "open", "", ""
+	})
+	return nil
 }
 
 func (s *issueService) CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error {
@@ -432,7 +484,26 @@ func (s *issueService) EditIssueBody(ctx context.Context, orgID, projectID strin
 	if err != nil {
 		return err
 	}
-	return s.github.EditIssueBody(ctx, ref, number, body)
+	if err := s.github.EditIssueBody(ctx, ref, number, body); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) { i.Body = body })
+	return nil
+}
+
+func (s *issueService) EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("title is required")
+	}
+	ref, err := s.resolveRef(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.github.EditIssueTitle(ctx, ref, number, title); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) { i.Title = title })
+	return nil
 }
 
 func (s *issueService) SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error {
@@ -443,7 +514,11 @@ func (s *issueService) SetIssueMilestone(ctx context.Context, orgID, projectID s
 	if err != nil {
 		return err
 	}
-	return s.github.SetIssueMilestone(ctx, ref, number, milestoneNumber)
+	if err := s.github.SetIssueMilestone(ctx, ref, number, milestoneNumber); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) { i.MilestoneNumber = milestoneNumber })
+	return nil
 }
 
 func (s *issueService) AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error {
@@ -456,7 +531,19 @@ func (s *issueService) AddLabels(ctx context.Context, orgID, projectID string, n
 	}
 	// Ensure each label exists first — GitHub silently drops unknown labels.
 	s.ensureLabels(ctx, ref, labels)
-	return s.github.AddIssueLabels(ctx, ref, number, labels)
+	if err := s.github.AddIssueLabels(ctx, ref, number, labels); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) {
+		merged := slices.Clone(i.Labels) // listed copies share the old backing array
+		for _, label := range labels {
+			if !slices.Contains(merged, label) {
+				merged = append(merged, label)
+			}
+		}
+		i.Labels = merged
+	})
+	return nil
 }
 
 func (s *issueService) RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error {
@@ -464,7 +551,13 @@ func (s *issueService) RemoveLabel(ctx context.Context, orgID, projectID string,
 	if err != nil {
 		return err
 	}
-	return s.github.RemoveIssueLabel(ctx, ref, number, label)
+	if err := s.github.RemoveIssueLabel(ctx, ref, number, label); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) {
+		i.Labels = slices.DeleteFunc(slices.Clone(i.Labels), func(l string) bool { return l == label })
+	})
+	return nil
 }
 
 func (s *issueService) SetLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error {
@@ -473,7 +566,11 @@ func (s *issueService) SetLabels(ctx context.Context, orgID, projectID string, n
 		return err
 	}
 	s.ensureLabels(ctx, ref, labels)
-	return s.github.SetIssueLabels(ctx, ref, number, labels)
+	if err := s.github.SetIssueLabels(ctx, ref, number, labels); err != nil {
+		return err
+	}
+	s.recent.update(ref.Owner, ref.Repo, number, func(i *IssueInfo) { i.Labels = slices.Clone(labels) })
+	return nil
 }
 
 func (s *issueService) GetPullRequestState(ctx context.Context, orgID, projectID string, number int) (*PullRequestState, error) {
@@ -567,6 +664,10 @@ func labelColor(name string) string {
 		return "7057ff" // purple — planned work from the spec
 	case "bug":
 		return "d73a4a" // red — a defect (GitHub's own default for this name)
+	case "feature":
+		return "a2eeef" // cyan — something new a user asked for
+	case "improvement":
+		return "84b6eb" // light blue — something existing a user would make better
 	case "conflict":
 		return "b60205" // dark red — a pull request that will not merge
 	case "validation":

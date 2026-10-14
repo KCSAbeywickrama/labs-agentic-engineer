@@ -26,11 +26,22 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// hookRepair is the sweep's hook backstop. A project create
-// whose hook registration failed keeps going with a warning, and the row is
-// left with no hook id; each pass ensures a hook for every such ready row,
-// whatever its age (a row that holds an id keeps its hook: R12, no migration
-// of old hooks).
+// hookRepair is the sweep's hook backstop. Each pass it ensures the hook of
+// every ready project row that needs one:
+//
+//   - a row with no hook id: a project create whose hook registration failed
+//     keeps going with a warning and leaves the row so;
+//   - a row whose hook was ensured at another config rev than the one its
+//     org's AE Studio installs now. The rev names the pod's delivery URL and
+//     signing secret, so it moves when the org's relay channel moves (a new
+//     relay seed) or its webhook secret changes, and is "" on a row from
+//     before revs were stored. Such a hook posts to a dead channel or signs
+//     with a secret the pod refuses (401), so every delivery is lost. The
+//     ensure reconfigures the stored hook in place (re-created when GitHub
+//     no longer has it), and the row then stores the current rev.
+//
+// The org's current rev is one pod call per org per pass (no GitHub call);
+// a row at that rev costs nothing more.
 //
 // What it must never do is call GitHub every minute forever:
 //
@@ -47,7 +58,7 @@ type hookRepair struct {
 	ensurer HookEnsurer
 
 	mu      sync.Mutex
-	skipped map[RepoRef]struct{} // rows refused for good, keyed without HasHook
+	skipped map[RepoRef]struct{} // rows refused for good, keyed without their hook state
 }
 
 func (h *hookRepair) repair(ctx context.Context, repos []RepoRef) {
@@ -56,14 +67,23 @@ func (h *hookRepair) repair(ctx context.Context, repos []RepoRef) {
 	}
 	h.prune(repos)
 	waiting := map[string]bool{} // orgs whose AE Studio does not serve this pass
+	revs := map[string]string{}  // each org's current hook config rev, read once a pass
 	for _, repo := range repos {
-		if repo.HasHook || waiting[repo.OrgID] || h.isSkipped(repo) {
+		if repo.HookExempt || waiting[repo.OrgID] || h.isSkipped(repo) {
 			continue
+		}
+		reason := "missing"
+		if repo.HasHook {
+			current, ok := h.currentRev(ctx, repo.OrgID, revs, waiting)
+			if !ok || repo.HookRev == current {
+				continue
+			}
+			reason = "stale"
 		}
 		_, err := h.ensurer.Register(ctx, repo.OrgID, repo.ProjectID)
 		switch {
 		case err == nil:
-			slog.InfoContext(ctx, "eventcore.hook_repaired", "org", repo.OrgID, "project", repo.ProjectID)
+			slog.InfoContext(ctx, "eventcore.hook_repaired", "org", repo.OrgID, "project", repo.ProjectID, "reason", reason)
 		case errors.Is(err, sourcecontrol.ErrAEStudioUnavailable), errors.Is(err, sourcecontrol.ErrAEStudioAbsent):
 			waiting[repo.OrgID] = true
 			slog.DebugContext(ctx, "eventcore.hook_repair_deferred", "org", repo.OrgID, "reason", skipReason(err))
@@ -75,6 +95,27 @@ func (h *hookRepair) repair(ctx context.Context, repos []RepoRef) {
 				"reason", failReason(err), "status", httpStatusOf(err))
 		}
 	}
+}
+
+// currentRev answers org's current hook config rev, read once per pass into
+// revs. An org whose rev cannot be read waits for the next pass (waiting):
+// its stored hooks are not judged without it.
+func (h *hookRepair) currentRev(ctx context.Context, org string, revs map[string]string, waiting map[string]bool) (string, bool) {
+	if rev, ok := revs[org]; ok {
+		return rev, true
+	}
+	rev, err := h.ensurer.HookRev(ctx, org)
+	if err != nil {
+		waiting[org] = true
+		if errors.Is(err, sourcecontrol.ErrAEStudioUnavailable) || errors.Is(err, sourcecontrol.ErrAEStudioAbsent) {
+			slog.DebugContext(ctx, "eventcore.hook_repair_deferred", "org", org, "reason", skipReason(err))
+		} else {
+			slog.WarnContext(ctx, "eventcore.hook_rev_failed", "org", org, "reason", failReason(err), "status", httpStatusOf(err))
+		}
+		return "", false
+	}
+	revs[org] = rev
+	return rev, true
 }
 
 // prune forgets the skipped rows the listing no longer has (a deleted
@@ -113,7 +154,7 @@ func (h *hookRepair) skip(repo RepoRef) {
 }
 
 func skipKey(repo RepoRef) RepoRef {
-	repo.HasHook = false
+	repo.HasHook, repo.HookRev = false, ""
 	return repo
 }
 

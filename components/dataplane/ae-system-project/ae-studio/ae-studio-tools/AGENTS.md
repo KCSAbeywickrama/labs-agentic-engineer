@@ -31,12 +31,12 @@ reaper: [`design/clone-storage.md`](design/clone-storage.md).
 | `internal/config` | `Load(getenv)` reads the pod env; `CheckSecretRev` refuses to start when `AE_SECRET_REV` is not `AE_EXPECTED_SECRET_REV` |
 | `internal/auth` | JWT verifier over the IdP JWKS; `UserGate` (`/v1`), `M2MGate` (`/internal/v1`) |
 | `internal/problem` | the `application/problem+json` body (a leaf, shared by gates and edge) |
-| `internal/edge` | the mount tables (`routes.go`), the `/internal/v1` group (`internal*.go`), the owner guard, the Files and MCP socket mounts |
+| `internal/edge` | the mount tables (`routes.go`), the `/internal/v1` group (`internal*.go`; `internal_threads.go` is aep-api's `remove-issue-thread`), the owner guard, the Files and MCP socket mounts |
 | `internal/gen` | generated, never edited; one sub-package per contract |
-| `internal/mcp` | the MCP socket's JSON-RPC server and `AllowedTools` |
+| `internal/mcp` | the MCP socket's JSON-RPC servers: the design tools' `AllowedTools`, and the Issues area chats' pinned lists forwarded to aep-api: `IssuesTools` (the Issues chat; aep-api answers `classify_report` with the platform's key, which no pod holds) and `IssueTools` (an issue's chat) |
 | `internal/files` | read-only Files ops, `Snapshot`, and `Applier` (the Files socket's apply) |
 | `internal/repo` | the git engine (bare mirrors, `Mutate`, `Commit`, tags), its `/internal/v1/repos/{owner}/{repo}` handler, and `reaper/` |
-| `internal/turns` | `Relay` of aep-api's turns to the Turn socket; `turnstest` is a fake Turn socket replaying the golden streams |
+| `internal/turns` | `Relay` of aep-api's turns to the Turn socket, and `Client.RemoveIssueThread` (the socket's `DELETE /projects/{p}/issues/{n}/thread?before=`); `turnstest` is a fake Turn socket replaying the golden streams |
 | `internal/usage` | the turn-usage outbox `Sender` |
 | `internal/webhook` | HMAC check and the `Forwarder` to aep-api |
 | `internal/github` | the pod's one GitHub client and its `/internal/v1` ops |

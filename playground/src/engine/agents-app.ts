@@ -111,7 +111,7 @@ export async function bootAgentsApp(opts: BootOptions): Promise<AgentsApp> {
   );
   await listening(edge);
   const turnSocket = join(opts.socketDir, "turn.sock");
-  const socket = createTurnSocketApp({ turns, desk }).listen(turnSocket);
+  const socket = createTurnSocketApp({ turns, desk, threads }).listen(turnSocket);
   await listening(socket);
 
   const { port } = edge.address() as AddressInfo;

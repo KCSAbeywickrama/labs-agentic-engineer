@@ -25,7 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isTurnSpec } from "../src/contracts/sse-events.js";
+import { isToolset, isTurnSpec, TOOLSETS } from "../src/contracts/sse-events.js";
 
 test("accepts each well-formed kind", () => {
   assert.ok(isTurnSpec({ kind: "chat", text: "add a returns policy" }));
@@ -82,4 +82,9 @@ test("a plan scope is validated when present", () => {
 
 test("unknown extra keys are tolerated", () => {
   assert.ok(isTurnSpec({ kind: "start", idea: "x", futureField: true }));
+});
+
+test("the main agent's tool sets; an area's chat is none of them", () => {
+  assert.deepEqual([...TOOLSETS], ["files", "task-plan"]);
+  for (const area of ["issues", "issue"]) assert.equal(isToolset(area), false, area);
 });

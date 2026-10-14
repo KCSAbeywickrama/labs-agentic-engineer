@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { AskQuestionInput } from "@aep/agent-stream";
 import type { QuestionItem } from "../chatLog";
+import { ISSUES_CHAT, MAIN_CHAT, type ChatRef } from "../chatRef";
 
 // The chat's side of the agent's questions (ADR-0002 / #879): a pointer to
 // the Questions card while they are open, their texts once they are not.
@@ -39,7 +40,10 @@ afterEach(() => {
 
 const Q = (question: string): AskQuestionInput => ({ question, options: [{ label: "Yes" }, { label: "No" }] });
 
-function show(questions: AskQuestionInput[], opts: { open?: boolean; streaming?: boolean; answered?: boolean } = {}) {
+function show(
+  questions: AskQuestionInput[],
+  opts: { open?: boolean; streaming?: boolean; answered?: boolean; chat?: ChatRef } = {},
+) {
   const item: QuestionItem = {
     kind: "question",
     id: "t1:q:c1",
@@ -51,7 +55,7 @@ function show(questions: AskQuestionInput[], opts: { open?: boolean; streaming?:
   };
   render(
     <OxygenUIThemeProvider theme={OxygenTheme}>
-      <QuestionsPointer projectName="acme" item={item} open={opts.open ?? true} />
+      <QuestionsPointer projectName="acme" item={item} open={opts.open ?? true} chat={opts.chat ?? MAIN_CHAT} />
     </OxygenUIThemeProvider>,
   );
 }
@@ -64,6 +68,15 @@ describe("QuestionsPointer", () => {
     expect(screen.queryByText("Who approves?")).toBeNull();
     fireEvent.click(pointer);
     expect(navigate).toHaveBeenCalledWith({ to: "/projects/$projectName/questions", params: { projectName: "acme" } });
+  });
+
+  it("points the Issues chat's questions at the card over the Issues page", () => {
+    show([Q("What broke?")], { chat: ISSUES_CHAT });
+    fireEvent.click(screen.getByRole("button", { name: /The agent has a question/ }));
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/projects/$projectName/issues/questions",
+      params: { projectName: "acme" },
+    });
   });
 
   it("speaks of one question in the singular", () => {

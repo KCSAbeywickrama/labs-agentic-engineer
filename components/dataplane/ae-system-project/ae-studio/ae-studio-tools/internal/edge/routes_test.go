@@ -208,6 +208,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Skills:   skills.NewHandler(skills.NewMirror(engine), cloneURL, cfg.GitHubOwner),
 		Projects: h.projects,
 		Turns:    turns.Relay{Turns: turns.NewClient(deps.turnSocket)},
+		Threads:  turns.NewClient(deps.turnSocket),
 	})
 	h.engine = engine
 	return h

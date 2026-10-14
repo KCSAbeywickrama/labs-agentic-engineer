@@ -26,6 +26,15 @@
  * the send (lookup → admit → desk.start, so a refused send takes no
  * lock). Every refusal is a `TurnStartError` the edge maps to a status.
  *
+ * A browser turn runs in the chat its thread belongs to (`conversations/
+ * chat.ts`). The main chat's is a spec turn. An area's chat (the Issues
+ * area's own, or the area focused on an issue) runs plain chat turns for the
+ * area's sub-agent: no `/<skill>` flows, no Room, no spec scope, its scope's
+ * tools over its MCP route; a turn focused on an issue is refused while the
+ * issue is closed (`409 issue_closed`), which removes the thread. A main turn
+ * is told what the Issues area's chat came to meanwhile (branch notes); that
+ * chat's turn outcome is kept for it.
+ *
  * Server-started turns (the Turn socket) take the same path with the
  * caller's `turnId`: a turn id the desk still knows reattaches instead.
  * **Kickoff** (`start`) is `/start` on the project's current thread, in the
@@ -65,12 +74,17 @@ import {
 import { runConversationTurn } from "../conversation/run-conversation-turn.js";
 import { stepContextOf } from "../conversation/step-context.js";
 import { codedErrorFrame, turnErrorFrame } from "../conversation/turn-error.js";
+import type { BranchNote } from "../conversations/branch-notes.js";
+import { chatKey, issueOf, MAIN_CHAT, type Chat } from "../conversations/chat.js";
+import { issueMcpPath, issuesMcpPath, issueState } from "../conversations/issue-state.js";
 import type { ThreadBook } from "../conversations/thread-book.js";
+import { mcpRoute } from "../shared/mcp-client.js";
 import { composeInstruction, eagerSkillsFor, scopeFactFor, toolsetFor, wantsRegisterDraftTool } from "../prompts/turn.js";
 import { connectionHost, type ModelConnection } from "../shared/model.js";
 import { projectSnapshotDir, skillsSnapshotDir } from "../shared/snapshot-path.js";
 import type { ConversationStore } from "../store/conversation-store.js";
 import { ToolsSocketError, type ProjectSnapshot, type ToolsSocket } from "../tools-socket/client.js";
+import { removeIssueThread } from "./issue-thread-removal.js";
 import { designFeaturesOf, savesItsEnd, startTurnSummary, turnSpecFor } from "./start-spec.js";
 import {
   DeskClosedError,
@@ -226,8 +240,15 @@ interface Launch {
   flow: string;
   material: TurnMaterial;
   conn: ModelConnection;
-  /** The project turn joins the Room (`undefined` for marketplace and Plan turns). */
+  /** The project turn joins the Room (`undefined` for marketplace, Plan and area-chat turns). */
   roomProject?: string;
+  /** The project chat the turn runs in (the main chat for every turn but an area chat's). */
+  chat: Chat;
+  /**
+   * A main-chat browser turn: told what the area chats came to meanwhile,
+   * taken once the desk accepted the turn (a refused start leaves them).
+   */
+  takesBranchNotes?: true;
   route: "project" | "marketplace";
   /** A one-shot conversation (Plan): no earlier turn's facts, dropped from the store at the end. */
   throwaway?: boolean;
@@ -248,18 +269,30 @@ export class TurnStarter {
     this.refusing = true;
   }
 
-  /** Start a browser turn in the project's current thread; resolves to its turn id. */
+  /**
+   * Start a browser turn in one of the project's current threads, in the
+   * chat that thread belongs to; resolves to its turn id.
+   */
   async startProjectTurn(req: { project: string; conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
+    const chat = this.deps.threads.chatOf(req.project, req.conversationId);
+    if (!chat) throw rotated();
+    if (chat.area !== undefined && req.input.scope) {
+      throw new TurnStartError(400, "invalid_turn", "an area's chat takes no scope");
+    }
+    // A closed issue has no thread: refused (and its thread removed) before the lookup.
+    const issue = issueOf(chat);
+    if (issue !== undefined) await this.checkIssueOpen(req.project, issue);
     const lookup = await this.lookup(req.project);
-    const { spec, flow } = turnSpecFor(req.input.instruction, lookup);
+    // An area's sub-agent works on no spec: its message is a plain chat turn,
+    // so a typed `/design` is words for that agent, not a command.
+    const { spec, flow } =
+      chat.area === undefined ? turnSpecFor(req.input.instruction, lookup) : { spec: { kind: "chat" as const, text: req.input.instruction }, flow: "" };
     const material = await this.material(req.input, spec, () => this.projectDirs(req.project, lookup), conn);
-    const scope: Scope = { kind: "project", project: req.project };
+    const scope: Scope = { kind: "project", project: req.project, chat: chatKey(chat) };
     this.refuseBusy(scope);
     // A full or demoted thread is refused before anything holds the lock.
-    if ((await this.deps.threads.admit(req.project, req.conversationId, conn.contextWindow)) === "rotated") {
-      throw new TurnStartError(409, "conversation_rotated", "the conversation is no longer the project's current thread");
-    }
+    if ((await this.deps.threads.admit(req.project, req.conversationId, conn.contextWindow)) === "rotated") throw rotated();
     return this.launch({
       scope,
       kind: "browser",
@@ -270,9 +303,32 @@ export class TurnStarter {
       flow,
       material,
       conn,
-      ...(this.deps.room ? { roomProject: req.project } : {}),
+      ...(this.deps.room && chat.area === undefined ? { roomProject: req.project } : {}),
       route: "project",
+      chat,
+      ...(chat.area === undefined ? { takesBranchNotes: true } : {}),
     }).turnId;
+  }
+
+  /**
+   * Refuse an issue's chat unless the issue is open: `404 issue_unknown` for
+   * no such issue, `409 issue_closed` for a closed one, whose thread is then
+   * removed (a close the pod was not told of included), at its running turn's
+   * end when one runs. The issue tools not answering is `503 tools_unavailable`.
+   */
+  async checkIssueOpen(project: string, issueNumber: number): Promise<void> {
+    if (!isProjectName(project)) throw new TurnStartError(404, "project_unknown", "no such project");
+    let state: "open" | "closed" | "unknown";
+    try {
+      state = await issueState(this.deps.tools, project, issueNumber);
+    } catch {
+      throw new TurnStartError(503, "tools_unavailable", "the studio's tools are not answering");
+    }
+    if (state === "unknown") throw new TurnStartError(404, "issue_unknown", "no such issue");
+    if (state === "closed") {
+      await removeIssueThread(this.deps, project, issueNumber, new Date());
+      throw new TurnStartError(409, "issue_closed", "the issue is closed");
+    }
   }
 
   /**
@@ -319,6 +375,7 @@ export class TurnStarter {
       conn,
       ...(this.deps.room ? { roomProject: req.project } : {}),
       route: "project",
+      chat: MAIN_CHAT,
     });
   }
 
@@ -348,6 +405,7 @@ export class TurnStarter {
       material,
       conn,
       route: "project",
+      chat: MAIN_CHAT,
       throwaway: true,
     });
   }
@@ -385,6 +443,7 @@ export class TurnStarter {
       material,
       conn,
       route: "marketplace",
+      chat: MAIN_CHAT,
     }).turnId;
   }
 
@@ -523,6 +582,8 @@ export class TurnStarter {
       baseRef: l.material.baseRef,
       skillsRef: l.material.skillsRef,
       ...designFeaturesFact(l.flow, l.spec),
+      ...(l.chat.area !== undefined ? { area: l.chat.area } : {}),
+      ...(l.chat.focus !== undefined ? { focus: l.chat.focus } : {}),
     };
     const scope = l.input.scope;
     const instruction = composeInstruction(l.spec, {
@@ -534,6 +595,7 @@ export class TurnStarter {
       previousTurnFailed: last?.status === "failed",
       ...(l.input.aim ? { aim: l.input.aim } : {}),
       ...(this.deps.headless ? { headless: true } : {}),
+      ...(l.chat.area !== undefined ? { area: l.chat.area } : {}),
       now: new Date().toISOString(),
     });
     const filesChangedExternally = last !== null && last.baseRef !== l.material.baseRef;
@@ -559,11 +621,22 @@ export class TurnStarter {
     const host = connectionHost(l.conn);
     const roomScoped = l.roomProject !== undefined;
     const gates = { flow: l.flow, roomScoped };
+    const { chat } = l;
     const toolset = toolsetFor(l.spec);
-    const eager = eagerSkillsFor(l.spec, l.input.scope, orgDesignSystem(l.material.skillSource));
+    // An area's sub-agent carries no spec flows, so there is nothing to inline.
+    const eager = chat.area !== undefined ? [] : eagerSkillsFor(l.spec, l.input.scope, orgDesignSystem(l.material.skillSource));
+    // An area's sub-agent acts with its chat's tools only, over its MCP route:
+    // the issue's when the chat is focused on one, else the Issues area's.
+    const issue = issueOf(chat);
+    const areaMcp =
+      chat.area === undefined
+        ? undefined
+        : mcpRoute(deps.tools, issue !== undefined ? issueMcpPath(projectOf(l.scope), issue) : issuesMcpPath(projectOf(l.scope)));
     const m = l.material;
     const author = authorOf(l.credit);
     return async (emit, signal): Promise<TurnOutcome> => {
+      // Taken before the first await: the desk calls the run as it accepts the turn.
+      const branchNotes: BranchNote[] = l.takesBranchNotes ? deps.threads.takeBranchNotes(projectOf(l.scope)) : [];
       let contextTokens: number | undefined;
       const onEvent = (part: StreamPart): void => {
         contextTokens = stepContextOf(part) ?? contextTokens;
@@ -601,8 +674,10 @@ export class TurnStarter {
             toolset,
             ...(l.spec.kind === "plan" && l.spec.scope ? { planScope: l.spec.scope } : {}),
             ...(wantsRegisterDraftTool(l.spec, l.route) ? { registerDraft: true } : {}),
-            ...(catalogTurn(gates) ? { mcp: deps.tools } : {}),
-            webSearch: designOrRoomTurn(gates),
+            ...(areaMcp ? { mcp: areaMcp } : catalogTurn(gates) ? { mcp: deps.tools } : {}),
+            ...(chat.area !== undefined ? { chat, project: projectOf(l.scope) } : {}),
+            ...(branchNotes.length ? { branchNotes } : {}),
+            webSearch: chat.area === undefined && designOrRoomTurn(gates),
             ...(eager.length ? { eagerSkills: eager } : {}),
             ...(deps.surface ? { surface: deps.surface } : {}),
             ...(peer ? { collabPeer: peer } : {}),
@@ -623,6 +698,8 @@ export class TurnStarter {
             onEvent,
             abortSignal: signal,
           });
+          // What the Issues area's chat came to reaches the main chat's next turn.
+          if (chat.area === "issues" && res.outcome) deps.threads.noteOutcome(projectOf(l.scope), res.outcome);
           const usage = {
             usage: res.usage,
             ...(contextTokens !== undefined ? { contextTokens } : {}),
@@ -669,6 +746,17 @@ export class TurnStarter {
   }
 }
 
+/** The send addressed a thread that is not its chat's current one. */
+function rotated(): TurnStartError {
+  return new TurnStartError(409, "conversation_rotated", "the conversation is no longer the project's current thread");
+}
+
+/** The project a project-scoped turn runs for. */
+function projectOf(scope: Scope): string {
+  if (scope.kind !== "project") throw new Error("an area chat's turn is a project turn");
+  return scope.project;
+}
+
 /** A design turn's feature IDs for its usage record; none for a bare `/design` or any other flow. */
 function designFeaturesFact(flow: string, spec: TurnSpec): { designFeatures?: string[] } {
   if (flow !== "design") return {};
@@ -683,18 +771,22 @@ function authorOf(credit: Credit): { id: string; name: string } | undefined {
 }
 
 /**
- * The desk's `onFinished`: the record goes to the usage outbox, and a project
- * turn's closing context size goes to its thread for auto-rotation.
+ * The desk's `onFinished`: the record goes to the usage outbox, a project
+ * turn's closing context size goes to its thread for auto-rotation, and an
+ * issue thread's removal that waited for the turn runs.
  */
 export function finishedTurnSink(
-  threads: Pick<ThreadBook, "noteContextTokens">,
+  threads: Pick<ThreadBook, "noteContextTokens" | "turnEnded">,
   outbox: { push(r: Parameters<TurnRecordSink>[0]): void },
 ): TurnRecordSink {
   return (record) => {
     outbox.push(record);
-    if (record.project !== undefined && record.contextTokens !== undefined) {
+    if (record.project === undefined) return;
+    if (record.contextTokens !== undefined) {
       threads.noteContextTokens(record.project, record.conversationId, record.contextTokens);
     }
+    // The store is in memory: a removal cannot fail, and the sink must not throw.
+    threads.turnEnded(record.project, record.conversationId).catch(() => undefined);
   };
 }
 

@@ -150,6 +150,30 @@ describe("a turn's lifecycle", () => {
     expect(ended).toHaveBeenCalledWith(PROJECT, "completed");
   });
 
+  it("shows a hand-off the turn ends on as its announcement", async () => {
+    const { store, streams, chat } = setup();
+    await store.open(PROJECT);
+    const input = { area: "issues", request: "Save does nothing" };
+    streams.set(
+      "t1",
+      sse([
+        { type: "tool-call", toolCallId: "c1", toolName: "hand_off", input },
+        { type: "tool-result", toolCallId: "c1", toolName: "hand_off", input, output: { status: "awaiting_handoff", area: "issues" } },
+        { type: "turn-completed" },
+      ]),
+    );
+    await store.send(PROJECT, "Save does nothing", PRODUCT);
+    await vi.waitFor(() => expect(chat().turn).toEqual({ phase: "idle" }));
+    expect(chat().items.at(-1)).toEqual({
+      kind: "handoff",
+      id: "t1:h:c1",
+      turnId: "t1",
+      toolCallId: "c1",
+      area: "issues",
+      request: "Save does nothing",
+    });
+  });
+
   it("says why a turn failed, and ends it failed", async () => {
     const { store, streams, chat, ended } = setup();
     await store.open(PROJECT);
@@ -178,6 +202,19 @@ describe("a line posted from outside the chat", () => {
     await store.open(PROJECT);
     store.post(PROJECT, "v1 is building. Watch it here.", [{ kind: "open-build", label: "Open v1", version: "v1" }]);
     expect(chat().items.at(-1)).toMatchObject({ actions: [{ kind: "open-build", version: "v1" }] });
+  });
+
+  it("can be reworded in place, keeping its row", async () => {
+    const { store, chat } = setup();
+    await store.open(PROJECT);
+    store.post(PROJECT, "From Issues · 1 message", [{ kind: "open-issues", label: "Reopen" }]);
+    store.post(PROJECT, "Another line");
+    const [first] = chat().items;
+    store.replaceNote(PROJECT, first!.id, "From Issues · 3 messages", [{ kind: "open-issues", label: "Reopen" }]);
+    expect(chat().items).toEqual([
+      { kind: "note", id: first!.id, text: "From Issues · 3 messages", actions: [{ kind: "open-issues", label: "Reopen" }] },
+      { kind: "note", id: expect.any(String), text: "Another line" },
+    ]);
   });
 });
 
@@ -556,3 +593,60 @@ describe("before a turn", () => {
   });
 });
 
+
+describe("forgetting a thread (it was removed: its issue was closed)", () => {
+  it("drops what it held and tells its listeners; the next open resolves a fresh thread", async () => {
+    let current = "conv-1";
+    const { store, api, chat } = setup({
+      api: {
+        conversationId: vi.fn(async () => current),
+        history: vi.fn(async (_p: string, conversationId: string) =>
+          conversationId === "conv-1" ? [{ role: "user" as const, content: "Is it still broken?" }] : [],
+        ),
+      },
+    });
+    await store.open(PROJECT);
+    expect(chat().items).toHaveLength(1);
+    const told = vi.fn();
+    store.subscribe(PROJECT, told);
+
+    store.forget(PROJECT);
+    expect(told).toHaveBeenCalled();
+    expect(chat()).toEqual({ status: "loading", error: null, items: [], turn: { phase: "idle" } });
+
+    current = "conv-2";
+    await store.open(PROJECT);
+    expect(api.conversationId).toHaveBeenCalledTimes(2);
+    expect(api.history).toHaveBeenLastCalledWith(PROJECT, "conv-2");
+    expect(chat()).toMatchObject({ status: "ready", items: [] });
+  });
+
+  it("lets a load in flight land nowhere", async () => {
+    let release!: () => void;
+    const { store, api, chat } = setup({
+      api: { history: vi.fn(() => new Promise<ConversationMessage[]>((r) => (release = () => r([])))) },
+    });
+    const loading = store.open(PROJECT);
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
+    store.forget(PROJECT);
+    release();
+    await loading;
+    expect(chat().status).toBe("loading");
+  });
+
+  it("lets a turn still folding land nowhere, though its end is still told", async () => {
+    const { store, streams, chat, ended } = setup();
+    await store.open(PROJECT);
+    const stream = controlledStream();
+    streams.set("t1", stream.body);
+    await store.send(PROJECT, "Close it", PRODUCT);
+    await vi.waitFor(() => expect(chat().turn.phase).toBe("running"));
+
+    store.forget(PROJECT);
+    stream.send({ type: "text-delta", delta: "Closed." });
+    stream.send({ type: "turn-completed" });
+    stream.end();
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(PROJECT, "completed"));
+    expect(chat()).toEqual({ status: "loading", error: null, items: [], turn: { phase: "idle" } });
+  });
+});

@@ -33,6 +33,11 @@ func (c *countingHooks) Register(context.Context, string, string) (*int64, error
 	return &id, nil
 }
 
+func (c *countingHooks) HookRev(context.Context, string) (string, error) {
+	c.calls++
+	return "r", nil
+}
+
 type credStatus struct {
 	p   *organization.Projection
 	err error
@@ -42,8 +47,8 @@ func (c credStatus) Status(context.Context, string) (*organization.Projection, e
 	return c.p, c.err
 }
 
-// The sweep's hook repair registers only for an org whose GitHub credential
-// is active: a disconnected or never-connected org reads as absent (passed
+// The sweep's hook repair registers (and reads the hook rev) only for an
+// org whose GitHub credential is active: a disconnected or never-connected org reads as absent (passed
 // by this tick), so the repair never undoes a disconnect.
 func TestActiveOrgHooks_RegistersOnlyForAnActiveCredential(t *testing.T) {
 	t.Parallel()
@@ -62,9 +67,14 @@ func TestActiveOrgHooks_RegistersOnlyForAnActiveCredential(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			hooks := &countingHooks{}
-			_, err := activeOrgHooks{hooks: hooks, creds: tc.creds}.Register(context.Background(), "acme", "p")
+			gated := activeOrgHooks{hooks: hooks, creds: tc.creds}
+			_, err := gated.Register(context.Background(), "acme", "p")
 			if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) || hooks.calls != tc.calls {
-				t.Fatalf("err=%v calls=%d, want %v and %d", err, hooks.calls, tc.want, tc.calls)
+				t.Fatalf("register: err=%v calls=%d, want %v and %d", err, hooks.calls, tc.want, tc.calls)
+			}
+			_, err = gated.HookRev(context.Background(), "acme")
+			if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) || hooks.calls != 2*tc.calls {
+				t.Fatalf("rev: err=%v calls=%d, want %v and %d", err, hooks.calls, tc.want, 2*tc.calls)
 			}
 		})
 	}

@@ -780,10 +780,20 @@ func runSREAgentHelm(ctx context.Context, label string, args []string) error {
 	}
 	defer cleanup()
 	args = append(args, flags...)
-	if major >= 4 {
-		args = append(args, "--force-conflicts")
-	}
+	args = append(args, serverSideApplyFlags(major)...)
 	return runHelmWithEnv(ctx, label, env, args...)
+}
+
+// serverSideApplyFlags are the apply flags of an SRE-agent upgrade on helm
+// major. On v4, --force-conflicts with --server-side=true: v4's default
+// ("auto") reuses the previous release's apply method, so a release a Helm 3
+// run (or OpenChoreo's own install) left client-side fails every upgrade with
+// "forceConflicts enabled when serverSideApply disabled".
+func serverSideApplyFlags(major int) []string {
+	if major >= 4 {
+		return []string{"--server-side=true", "--force-conflicts"}
+	}
+	return nil
 }
 
 // helmMajorVersion returns the installed helm's major version. Best-effort:

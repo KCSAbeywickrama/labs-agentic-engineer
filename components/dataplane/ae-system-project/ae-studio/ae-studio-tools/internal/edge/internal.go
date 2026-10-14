@@ -96,6 +96,9 @@ type internalServer struct {
 	// the turn to the agent (internal_turns.go).
 	projects projects.Resolver
 	turns    TurnRelay
+	// threads removes an issue's chat thread in the agent
+	// (internal_threads.go).
+	threads ThreadRemover
 }
 
 var _ gen.StrictServerInterface = internalServer{}

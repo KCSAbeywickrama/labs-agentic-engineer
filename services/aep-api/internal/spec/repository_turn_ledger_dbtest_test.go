@@ -237,6 +237,43 @@ func TestRecordFinished_ReadersSeeTheLedger(t *testing.T) {
 	}
 }
 
+// A turn of the Issues chat or of an issue's chat is never spec work: Newest,
+// which drives the kickoff guard and spec.agent, reads past it to the main
+// chat's newest turn, and the view is stored as the pod reported it.
+func TestRecordFinished_NewestReadsTheMainChatOnly(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := spec.NewTurnRepository(db, nil)
+	ctx := context.Background()
+	main := finishedTurn("p1")
+	issues := finishedTurn("p1")
+	issues.Flow = ""
+	issues.ChatView = "issues"
+	issues.Status = "failed"
+	issues.StartedAt = main.FinishedAt.Add(time.Minute)
+	issues.FinishedAt = issues.StartedAt.Add(time.Minute)
+	issue := issues
+	issue.TurnID = uuid.NewString()
+	issue.ChatView = "issue"
+	issue.StartedAt = issues.FinishedAt.Add(time.Minute)
+	issue.FinishedAt = issue.StartedAt.Add(time.Minute)
+
+	if err := repo.RecordFinished(ctx, "o1", []spec.TurnRecord{main, issues, issue}); err != nil {
+		t.Fatalf("RecordFinished: %v", err)
+	}
+	newest, err := repo.Newest(ctx, "o1", "p1")
+	if err != nil || newest == nil || newest.ID != main.TurnID {
+		t.Fatalf("Newest = (%+v, %v), want the main chat's turn", newest, err)
+	}
+	var views []string
+	if err := db.Model(&spec.AgentTurn{}).Where("org_id = ?", "o1").Order("created_at").Pluck("chat_view", &views).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 3 || views[0] != "" || views[1] != "issues" || views[2] != "issue" {
+		t.Fatalf("chat_view = %q", views)
+	}
+}
+
 // A ledger row sorts by when its turn started, not by when the record arrived:
 // a batch may carry two turns of one project, in any order, and a delayed
 // batch must not make an older turn the newest.

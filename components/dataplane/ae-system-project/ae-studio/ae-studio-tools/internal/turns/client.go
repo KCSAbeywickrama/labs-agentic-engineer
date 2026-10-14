@@ -16,7 +16,8 @@
 
 // Package turns runs the turns aep-api starts in the studio (kickoff and
 // plan): the Turn socket client (ae-design-agent serves it, AE_TURN_SOCKET)
-// and the relay that streams a turn's NDJSON frames back to aep-api.
+// and the relay that streams a turn's NDJSON frames back to aep-api. The
+// same client removes an issue's chat thread when aep-api asks.
 package turns
 
 import (
@@ -78,4 +79,21 @@ func (c *Client) Start(ctx context.Context, body Body) (io.ReadCloser, int, erro
 		return nil, 0, fmt.Errorf("%w: %w", ErrSocketUnavailable, err)
 	}
 	return resp.Body, resp.StatusCode, nil
+}
+
+// RemoveIssueThread asks the agent to remove the chat threads of issue number
+// of project created before before (remove-issue-thread). ErrSocketUnavailable
+// when the socket could not be reached; any answer but 204 is an error naming
+// its status.
+func (c *Client) RemoveIssueThread(ctx context.Context, project string, number int, before time.Time) error {
+	resp, err := c.api.RemoveIssueThread(ctx, project, number, &turnsock.RemoveIssueThreadParams{Before: before})
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSocketUnavailable, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("remove issue thread: the design agent answered %d", resp.StatusCode)
+	}
+	return nil
 }

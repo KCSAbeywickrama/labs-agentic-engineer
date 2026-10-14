@@ -69,6 +69,21 @@ func (e ProjectSnapshotKnown) Valid() bool {
 	}
 }
 
+// Defines values for TurnRecordArea.
+const (
+	Issues TurnRecordArea = "issues"
+)
+
+// Valid indicates whether the value is a known member of the TurnRecordArea enum.
+func (e TurnRecordArea) Valid() bool {
+	switch e {
+	case Issues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TurnRecordKind.
 const (
 	Browser TurnRecordKind = "browser"
@@ -126,6 +141,21 @@ func (e TurnRecordStatus) Valid() bool {
 	case Completed:
 		return true
 	case Failed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TurnRecordFocusKind.
+const (
+	Issue TurnRecordFocusKind = "issue"
+)
+
+// Valid indicates whether the value is a known member of the TurnRecordFocusKind enum.
+func (e TurnRecordFocusKind) Valid() bool {
+	switch e {
+	case Issue:
 		return true
 	default:
 		return false
@@ -198,6 +228,8 @@ type SkillsSnapshot struct {
 
 // TurnRecord One finished turn, as the ledger stores it. Idempotent on turnId.
 type TurnRecord struct {
+	// Area The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+	Area   TurnRecordArea    `json:"area,omitempty"`
 	Author *TurnRecordAuthor `json:"author,omitempty"`
 
 	// BaseRef The repo snapshot sha the turn read.
@@ -231,14 +263,17 @@ type TurnRecord struct {
 	// the project's head. Absent when the flush did not land, and on
 	// every other flow. Same schema as aep-api's
 	// AEStudioTurnRecord.endRef.
-	EndRef       string         `json:"endRef,omitempty"`
-	FinishedAt   time.Time      `json:"finishedAt"`
-	Flow         string         `json:"flow"`
-	InputTokens  int64          `json:"inputTokens"`
-	Kind         TurnRecordKind `json:"kind"`
-	Model        string         `json:"model"`
-	ModelHost    string         `json:"modelHost"`
-	OutputTokens int64          `json:"outputTokens"`
+	EndRef     string    `json:"endRef,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Flow       string    `json:"flow"`
+
+	// Focus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+	Focus        *TurnRecordFocus `json:"focus,omitempty"`
+	InputTokens  int64            `json:"inputTokens"`
+	Kind         TurnRecordKind   `json:"kind"`
+	Model        string           `json:"model"`
+	ModelHost    string           `json:"modelHost"`
+	OutputTokens int64            `json:"outputTokens"`
 
 	// Project Absent on a marketplace turn.
 	Project string           `json:"project,omitempty"`
@@ -250,6 +285,9 @@ type TurnRecord struct {
 	Status    TurnRecordStatus   `json:"status"`
 	TurnID    openapi_types.UUID `json:"turnId"`
 }
+
+// TurnRecordArea The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+type TurnRecordArea string
 
 // TurnRecordKind defines model for TurnRecord.Kind.
 type TurnRecordKind string
@@ -266,6 +304,15 @@ type TurnRecordAuthor struct {
 	Name string `json:"name"`
 }
 
+// TurnRecordFocus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+type TurnRecordFocus struct {
+	ID   int                 `json:"id"`
+	Kind TurnRecordFocusKind `json:"kind"`
+}
+
+// TurnRecordFocusKind defines model for TurnRecordFocus.Kind.
+type TurnRecordFocusKind string
+
 // ProjectName defines model for ProjectName.
 type ProjectName = string
 
@@ -278,6 +325,12 @@ type LookupProjectParams struct {
 // CallMcpJSONRequestBody defines body for CallMcp for application/json ContentType.
 type CallMcpJSONRequestBody = JSONRPCRequest
 
+// CallIssuesMcpJSONRequestBody defines body for CallIssuesMcp for application/json ContentType.
+type CallIssuesMcpJSONRequestBody = JSONRPCRequest
+
+// CallIssueMcpJSONRequestBody defines body for CallIssueMcp for application/json ContentType.
+type CallIssueMcpJSONRequestBody = JSONRPCRequest
+
 // PostTurnUsageJSONRequestBody defines body for PostTurnUsage for application/json ContentType.
 type PostTurnUsageJSONRequestBody = TurnRecord
 
@@ -289,6 +342,12 @@ type ServerInterface interface {
 	// Resolve a project and write its snapshots
 	// (GET /projects/{projectName})
 	LookupProject(w http.ResponseWriter, r *http.Request, projectName ProjectName, params LookupProjectParams)
+	// The Issues chat's issue tools (MCP JSON-RPC)
+	// (POST /projects/{projectName}/issues/mcp)
+	CallIssuesMcp(w http.ResponseWriter, r *http.Request, projectName ProjectName)
+	// One issue's chat tools (MCP JSON-RPC)
+	// (POST /projects/{projectName}/issues/{number}/mcp)
+	CallIssueMcp(w http.ResponseWriter, r *http.Request, projectName ProjectName, number int)
 	// Write the Org skills snapshot
 	// (GET /skills)
 	GetSkills(w http.ResponseWriter, r *http.Request)
@@ -353,6 +412,67 @@ func (siw *ServerInterfaceWrapper) LookupProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.LookupProject(w, r, projectName, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CallIssuesMcp operation middleware
+func (siw *ServerInterfaceWrapper) CallIssuesMcp(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectName" -------------
+	var projectName ProjectName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectName", r.PathValue("projectName"), &projectName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CallIssuesMcp(w, r, projectName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CallIssueMcp operation middleware
+func (siw *ServerInterfaceWrapper) CallIssueMcp(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectName" -------------
+	var projectName ProjectName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectName", r.PathValue("projectName"), &projectName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "number" -------------
+	var number int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "number", r.PathValue("number"), &number, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CallIssueMcp(w, r, projectName, number)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -512,6 +632,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/mcp", wrapper.CallMcp)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectName}", wrapper.LookupProject)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectName}/issues/mcp", wrapper.CallIssuesMcp)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectName}/issues/{number}/mcp", wrapper.CallIssueMcp)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/skills", wrapper.GetSkills)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/turn-usage", wrapper.PostTurnUsage)
 
@@ -675,6 +797,157 @@ func (response LookupProject503ApplicationProblemPlusJSONResponse) VisitLookupPr
 	return err
 }
 
+type CallIssuesMcpRequestObject struct {
+	ProjectName ProjectName `json:"projectName"`
+	Body        *CallIssuesMcpJSONRequestBody
+}
+
+type CallIssuesMcpResponseObject interface {
+	VisitCallIssuesMcpResponse(w http.ResponseWriter) error
+}
+
+type CallIssuesMcp200JSONResponse JSONRPCResponse
+
+func (response CallIssuesMcp200JSONResponse) VisitCallIssuesMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssuesMcp202Response struct {
+}
+
+func (response CallIssuesMcp202Response) VisitCallIssuesMcpResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type CallIssuesMcp400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CallIssuesMcp400ApplicationProblemPlusJSONResponse) VisitCallIssuesMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssuesMcp502ApplicationProblemPlusJSONResponse Problem
+
+func (response CallIssuesMcp502ApplicationProblemPlusJSONResponse) VisitCallIssuesMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssuesMcp503ApplicationProblemPlusJSONResponse Problem
+
+func (response CallIssuesMcp503ApplicationProblemPlusJSONResponse) VisitCallIssuesMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssueMcpRequestObject struct {
+	ProjectName ProjectName `json:"projectName"`
+	Number      int         `json:"number"`
+	Body        *CallIssueMcpJSONRequestBody
+}
+
+type CallIssueMcpResponseObject interface {
+	VisitCallIssueMcpResponse(w http.ResponseWriter) error
+}
+
+type CallIssueMcp200JSONResponse JSONRPCResponse
+
+func (response CallIssueMcp200JSONResponse) VisitCallIssueMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssueMcp202Response struct {
+}
+
+func (response CallIssueMcp202Response) VisitCallIssueMcpResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type CallIssueMcp400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CallIssueMcp400ApplicationProblemPlusJSONResponse) VisitCallIssueMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssueMcp502ApplicationProblemPlusJSONResponse Problem
+
+func (response CallIssueMcp502ApplicationProblemPlusJSONResponse) VisitCallIssueMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CallIssueMcp503ApplicationProblemPlusJSONResponse Problem
+
+func (response CallIssueMcp503ApplicationProblemPlusJSONResponse) VisitCallIssueMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSkillsRequestObject struct {
 }
 
@@ -780,6 +1053,12 @@ type StrictServerInterface interface {
 	// Resolve a project and write its snapshots
 	// (GET /projects/{projectName})
 	LookupProject(ctx context.Context, request LookupProjectRequestObject) (LookupProjectResponseObject, error)
+	// The Issues chat's issue tools (MCP JSON-RPC)
+	// (POST /projects/{projectName}/issues/mcp)
+	CallIssuesMcp(ctx context.Context, request CallIssuesMcpRequestObject) (CallIssuesMcpResponseObject, error)
+	// One issue's chat tools (MCP JSON-RPC)
+	// (POST /projects/{projectName}/issues/{number}/mcp)
+	CallIssueMcp(ctx context.Context, request CallIssueMcpRequestObject) (CallIssueMcpResponseObject, error)
 	// Write the Org skills snapshot
 	// (GET /skills)
 	GetSkills(ctx context.Context, request GetSkillsRequestObject) (GetSkillsResponseObject, error)
@@ -875,6 +1154,73 @@ func (sh *strictHandler) LookupProject(w http.ResponseWriter, r *http.Request, p
 	}
 }
 
+// CallIssuesMcp operation middleware
+func (sh *strictHandler) CallIssuesMcp(w http.ResponseWriter, r *http.Request, projectName ProjectName) {
+	var request CallIssuesMcpRequestObject
+
+	request.ProjectName = projectName
+
+	var body CallIssuesMcpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CallIssuesMcp(ctx, request.(CallIssuesMcpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CallIssuesMcp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CallIssuesMcpResponseObject); ok {
+		if err := validResponse.VisitCallIssuesMcpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CallIssueMcp operation middleware
+func (sh *strictHandler) CallIssueMcp(w http.ResponseWriter, r *http.Request, projectName ProjectName, number int) {
+	var request CallIssueMcpRequestObject
+
+	request.ProjectName = projectName
+	request.Number = number
+
+	var body CallIssueMcpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CallIssueMcp(ctx, request.(CallIssueMcpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CallIssueMcp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CallIssueMcpResponseObject); ok {
+		if err := validResponse.VisitCallIssueMcpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetSkills operation middleware
 func (sh *strictHandler) GetSkills(w http.ResponseWriter, r *http.Request) {
 	var request GetSkillsRequestObject
@@ -935,58 +1281,67 @@ func (sh *strictHandler) PostTurnUsage(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"zFpdc9s21v4rZ/j2ndhTklIUJ506V143nrq7bTx2OntRZUWIOBRRkQALgJa1Hv33nQOAEiXRbp1pd/bO",
-	"IkHgfDznOR/wY5SrulESpTXR+WPUMM1qtKjdrxutfsXc/sRqpJ8cTa5FY4WS0Xn3EiSrEU6+++kuqdgc",
-	"KzBVuziN4kjQoobZMooj6XaImt5+caTxt1Zo5NG51S3GkclLrBkdZNcNLTdWC7mINpsNLTaNkgY7ueYV",
-	"1vRnrqRFaelP1jSVyBmJN2r8iq9/NSTrY2/vrzQW0Xn0f6Od4iP/1oy6fd2J+9reXl3Ct2dvv4GwcwqX",
-	"iqM5h6DTrJVLqVYyBo3FTCo7K1QreQxkgZmQ96wSPIbwx4x0R2P7D3KleQxcmOWsaKsqBobNjDVi1kp2",
-	"z0TF5hXGIHiz/2AhbNnOZ6i10mlEggdtSNkfjJK3Tf6BXjr3atWgtsKbMVcce+YW0uICdUS6M0vG2sRR",
-	"jcawBQ55pe/BX/xmu/Wf4269mpN9aNcgza3X/RhRF/DD3cefktubS5ikYwg2SuFiblBayATPoGZLNCAs",
-	"MJDKiiI4PI3iA+UEHzrACw9KA5MQFE5JNgKKbnL6BmVbk0aTdNxTo1ObVLSlGthdSGEFq8S/MQarVGVG",
-	"lTCWzvK/clZVKVzINShboga/DwgDTJoVauSwErYEtjODX5JIZRMHJwhuHpDKRa7TnHEuSCRW3fQs4mPs",
-	"wCcHPuyMsNXxWS/6gDyGFXZoey7U9pC5iQfd9anEDgSvDAj+UkdpNG1l/xyTDFmiR0PPBtZOIo6WiWrw",
-	"lbHMtmY4HK2w1fCG/sHvxaZ7222zPSr2cj6hGf15J1ljSvWMCQtWGTwMvRIZvyvZoMCCIxv2dCBSoBWQ",
-	"s8a2FBHMQq7RxTicZPQuAyEhMw3mZpSyBUor8gTlQkhEnVpVVxl9lQUpstMYrBZ1jTwFOscEpWCJ2Biw",
-	"JQJXNqmQQyeU0qBaC6pwb90ZrwxoZNzEYBTYUhiK21KtgEE2MpZpm4FttYQFWuKnLWutSpRum1zVtbBQ",
-	"MgNS9Y6Kic24QnpsoWHaYEykIWgfsoUwMK+YXA6GvUs6vWAgTO88OleqQiZ9MBSoUebeRfvmvxIVujxu",
-	"Op2DM14ZMFaRH7afA1d5W1MskzzCYm2eQWbEtGZrh++lqCozDIsDuHqd4i2O+h/vKTIE3Tu/9MuQ+wIh",
-	"d0uHpPjUannrUvrvSrDvio8SoRBSmBK5A1QMzIO0Qr5A7f3hEXbNsW4UlT+gpFt8zY8TIWtt+ft8vBP4",
-	"wq+Po4dkoRLSLDFL0SSq8SokjSJq0kGBTRzNmcFb2nqYwBu1izlTMqeMCxUKqEFQ5ywv8TKE/Se1ROk0",
-	"KZSumfXU+O5s92GPKd2Xt8j4y74qmVwgv2G2NM+TUyEqNDsNwofnsCqZdRGrVhJWWlg0UGFhp5KLwuHV",
-	"QqFV3S0ERxkh48fOSInGillxj0Qx9O490VitjJ1KOrAQ2liYjMf71CJsJwXxRynkIoU7Ksm9Z4GZqWTY",
-	"JKwRrwxcfLizLRdq5+60r7xjNwa+GAVVFLS9MFOpsWgNcihRI5ycjceHlewpMMlB4j1q+K3FFvkePdTs",
-	"4R8oF7aMzt++nsRRLWT3+/VQicUerv2nk/H4mEuezK+uG3iwL3O+kveojcPaNd/7qG0FH8InRyMW8goZ",
-	"5agnEFOEt5Qg/PqQIPwP5NvAzkb+EVy9hqtJNpWVkJ6OOb2vqUkAS7hRmqN+D9ffGVCyWsfB3o4dhMQO",
-	"GFOpNGDd2DXUyKQBWrXuJAoCUPdAAAvBCycM5kzjVHbiZKcp3KHkBAE6jTjmQJf3EJAFYiEDLYGSU8m2",
-	"RW5RqdUhIGGLx6kcAOS+dWNYlSIvwSOQzLkqVYUwZzYvoVB6KpWknyQoGauPYF9PS/fGwdll7iCIMGFT",
-	"PpUvwPU5cK0a2vX6O+8WSt5TSdm7dkJp5lS3JZNgvAWfCobX76hytxY14eZfV7+Mk28/f/1V9PKYQMmf",
-	"5OBQevS8pzRkjHONxiT0lnKB9+krA7eKiErpJayIPQy794VYxzddfjrfEWGhdO6c474tqtaUMb31JG88",
-	"g+2KCsrsxxWS+wy4cEwGFaP2maxPiPIQ/mJMeeuQF3rGf3c2YOZOuQu7RwWcWUyscIOL428qtRqudmXT",
-	"voyNlkLyfm8z12plkNLxUuRLVRSU3ysmhztTxXG4u3Bvvle+6z56q1r7UjmDLwd6bO9URxY100u0TcVy",
-	"D5PBZK+RhSFNp7MruBPfRlK3opHVCRdIXGzK1nJfHroqRLJq0BS+PHsyIj7qBfglL61NQuJ+CTx2rV2n",
-	"IRVgFVqnUcFEhXxQCV/S/YGUdNjv+e+OcluAVwBsrxHsKri+3fqq7oVFh7M+qvahfoCo47JsuMR7vpC+",
-	"2NaxLyjo/VjhyLAyTDSfN6OztFt6LNnGRXehjuH1sxQPiVH5Ei1c3FzDHO0KUQLDxLNv4vDtmI1hYhxV",
-	"JW5EBEIawREooV18mEpPY9AoDidhx4bZkuqBiw+zHy9vZncfL//+4VMMBjWR9Hx9uGUM5KSpHL97Nz71",
-	"DXCtWklVnQP7glkMPS2lQOGaU4N5q4Vde3rFFK679VPZdcOuJOBqv1VuVEgKP17eQDh/G1KtYYuujaES",
-	"gfc7TWeOg4g0KZx86hpw+FUJaVyNnauqYnOfaly1gYl/1OUub6vYpRFbatUuSp/5lcT0FNzQyQDTCLdX",
-	"l1PZn+saOHlqjnz6vj+ao7BtvcUYVeWu1iC1IHPMlUGN9Rz1tsxrtLIqV5WbAPiKIMx1oq3PnN289FEc",
-	"Ueh6TL1Ox+nYMXWDkjUiOo/epOP0TeSqB9+0jOq8caMoNTRbvelOD5vCZDw5S16/TsZvU8h248osDCMN",
-	"4APLbbV2smOF9yinMhSqHqzUyri6qCsCHQiNz9nZbuaZETp2FSEF1FTuii/XU6TwaaXCvuSXgGchO1hN",
-	"5ckC7UxjrSzOFsLOqBWbhfE/NS7IdF72F1CXEFNDhjpZtExz5Kexr0Q0GuvOKZReuTdgVadHChd7s2U4",
-	"kcoNn0+ds/McG0s1oysuJ+OJrxAVzBVfk1eJf7bdREQWSMg1nlvQ2L8pvn7m6uJlVxYHM/XNPodZ3eLh",
-	"5clkPP7zTw+z4IGLk23AdEJQp+Ens2EM78IlRMspgXwyngzN7vs+ibd+eN+Znr4887oNiby1we6WJ47e",
-	"+pNesP7NC9ZT6m/rmul1dB5RZG9tcTJ8VxD3bgpOiR/YwlAi+vHyJvpM240CW5rRY+8ubUMyLXAg6m/R",
-	"qOo+TCw0NsoIq/Q67kYU9mhAwyxkzGZwQq+oTHfl+VSqWlhLTWuBNi+Rn/reilY9PSEEdY+6YoK6h6kM",
-	"M9uAzjpYrRvmjTJPHHa4OnMviV49OblziUi7T45PDwPNEz9MCbnPpZKpdE0JZKNtpnnCsKPHMIPcZP78",
-	"/idewtHjdhK4yVLoRtRmL7m5Oa6b/7gc2pszM+t7SN+ixa7uhDkam2BRKG1TOBufQXZwy5iFxt7ttj3E",
-	"hIRHiU4vXpmtQaVL6p2LhXHutyjf0+ZTme1dWXZ7Oxh4G0rVtZAhz++glMLb8ZupzLb3llmvU5e42kPW",
-	"t2P4/24Ln/DCgJkt8Jg5K6WWbZN0nUa8dzn9y3AU7paM+pfXm/gwMi69Plb1EQYlPoCv8JzmKXz0sN+V",
-	"JP6+AAvWVjaZaybz0nez3Y33by3q9e7Km5HgOzLt9frU6rOkuEiuPj9+E7872wx0/ZvPfyF5H17yDJD3",
-	"3r2MAYc9spkfozgPfgntno3P/ldpOjAmsL3C1NGlqz23QOjR8932mSdpTwh/jJRdoHZkN8DQ/TM9WSBY",
-	"0fj6+YAN3++uq+CY4Ybo6ijmFmiTIP5fiLyDO5ongNeJTvYp2X8ZB/90Hn8iGT3je+p0krb7l4nhWvwi",
-	"lC4gpIslpBZqrh5i4FiJe/efALtyFJhZy7zUSqrWVAMVJh2S9M79awrN3o3WHyoyJ0/r/WWV2he78ns3",
-	"Q6RGRR1errlbXafTzqM/+/9fcUq6NiSkm1ZX0Xk0ioiTw9rHp2rdSTp2pRyYVhcsd8ktJASq5Y7T0aeh",
-	"Jrn3lRfq+LubHkkNANX0ttghdfN5858AAAD//w==",
+	"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",
+	"nVVeqP11D53asAeoprNFi9T15/X/BQAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

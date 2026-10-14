@@ -238,10 +238,8 @@ func platformUpdate(ctx context.Context, cfg platformUpdateConfig) error {
 
 	// Before the upgrade renders the relay's ExternalSecret, so it syncs the
 	// seed on its first reconcile.
-	if webhookRelayEnabled() {
-		if err := ensureWebhookRelaySeed(ctx); err != nil {
-			return fmt.Errorf("webhook relay seed: %w", err)
-		}
+	if err := ensureWebhookRelaySeed(ctx, cfg.Namespace); err != nil {
+		return fmt.Errorf("webhook relay seed: %w", err)
 	}
 
 	ui.Step(fmt.Sprintf("Upgrading platform chart %q", cfg.Release))

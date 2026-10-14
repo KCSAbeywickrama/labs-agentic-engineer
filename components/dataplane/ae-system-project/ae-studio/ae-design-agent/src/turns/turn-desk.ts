@@ -19,8 +19,9 @@
 /**
  * The TurnDesk: every design-agent turn in the pod runs through it. It is the
  * ONLY turn lock (nothing outside the pod guards a turn): one running turn per
- * scope, a project for browser, kickoff and Plan turns alike, a conversation
- * for marketplace turns. A busy scope throws `TurnInProgressError` naming the
+ * scope, a project chat for browser, kickoff and Plan turns alike (the main
+ * chat's for kickoff and Plan; the Issues chat and each issue's chat have
+ * their own, `conversations/chat.ts`), a conversation for marketplace turns. A busy scope throws `TurnInProgressError` naming the
  * running turn (the edges answer `409 turn_in_progress`).
  *
  * A turn runs detached from whoever started it. Its frames go to a
@@ -89,8 +90,12 @@ export function errorClassOf(err: unknown): string {
   return err instanceof Error ? err.name : typeof err;
 }
 
-/** What a turn holds the lock on. */
-export type Scope = { kind: "project"; project: string } | { kind: "marketplace"; conversationId: string };
+/**
+ * What a turn holds the lock on: a project chat (`chat` is its
+ * `conversations/chat.ts` key; absent or `""` the main chat), or a
+ * marketplace conversation.
+ */
+export type Scope = { kind: "project"; project: string; chat?: string } | { kind: "marketplace"; conversationId: string };
 
 /** What the starter knows about a turn before it runs. */
 export interface TurnMeta {
@@ -114,6 +119,10 @@ export interface TurnMeta {
   skillsRef?: string;
   /** A `design` turn's scoped feature IDs (`start-spec.ts` `designFeaturesOf`); absent = every feature. */
   designFeatures?: string[];
+  /** The area whose chat a browser turn ran in when it is not the main chat (the record's `area`). */
+  area?: TurnRecord["area"];
+  /** The entity that area chat was narrowed to (the record's `focus`). */
+  focus?: TurnRecord["focus"];
 }
 
 /** How a run ended, as the run reports it. */
@@ -376,6 +385,8 @@ export class TurnDesk {
       ...(status.project !== undefined ? { project: status.project } : {}),
       conversationId: meta.conversationId,
       kind: meta.kind,
+      ...(meta.area ? { area: meta.area } : {}),
+      ...(meta.focus ? { focus: meta.focus } : {}),
       flow: meta.flow,
       status: ending.status,
       ...(reason ? { reason } : {}),
@@ -432,7 +443,8 @@ function refsOf(meta: TurnMeta): { baseRef: string; skillsRef: string } {
 }
 
 function scopeKey(scope: Scope): string {
-  return scope.kind === "project" ? `project:${scope.project}` : `marketplace:${scope.conversationId}`;
+  if (scope.kind === "marketplace") return `marketplace:${scope.conversationId}`;
+  return scope.chat ? `project:${scope.project}#${scope.chat}` : `project:${scope.project}`;
 }
 
 /** The optional failure fields, without undefined keys. */

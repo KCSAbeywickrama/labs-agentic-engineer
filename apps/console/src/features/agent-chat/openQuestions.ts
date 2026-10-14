@@ -17,6 +17,7 @@
  */
 
 import type { ShellScope } from "../shell/scope";
+import { chatIssue, MAIN_CHAT, type ChatRef } from "./chatRef";
 
 /**
  * Whether questions a turn of this browser's asked in `projectName` open the
@@ -26,12 +27,16 @@ import type { ShellScope } from "../shell/scope";
  * Deploy, Issues, another project, the org) the chat's pointer is enough: the
  * card would move the user off the page they are working on. Not again when
  * the card is already open.
+ *
+ * The Issues chat's questions open their own card over the Issues page, and
+ * only from the Issues page itself (not from an Issue card over it); an
+ * issue's chat's, only from that issue's own card (the card closes back to
+ * it): the overview's rule is the main chat's.
  */
-export function opensQuestionsCard(scope: ShellScope, projectName: string): boolean {
-  return (
-    scope.kind === "project" &&
-    scope.projectName === projectName &&
-    scope.page === "overview" &&
-    scope.card !== "questions"
-  );
+export function opensQuestionsCard(scope: ShellScope, projectName: string, chat: ChatRef = MAIN_CHAT): boolean {
+  if (scope.kind !== "project" || scope.projectName !== projectName) return false;
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return scope.card === "issue" && scope.issueNumber === issue;
+  if (chat.area === "issues") return scope.page === "issues" && scope.card === null;
+  return scope.page === "overview" && scope.card !== "questions";
 }

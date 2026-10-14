@@ -76,6 +76,8 @@ export interface EdgeOptions {
   headless?: boolean;
   /** Replaces the local IdP's key set (an unreachable IdP). */
   jwks?: JWTVerifyGetKey;
+  /** The issues the fake tools socket's issue routes answer (by number). */
+  issues?: Record<number, { state: "open" | "closed"; title?: string }>;
 }
 
 export interface Edge {
@@ -129,6 +131,7 @@ export async function startEdge(opts: EdgeOptions = {}): Promise<Edge> {
     projects: { [PROJECT]: { headSha: HEAD, skillsSha: SKILLS, references: Object.keys(opts.references ?? {}).sort() } },
     skillsSha: SKILLS,
     ...(opts.missingRefs ? { missingRefs: opts.missingRefs } : {}),
+    ...(opts.issues ? { issues: opts.issues } : {}),
   });
   const store = new InMemoryConversationStore();
   const threads = new ThreadBook({ store });

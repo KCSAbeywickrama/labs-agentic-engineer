@@ -18,9 +18,12 @@ package sourcecontrol
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // WebhookService manages the per-repo webhook that delivers a project's
@@ -28,9 +31,11 @@ import (
 // the signing secret; this service only asks for the hook and remembers its
 // ID on the repo row.
 type WebhookService interface {
-	// Register installs the webhook on the project's repo and persists its
-	// hook ID. Idempotent: the pod answers an existing hook to its URL, with
-	// its events replaced by the current subscription.
+	// Register ensures the webhook on the project's repo carries the pod's
+	// current config and the subscribed events, and persists its hook ID and
+	// config rev. Idempotent: the stored hook is reconfigured in place
+	// (created again when GitHub no longer has it); a row with none adopts
+	// the hook to the pod's URL, else gets a new one.
 	Register(ctx context.Context, orgID, projectID string) (hookID *int64, err error)
 
 	// Unregister removes the hook Register installed, addressed by the hook ID
@@ -52,6 +57,17 @@ type WebhookService interface {
 	// disconnect, after its pod is gone): a reconnect's hook repair then
 	// installs a hook for each, whether or not UnregisterOrg reached it.
 	ForgetOrg(ctx context.Context, orgID string) error
+
+	// HookRev answers the config rev a hook of the org ensured now is stored
+	// at: the org pod's config rev (its delivery URL and signing secret)
+	// folded with the subscribed events. One pod call, no GitHub call. A
+	// stored rev that differs names a hook to re-ensure.
+	HookRev(ctx context.Context, orgID string) (string, error)
+
+	// ResyncOrg forgets the config rev of every row of the org, keeping the
+	// hook ids (a GitHub reconnect): the hook repair then re-ensures every
+	// stored hook in place with the pod's current config.
+	ResyncOrg(ctx context.Context, orgID string) error
 }
 
 // subscribedEvents answers the events every project hook carries. Repo-level
@@ -84,15 +100,21 @@ func (s *webhookService) Register(ctx context.Context, orgID, projectID string) 
 		return nil, ErrRepoNotFound
 	}
 
-	// One ensure: an existing hook to the pod's URL has its events (and
-	// signing config) replaced in the same call, so a hook created before
-	// "issues" joined the subscription gets it (§9.2 cutover).
-	hookID, err := s.github.RegisterWebhook(ctx, ref, subscribedEvents())
+	// One ensure: the stored hook (else the one to the pod's URL) has its
+	// whole config and events replaced in the same call, so a hook left on
+	// an old relay channel or signed with an old secret is re-pointed and
+	// re-keyed in place, and one GitHub lost is created again.
+	var storedID int64
+	if row.WebhookID != nil {
+		storedID = *row.WebhookID
+	}
+	hook, err := s.github.RegisterWebhook(ctx, ref, storedID, subscribedEvents())
 	if err != nil {
 		return nil, fmt.Errorf("register webhook: %w", err)
 	}
+	hookID := hook.ID
 
-	if err := s.repoSvc.SetWebhookID(ctx, orgID, projectID, hookID); err != nil {
+	if err := s.repoSvc.SetWebhookID(ctx, orgID, projectID, hookID, hookRev(hook.ConfigRev)); err != nil {
 		if errors.Is(err, ErrRepoNotFound) {
 			// The row went (or its project's delete started) while the hook
 			// was being installed: nothing will ever name this hook again,
@@ -139,6 +161,28 @@ func (s *webhookService) Unregister(ctx context.Context, orgID, projectID string
 	}
 	slog.InfoContext(ctx, "webhook unregistered from repo",
 		"org", orgID, "project", projectID, "hookId", hookID)
+	return nil
+}
+
+func (s *webhookService) HookRev(ctx context.Context, orgID string) (string, error) {
+	rev, err := s.github.HookConfigRev(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("read hook config rev: %w", err)
+	}
+	return hookRev(rev), nil
+}
+
+// hookRev folds the pod's config rev with the subscribed events: the rev a
+// row stores for its hook, so a change of either re-syncs the hook.
+func hookRev(podRev string) string {
+	sum := sha256.Sum256([]byte(podRev + "\n" + strings.Join(subscribedEvents(), ",")))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *webhookService) ResyncOrg(ctx context.Context, orgID string) error {
+	if err := s.repo.ClearWebhookConfigRevs(ctx, orgID); err != nil {
+		return fmt.Errorf("clear org webhook revs: %w", err)
+	}
 	return nil
 }
 

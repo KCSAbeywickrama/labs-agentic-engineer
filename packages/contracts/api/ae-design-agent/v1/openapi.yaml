@@ -17,7 +17,12 @@ servers:
 - url: /v1
 tags:
 - name: Conversations
-  description: A project's current chat thread and its messages.
+  description: |-
+    A project chat's current thread and its messages. A project has a main
+    chat and a chat per area: the Issues area's (`area=issues`), narrowed to
+    one open issue by a focus (`area=issues&focus[kind]=issue&focus[id]=<n>`).
+    Each has its own thread and runs one turn at a time, apart from the
+    others. A closed issue has no thread (409 issue_closed).
 - name: Turns
   description: Start a turn, read its status, attach to its event stream.
 - name: Marketplace
@@ -28,11 +33,13 @@ paths:
   /projects/{projectName}/conversations/current:
     get:
       operationId: get-current-conversation
-      summary: The project's current conversation, created on first read
+      summary: A project chat's current conversation, created on first read
       tags:
       - Conversations
       parameters:
       - $ref: '#/components/parameters/ProjectName'
+      - $ref: '#/components/parameters/Area'
+      - $ref: '#/components/parameters/Focus'
       responses:
         '200':
           description: The current thread
@@ -40,21 +47,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectConversationView'
+        '400':
+          $ref: '#/components/responses/BadChat'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IssueClosed'
         '503':
           $ref: '#/components/responses/Unavailable'
   /projects/{projectName}/conversations:
     post:
       operationId: rotate-conversation
       summary: Start a new conversation for the whole project
-      description: Demotes the current thread and mints a fresh one. Rotation is
-        project-wide, every member sees the new thread. Refused while a turn runs
-        for the project (its save would recreate the demoted thread).
+      description: Demotes the main chat's current thread and mints a fresh one.
+        Rotation is project-wide, every member sees the new thread. Refused while
+        a turn runs in the main chat (its save would recreate the demoted
+        thread). The Issues and issue chats do not rotate.
       tags:
       - Conversations
       parameters:
@@ -159,10 +171,11 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |-
-            A turn is already running for the project (TurnConflict
+            A turn is already running in the conversation's chat (TurnConflict
             turn_in_progress, with activeTurnId), the addressed conversation is no
-            longer the project's current thread (TurnConflict
-            conversation_rotated), or the studio has no default model key
+            longer its chat's current thread (TurnConflict
+            conversation_rotated), the conversation is a closed issue's
+            (TurnConflict issue_closed), or the studio has no default model key
             (problem code no_default_key).
           content:
             application/json:
@@ -178,11 +191,15 @@ paths:
   /projects/{projectName}/turns/active:
     get:
       operationId: get-active-turn
-      summary: The project's running turn, 204 when none
+      summary: A project chat's running turn, 204 when none
+      description: A read; it does not ask whether an issue is open, so a turn
+        still running after its issue closed stays reachable on reload.
       tags:
       - Turns
       parameters:
       - $ref: '#/components/parameters/ProjectName'
+      - $ref: '#/components/parameters/Area'
+      - $ref: '#/components/parameters/Focus'
       responses:
         '200':
           description: The running turn
@@ -192,6 +209,8 @@ paths:
                 $ref: '#/components/schemas/TurnStatus'
         '204':
           description: No running turn
+        '400':
+          $ref: '#/components/responses/BadChat'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -447,6 +466,24 @@ components:
       schema:
         type: integer
         minimum: 0
+    Area:
+      name: area
+      in: query
+      description: The area whose chat it is (the Issues page's, `issues`).
+        Absent is the project's main chat.
+      schema:
+        $ref: '#/components/schemas/AreaId'
+    Focus:
+      name: focus
+      in: query
+      description: The entity the area's chat is narrowed to, as
+        `focus[kind]=issue&focus[id]=<n>` (one issue's chat). Taken only with
+        an area that declares that kind of focus; absent is the area's own
+        chat.
+      style: deepObject
+      explode: true
+      schema:
+        $ref: '#/components/schemas/Focus'
     LastEventId:
       name: Last-Event-ID
       in: header
@@ -456,6 +493,22 @@ components:
       schema:
         type: string
   responses:
+    BadChat:
+      description: 'An area outside the enum, or a focus without an area, of a
+        kind the area does not declare, or without a positive integer id; a
+        retired view or issueNumber, or a focus key other than focus[kind] and
+        focus[id] (problem code: invalid_chat)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    IssueClosed:
+      description: 'The issue is closed, so its chat has no thread (problem code:
+        issue_closed)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     Unauthorized:
       description: Missing or invalid user JWT, or an M2M token
       content:
@@ -470,7 +523,7 @@ components:
             $ref: '#/components/schemas/Problem'
     NotFound:
       description: 'No such resource (problem codes: project_unknown, conversation_unknown,
-        turn_unknown)'
+        turn_unknown, issue_unknown)'
       content:
         application/problem+json:
           schema:
@@ -504,6 +557,28 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    AreaId:
+      type: string
+      description: An area, a main-panel page whose chat has a sub-agent of its
+        own (`@aep/agent-stream` AREAS).
+      enum:
+      - issues
+    Focus:
+      type: object
+      additionalProperties: false
+      description: The entity an area's chat is narrowed to; an issue by its
+        number.
+      required:
+      - kind
+      - id
+      properties:
+        kind:
+          type: string
+          enum:
+          - issue
+        id:
+          type: integer
+          minimum: 1
     Problem:
       type: object
       required:
@@ -728,6 +803,7 @@ components:
           enum:
           - turn_in_progress
           - conversation_rotated
+          - issue_closed
         activeTurnId:
           type: string
           format: uuid

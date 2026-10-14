@@ -32,7 +32,11 @@ import { join } from "node:path";
 import { loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
 import { buildSkillTools } from "../src/agents/main/tools/skill-tools.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
-import { ALL_AUDIENCES } from "../src/agents/main/skill-source.js";
+import { UNMARKED_AUDIENCES } from "../src/agents/main/skill-source.js";
+import { buildFileToolSet } from "../src/agents/main/tools/files.js";
+import { buildTaskPlanTools } from "../src/agents/main/tools/task-plan.js";
+import { BuildPlan } from "../src/agents/main/task-plan-accumulator.js";
+import { FileBundle } from "@aep/agent-stream";
 
 /**
  * A `_skills` snapshot holding the given `<name>/SKILL.md` files, optionally
@@ -133,7 +137,7 @@ test("loadSkill separates refused names from missing ones", async () => {
   assert.match(res.error!, /skillsPinned/); // the redirect names the alternative
 });
 
-const entry = (name: string, audience: readonly ("design" | "coding")[]) => ({
+const entry = (name: string, audience: readonly ("design" | "coding" | "chat")[]) => ({
   name,
   description: `${name} does things.`,
   hasReferences: false,
@@ -154,9 +158,85 @@ test("coding-only skills are listed apart, with the pin instruction", () => {
 });
 
 test("a library with no coding-only skills renders exactly as before", () => {
-  const text = buildSkillCatalog(sourceOf(entry("planning", ALL_AUDIENCES)));
+  const text = buildSkillCatalog(sourceOf(entry("planning", UNMARKED_AUDIENCES)));
   assert.ok(!text.includes("skillsPinned"));
   assert.ok(!/pin/i.test(text));
+});
+
+// --- The chat audience (the Issues chats' sub-agents) ------------------------
+
+test("chat is an audience of its own: read from frontmatter, never the unmarked default", () => {
+  const source = loadSkillsFromSnapshot(
+    snapshotWith({ triage: md("triage", "[chat]"), both: md("both", "[design, chat]"), unmarked: md("unmarked") }),
+  );
+  const by = new Map(source.catalog().map((e) => [e.name, e.audience]));
+  assert.deepEqual(by.get("triage"), ["chat"]);
+  assert.deepEqual(by.get("both"), ["design", "chat"]);
+  // Opt-in only: an unmarked skill is the design and coding agents', not a chat's.
+  assert.deepEqual(by.get("unmarked"), ["design", "coding"]);
+});
+
+test("a chat-only skill is refused to the design agent and loads for a chat", () => {
+  const source = loadSkillsFromSnapshot(snapshotWith({ triage: md("triage", "[chat]"), legacy: md("legacy") }));
+  assert.deepEqual(source.load("triage"), { refused: true });
+  const chat = source.load("triage", "chat");
+  assert.ok(chat !== undefined && "content" in chat && chat.content.includes("BODY of triage"));
+  // An unmarked skill is not a chat's to load.
+  assert.deepEqual(source.load("legacy", "chat"), { refused: true });
+});
+
+test("the design catalog never lists a chat-only skill, not even to pin", () => {
+  const text = buildSkillCatalog(sourceOf(entry("planning", ["design"]), entry("triage", ["chat"])));
+  assert.match(text, /- planning:/);
+  assert.equal(text.includes("triage"), false);
+  assert.equal(text.includes("skillsPinned"), false);
+  // Nothing but chat skills: no catalog at all.
+  assert.equal(buildSkillCatalog(sourceOf(entry("triage", ["chat"]))), "");
+});
+
+type LoadSkillExec = (
+  input: { names: string[] },
+  options: unknown,
+) => Promise<{ ok: boolean; error?: string; refused?: string[]; missing?: string[]; available?: string[]; skills: { name: string }[] }>;
+type LoadReferenceExec = (
+  input: { name: string; path: string },
+  options: unknown,
+) => Promise<{ ok: boolean; error?: string; available?: string[] }>;
+
+test("the design agent's loadSkill treats a chat-only skill as unknown: not listed, never pin advice", async () => {
+  const dir = snapshotWith({ triage: md("triage", "[chat]"), go: md("go", "[coding]"), planning: md("planning", "[design]") });
+  mkdirSync(join(dir, "skills", "triage", "references"));
+  writeFileSync(join(dir, "skills", "triage", "references", "steps.md"), "STEPS");
+  const source = loadSkillsFromSnapshot(dir);
+  const sets = {
+    files: buildFileToolSet(new FileBundle({}), source).tools,
+    "task-plan": buildTaskPlanTools(new BuildPlan({}), source),
+  };
+  for (const [set, tools] of Object.entries(sets)) {
+    const res = await (tools.loadSkill!.execute as unknown as LoadSkillExec)({ names: ["triage"] }, {});
+    assert.equal(res.ok, false, set);
+    assert.deepEqual(res.missing, ["triage"], set);
+    assert.equal(res.refused, undefined, set);
+    assert.equal(res.error!.includes("skillsPinned"), false, set);
+    assert.deepEqual(res.available, ["go", "planning"], set);
+    // A chat skill's references are no more addressable than its body.
+    assert.equal(tools.loadSkillReference, undefined, set);
+  }
+});
+
+test("the design agent's loadSkillReference does not list a chat-only skill", async () => {
+  const dir = snapshotWith({ triage: md("triage", "[chat]"), planning: md("planning", "[design]") });
+  for (const name of ["triage", "planning"]) {
+    mkdirSync(join(dir, "skills", name, "references"));
+    writeFileSync(join(dir, "skills", name, "references", "steps.md"), "STEPS");
+  }
+  const tools = buildFileToolSet(new FileBundle({}), loadSkillsFromSnapshot(dir)).tools;
+  const res = await (tools.loadSkillReference!.execute as unknown as LoadReferenceExec)(
+    { name: "triage", path: "references/steps.md" },
+    {},
+  );
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.available, ["planning"]);
 });
 
 // --- Disabled skills (ADR-0014) -----------------------------------------------

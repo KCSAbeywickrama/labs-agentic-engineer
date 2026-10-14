@@ -31,11 +31,9 @@
  * preserved across turns.
  */
 
-import { isStepCount, type FilePart, type LanguageModel, type ModelMessage, type StopCondition, type ToolSet } from "ai";
+import type { FilePart, LanguageModel, ToolSet } from "ai";
 import {
   FileBundle,
-  isErrorToolOutput,
-  isQuestionTool,
   type PlanScope,
   type StreamPart,
   type Surface,
@@ -46,7 +44,13 @@ import { DocFileBundle } from "../collab/doc-bundle.js";
 import { checkPrototypeRender } from "../prototype/render-check.js";
 import { StreamingDocWriter } from "../collab/streaming-add.js";
 import type { RoomPeer } from "../collab/room-peer.js";
-import { runTurn, type ProviderOptions } from "../agents/main/run-turn.js";
+import { runTurn } from "../agents/main/run-turn.js";
+import { createMainAgent } from "../agents/main/agent.js";
+import { buildSubAgent } from "../areas/sub-agent.js";
+import { scopeFor } from "../areas/profiles.js";
+import type { AreaChat } from "../conversations/chat.js";
+import { answerableQuestion } from "../agents/confirmation.js";
+import { endedAwaitingHuman, type AgentRunSettings, type ProviderOptions, type TurnAgent } from "../agents/run-settings.js";
 import { buildFileToolSet, buildRegisterDraftTools } from "../agents/main/tools/files.js";
 import { tapWrites, type WriteLedger } from "../agents/main/tools/write-ledger.js";
 import { buildWebSearchTools } from "../agents/main/tools/web-search.js";
@@ -58,7 +62,7 @@ import type { UnreadableReference } from "./attachments.js";
 import { historyFor } from "./history-for.js";
 import { toTurnUsage } from "./turn-usage.js";
 import { OutputTruncatedError, TruncationWatch } from "./truncation.js";
-import { attachmentsNote, unreadableReferencesNote } from "../prompts/turn.js";
+import { attachmentsNote, branchNotesNote, unreadableReferencesNote } from "../prompts/turn.js";
 import { config } from "../shared/config.js";
 import { guardedFetch } from "../shared/guarded-fetch.js";
 import {
@@ -70,6 +74,8 @@ import {
   type ModelConnection,
 } from "../shared/model.js";
 import { MODEL_MAX_RETRIES } from "../shared/provider-limit.js";
+import { turnOutcome } from "../areas/outcome.js";
+import type { BranchNote } from "../conversations/branch-notes.js";
 import { loadMcpTools, type McpTransport } from "../shared/mcp-client.js";
 import { turnTelemetry } from "../shared/telemetry.js";
 import type { Conversation, ConversationStore, TurnJournalEntry } from "../store/conversation-store.js";
@@ -81,45 +87,6 @@ const DIVERGENCE_NOTE =
 function freshConversation(id: string): Conversation {
   const now = new Date(); // store re-stamps on save; this is the lazy-create placeholder
   return { id, messages: [], turns: [], status: "active", createdAt: now, updatedAt: now };
-}
-
-/**
- * Stop when the last step carries a question tool-call the schema ACCEPTED.
- * The SDK's own `hasToolCall` also matches a call whose input failed
- * validation (it stays in `step.toolCalls` flagged `invalid`), which would end
- * the turn on a question nobody can render — an empty option label was enough
- * to leave the console blank and the conversation stuck awaiting-human.
- * Skipping invalid calls lets the model read the validation error as a tool
- * error and retry in the next step.
- */
-function hasValidQuestionCall(): StopCondition<ToolSet> {
-  return ({ steps }) =>
-    steps[steps.length - 1]?.toolCalls.some((call) => !call.invalid && isQuestionTool(call.toolName)) ?? false;
-}
-
-/**
- * True when the turn ended on a HITL question tool-call (`ask_question` or
- * `ask_questions`, console ADR-0012 / #270) that RESOLVED — its placeholder
- * result is on the transcript and is not an error. Scans only the messages
- * appended THIS turn; the paired stop condition guarantees an accepted call is
- * the last step, so a match means the turn is awaiting the user's answer. A
- * call the schema rejected leaves an error result instead, and a turn that
- * then ran out of steps is done, not awaiting anyone.
- */
-function endedAwaitingHuman(appended: ModelMessage[]): boolean {
-  const asked = new Set<string>();
-  const resolved = new Set<string>();
-  for (const m of appended) {
-    if (!Array.isArray(m.content)) continue;
-    for (const part of m.content) {
-      if (m.role === "assistant" && part.type === "tool-call" && isQuestionTool(part.toolName)) {
-        asked.add(part.toolCallId);
-      } else if (m.role === "tool" && part.type === "tool-result" && asked.has(part.toolCallId)) {
-        if (!isErrorToolOutput(part.output)) resolved.add(part.toolCallId);
-      }
-    }
-  }
-  return resolved.size > 0;
 }
 
 export interface RunConversationTurnInput {
@@ -179,10 +146,21 @@ export interface RunConversationTurnInput {
   /** A `task-plan` turn: what the version carries, which `planBuild` is checked against. */
   planScope?: PlanScope;
   /**
+   * The area chat the turn runs in (the Issues area's own, or the area
+   * focused on an issue): present → the turn runs the generic sub-agent built
+   * from that area's scope, and `toolset` is ignored. Absent → a spec turn on
+   * the main agent.
+   */
+  chat?: AreaChat;
+  /** The project an area chat's turn belongs to: its sub-agent's prompt names it. Ignored by a spec turn. */
+  project?: string;
+  /**
    * The MCP transport for this turn (the tools socket's fetch). Present →
    * `tools/list` is fetched (best-effort) and merged into the tool set as
    * dynamic tools, under a shadow-guard so a discovered tool can never shadow
    * a built-in one. Omitted → no fetch, no merge (byte-identical to today).
+   * An Issues or issue turn's transport is its chat's route on the socket
+   * (`mcpRoute`), whose tools its sub-agent's scope picks from.
    */
   mcp?: McpTransport;
   /**
@@ -219,6 +197,13 @@ export interface RunConversationTurnInput {
    * byte-identical to today.
    */
   surface?: Surface;
+  /**
+   * What the other views' chats did since this conversation's previous turn
+   * (the ThreadBook's `branchNotes`). A main-agent turn's prompt opens with one
+   * `Meanwhile in <view> (N turns): <outcome>` line per note; a view's turn
+   * ignores them. Absent/empty → the prompt is byte-identical to a turn without.
+   */
+  branchNotes?: BranchNote[];
   /** The turn's model, built by the caller from `connection` (`createModel`). */
   model: LanguageModel;
   /**
@@ -253,6 +238,12 @@ export interface ConversationTurnResult {
    * then put back is not among them. Empty for a turn that writes nothing.
    */
   changedPaths: string[];
+  /**
+   * What an Issues turn came to (`areas/outcome.ts`; a scope that reports back
+   * with an outcome note): the filing, else its last reply. Absent on every
+   * other turn, and on one that neither filed nor replied in text.
+   */
+  outcome?: string;
 }
 
 export async function runConversationTurn(input: RunConversationTurnInput): Promise<ConversationTurnResult> {
@@ -268,63 +259,98 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 2. mark active (in memory; not saved mid-turn — the TurnDesk lock handles concurrency)
     conv.status = "active";
 
-    // 3. select the tool set from `toolset` (default `files`). Both build a
-    //    throwaway per-turn accumulator from the passed snapshot; the skill
-    //    catalog + `loadSkill` are registered identically (only when skills were
-    //    supplied, ADR-0002). The `files` set also carries the HITL question
-    //    tools (ask_question / ask_questions); `task-plan` does not. The
-    //    FileBundle is held by name: the live doc writer below needs it.
+    // 3. select the agent. An area's chat (the Issues area's own, or the
+    //    area focused on an issue) runs the generic sub-agent built from its
+    //    area scope (areas/sub-agent.ts); every other turn runs the main
+    //    agent (agents/main/agent.ts) over the tool set `toolset` (default
+    //    `files`) names, built here. Both spec tool sets build a throwaway per-turn accumulator from the passed
+    //    snapshot; the skill catalog + `loadSkill` are registered identically
+    //    (only when skills were supplied, ADR-0002). The `files` set also
+    //    carries the HITL question tools (ask_question / ask_questions);
+    //    `task-plan` does not. The FileBundle is held by name: the live doc
+    //    writer below needs it.
     const toolset: Toolset = input.toolset ?? "files";
+    // An area chat's turn works on no spec: the user's message is its whole
+    // prompt, with no spec-turn notes.
+    const scope = input.chat ? scopeFor(input.chat.area, input.chat.focus) : undefined;
+    const areaChat = scope !== undefined;
+    // An area chat's sub-agent writes only what the user confirmed on a
+    // question card: the card it binds to is the one the user is answering,
+    // the one card the previous turn asked in the history this service
+    // stored, never anything this turn's instruction or model says.
+    const asked = areaChat ? answerableQuestion(conv.messages) : undefined;
     const skills = input.skillSource;
     let bundle: FileBundle | undefined;
     /** The bundle as the turn found it: what `changedPaths` is measured against. */
     let started: Record<string, string> = {};
-    let tools: ToolSet;
-    let instructions: string;
+    let agentFor: (run: AgentRunSettings) => TurnAgent;
     // The turn's write ledger (files turns only) — see write-ledger.ts: it is
     // what lets each file write settle at its OWN tool-input-end instead of at
     // the step's tail, which for a batched step is minutes later.
     let writes: WriteLedger | undefined;
-    if (toolset === "task-plan") {
-      // Read-only context: `files` mutates nothing; the accumulator validates
-      // planBuild against it and the scope (known components, carried items).
-      tools = buildTaskPlanTools(new BuildPlan(input.files, input.planScope), skills);
-      instructions = buildTaskPlanInstructions(skills, input.surface);
+    if (scope !== undefined) {
+      // Its tools arrive over the chat's MCP route (best-effort, like 3b
+      // below); the sub-agent takes the ones its scope names and gates every
+      // write on this turn's instruction. A built-in that asks aep-api (the
+      // report classifier: the pod holds no Jev key) asks on the same route.
+      const mcpTools = input.mcp ? await loadMcpTools(input.mcp) : {};
+      const context = {
+        route: input.mcp,
+        mcpTools,
+        instruction: input.instruction,
+        asked,
+        skills,
+        surface: input.surface,
+        project: input.project,
+      };
+      agentFor = (run) => buildSubAgent(scope, context, run);
     } else {
-      bundle = input.collabPeer ? new DocFileBundle(input.collabPeer, input.files) : new FileBundle(input.files);
-      started = bundle.snapshot();
-      // A prototype write is drawn by the isolated render check before it lands
-      // (asynchronously: other conversations keep the event loop meanwhile).
-      const fileToolSet = buildFileToolSet(bundle, skills, { prototypeRender: checkPrototypeRender });
-      tools = fileToolSet.tools;
-      writes = fileToolSet.writes;
-      if (input.registerDraft) {
-        tools = { ...tools, ...buildRegisterDraftTools() };
+      let tools: ToolSet;
+      let instructions: string;
+      if (toolset === "task-plan") {
+        // Read-only context: `files` mutates nothing; the accumulator validates
+        // planBuild against it and the scope (known components, carried items).
+        tools = buildTaskPlanTools(new BuildPlan(input.files, input.planScope), skills);
+        instructions = buildTaskPlanInstructions(skills, input.surface);
+      } else {
+        bundle = input.collabPeer ? new DocFileBundle(input.collabPeer, input.files) : new FileBundle(input.files);
+        started = bundle.snapshot();
+        // A prototype write is drawn by the isolated render check before it lands
+        // (asynchronously: other conversations keep the event loop meanwhile).
+        const fileToolSet = buildFileToolSet(bundle, skills, { prototypeRender: checkPrototypeRender });
+        tools = fileToolSet.tools;
+        writes = fileToolSet.writes;
+        if (input.registerDraft) {
+          tools = { ...tools, ...buildRegisterDraftTools() };
+        }
+        instructions = buildInstructions(skills, input.surface);
       }
-      instructions = buildInstructions(skills, input.surface);
-    }
 
-    // 3b. MCP discovery (dependency-management migration Phase 5): best-effort —
-    //     an `mcp` transport merges the org's dependency-discovery tools
-    //     (list_external_resources, etc.) into the tool set for this turn.
-    //     `loadMcpTools` never throws (socket down/HTTP error/malformed → `{}`, logged),
-    //     so a turn with `mcp` never fails ON ITS ACCOUNT. Omitted `mcp`, or a
-    //     failed/empty load, means `tools` IS the base set (no wrapping object)
-    //     — byte-identical to an mcp-free turn. `baseTools` (the `tools` set
-    //     already built above) spreads LAST — the shadow-guard — so a
-    //     discovered tool can never shadow a core file-mutation/task-plan/
-    //     loadSkill tool of the same name.
-    if (input.mcp) {
-      const mcpTools = await loadMcpTools(input.mcp);
-      if (Object.keys(mcpTools).length > 0) {
-        tools = { ...mcpTools, ...tools };
+      // 3b. MCP discovery (dependency-management migration Phase 5): best-effort —
+      //     an `mcp` transport merges the org's dependency-discovery tools
+      //     (list_external_resources, etc.) into the tool set for this turn.
+      //     `loadMcpTools` never throws (socket down/HTTP error/malformed → `{}`, logged),
+      //     so a turn with `mcp` never fails ON ITS ACCOUNT. Omitted `mcp`, or a
+      //     failed/empty load, means `tools` IS the base set (no wrapping object)
+      //     — byte-identical to an mcp-free turn. `baseTools` (the `tools` set
+      //     already built above) spreads LAST — the shadow-guard — so a
+      //     discovered tool can never shadow a core file-mutation/task-plan/
+      //     loadSkill tool of the same name.
+      if (input.mcp) {
+        const mcpTools = await loadMcpTools(input.mcp);
+        if (Object.keys(mcpTools).length > 0) {
+          tools = { ...mcpTools, ...tools };
+        }
       }
-    }
 
-    // 3b'. Web search (#252), spread LAST: the same shadow-guard as the MCP
-    //      merge above, so a discovered MCP tool can never shadow it.
-    if (input.webSearch) {
-      tools = { ...tools, ...buildWebSearchTools(conn, input.toolFetch ?? guardedFetch) };
+      // 3b'. Web search (#252), spread LAST: the same shadow-guard as the MCP
+      //      merge above, so a discovered MCP tool can never shadow it.
+      if (input.webSearch) {
+        tools = { ...tools, ...buildWebSearchTools(conn, input.toolFetch ?? guardedFetch) };
+      }
+
+      const main = { instructions, tools };
+      agentFor = (run) => createMainAgent(main, run);
     }
 
     // 3c. Live doc streaming: a room-scoped `files` turn has a bundle + peer to
@@ -356,7 +382,11 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 4. one generic turn. The instructions append the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
     //    divergence note ONLY when the caller flagged an external edit (append-only).
-    const note = input.filesChangedExternally ? DIVERGENCE_NOTE : "";
+    // An area chat's sub-agent has no "Existing files:" block for the note to refer to.
+    const note = input.filesChangedExternally && !areaChat ? DIVERGENCE_NOTE : "";
+    // What the Issues chat did meanwhile reaches the main agent, never an area chat's
+    // sub-agent (the Issues chat was there; an issue's chat is about one issue).
+    const branchNote = areaChat ? "" : branchNotesNote(input.branchNotes);
     // Eager skills (#335): resolve the requested bodies and inline them ahead
     // of the instruction — the model applies them in its FIRST step instead of
     // spending a whole model call on loadSkill. Unknown names skip silently
@@ -403,19 +433,21 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const maxOutputTokens = maxOutputTokensFor(conn);
     const res = await runTurn({
       model: input.model,
-      instructions,
+      agentFor,
       prompt:
+        branchNote +
         note +
         attachmentsNote((input.chatAttachments ?? []).flatMap((p) => (p.filename ? [p.filename] : []))) +
         unreadableReferencesNote(input.unreadableReferences) +
         eagerBlock +
-        buildPrompt(input.files, input.instruction),
+        // An area chat's sub-agent has no spec snapshot: the user's message is the prompt.
+        (areaChat ? input.instruction : buildPrompt(input.files, input.instruction)),
       messages: history,
       ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
-      tools,
-      // End the turn at an ACCEPTED HITL question call (the question tools live
-      // on the `files` set only, so this never fires on a task-plan turn).
-      stopWhen: [isStepCount(config.maxSteps), hasValidQuestionCall()],
+      // Each agent ends its turn here or at an ACCEPTED HITL question call (the
+      // question tools live on the `files`, `issues` and `issue` sets, so that
+      // never fires on a task-plan turn).
+      maxSteps: config.maxSteps,
       maxOutputTokens,
       // Short provider waits (a 429 with a brief retry-after, a 5xx) ride out
       // about a minute; a provider limit stops the turn at once
@@ -438,7 +470,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
 
     if (history !== conv.messages) conv.messages.push(...history.slice(historyLen));
 
-    // 5. set status: awaiting-human when the turn ended on a HITL question call.
+    // 5. set status: awaiting-human when the turn ended on a HITL question call
+    // or an accepted hand-off call.
     conv.status = endedAwaitingHuman(conv.messages.slice(startLen)) ? "awaiting-human" : "done";
 
     // 6. per-turn spend (#249): project the whole-turn usage onto the pinned
@@ -477,7 +510,16 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const cutOff = res.finishReason === "length" ? truncation.cutOffCall() : undefined;
     if (cutOff) throw new OutputTruncatedError(cutOff, maxOutputTokens);
 
-    return { conversation: conv, usage, changedPaths: bundle ? changedPaths(started, bundle) : [] };
+    // 8. An outcome-note scope's outcome (the Issues chat's: the filing, else
+    //    its last reply): the caller keeps it for the main chat's next turn
+    //    (a branch note).
+    const outcome = scope?.reportsBack === "outcome-note" ? turnOutcome(conv.messages.slice(startLen)) : undefined;
+    return {
+      conversation: conv,
+      usage,
+      changedPaths: bundle ? changedPaths(started, bundle) : [],
+      ...(outcome !== undefined ? { outcome } : {}),
+    };
   } finally {
     // Drain the live-preview writer and undo any addFile body we streamed but that
     // never finalized (a severed or rejected op). Runs before the turn's run detaches

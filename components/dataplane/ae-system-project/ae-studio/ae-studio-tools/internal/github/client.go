@@ -30,6 +30,9 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -322,6 +325,12 @@ func (c *Client) EditIssueBody(ctx context.Context, owner, repo string, number i
 	return c.doJSON(ctx, http.MethodPatch, url, map[string]string{"body": body}, nil, http.StatusOK)
 }
 
+// EditIssueTitle replaces an issue's title.
+func (c *Client) EditIssueTitle(ctx context.Context, owner, repo string, number int, title string) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPatch, url, map[string]string{"title": title}, nil, http.StatusOK)
+}
+
 // ReopenIssue sets the issue state back to open. It names no state_reason:
 // GitHub drops the closed reason itself on reopen. Reopening an open issue is
 // a 200 no-op, so callers need no read-before-write.
@@ -412,6 +421,9 @@ type issueWire struct {
 	Labels      []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Number int `json:"number"`
+	} `json:"milestone"`
 	// PullRequest is present only on pull requests.
 	PullRequest *struct{} `json:"pull_request"`
 }
@@ -422,10 +434,14 @@ func (w issueWire) info() IssueInfo {
 	for _, l := range w.Labels {
 		labels = append(labels, l.Name)
 	}
-	return IssueInfo{
+	info := IssueInfo{
 		Number: w.Number, Title: w.Title, Body: w.Body, URL: w.HTMLURL,
 		State: w.State, StateReason: w.StateReason, ClosedAt: w.ClosedAt, Labels: labels,
 	}
+	if w.Milestone != nil {
+		info.Milestone = w.Milestone.Number
+	}
+	return info
 }
 
 // ListIssues answers the repository's issues in every state, filtered by
@@ -457,7 +473,9 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, labels []st
 	return issues, nil
 }
 
-// GetIssue answers one issue by number; a 404 is ErrIssueNotFound.
+// GetIssue answers one issue by number; a 404 is ErrIssueNotFound, and so
+// is a pull request's number (GitHub's issues API answers those too), as
+// ListIssues drops them: nothing that takes an issue can target a PR.
 func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (*IssueInfo, error) {
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
 	var raw issueWire
@@ -466,6 +484,9 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 			return nil, ErrIssueNotFound
 		}
 		return nil, err
+	}
+	if raw.PullRequest != nil {
+		return nil, ErrIssueNotFound
 	}
 	info := raw.info()
 	return &info, nil
@@ -607,6 +628,41 @@ func (c *Client) ReconfigureWebhook(ctx context.Context, owner, repo string, hoo
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/hooks/%d", owner, repo, hookID)
 	payload := map[string]any{"active": true, "events": events, "config": c.hookConfig()}
 	return c.doJSON(ctx, http.MethodPatch, url, payload, nil, http.StatusOK)
+}
+
+// EnsureWebhook leaves one hook on owner/repo carrying this pod's whole
+// config (URL and secret) and events, active, and answers its id. storedID
+// (0: none) is the hook the caller remembers: it is reconfigured in place
+// whatever URL it had, so a moved delivery URL or a new secret re-points
+// that hook rather than adding a second one beside it. A stored hook GitHub
+// no longer has (404) is created again; a hook created, or found by the
+// pod's URL, is then reconfigured when it already existed.
+func (c *Client) EnsureWebhook(ctx context.Context, owner, repo string, storedID int64, events []string) (int64, error) {
+	if storedID > 0 {
+		err := c.ReconfigureWebhook(ctx, owner, repo, storedID, events)
+		if !IsHTTPStatus(err, http.StatusNotFound) {
+			return storedID, err
+		}
+	}
+	id, existed, err := c.RegisterWebhook(ctx, owner, repo, events)
+	if err == nil && existed {
+		err = c.ReconfigureWebhook(ctx, owner, repo, id, events)
+	}
+	return id, err
+}
+
+// hookConfigRevDomain separates the config rev's HMAC from any other use of
+// the webhook secret.
+const hookConfigRevDomain = "aep-hook-config/v1\n"
+
+// HookConfigRev names the config every hook of this pod carries (its
+// delivery URL and signing secret) without revealing either: 16 hex of
+// HMAC-SHA256 keyed by the secret over the URL. A caller that stored the rev
+// a hook was ensured at knows the hook is stale when the rev moves.
+func (c *Client) HookConfigRev() string {
+	mac := hmac.New(sha256.New, []byte(c.cfg.HookSecret))
+	mac.Write([]byte(hookConfigRevDomain + c.cfg.HookURL))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 // DeleteWebhook removes the hook with the id the platform stored at

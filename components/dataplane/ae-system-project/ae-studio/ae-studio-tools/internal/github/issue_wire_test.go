@@ -440,6 +440,20 @@ func TestEditIssueBody_PatchesBody(t *testing.T) {
 	}
 }
 
+func TestEditIssueTitle_PatchesTitle(t *testing.T) {
+	stub := githubtest.NewStub(t)
+	stub.On(http.MethodPatch, issuesPath+"/7", http.StatusOK, `{}`)
+
+	if err := clientOnStub(stub).EditIssueTitle(context.Background(), wireOwner, wireRepo, 7, "a new title"); err != nil {
+		t.Fatalf("EditIssueTitle: %v", err)
+	}
+	var b map[string]any
+	decodeInto(t, onlyRequestTo(t, stub, http.MethodPatch, issuesPath+"/7").Body, &b)
+	if len(b) != 1 || b["title"] != "a new title" {
+		t.Fatalf("edit title patch = %v, want the title alone", b)
+	}
+}
+
 // Adoption's write: the milestone travels as a NUMBER on the ordinary issue
 // PATCH route.
 func TestSetIssueMilestone_PatchesTheNumber(t *testing.T) {

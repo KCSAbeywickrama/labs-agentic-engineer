@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"path"
@@ -94,23 +95,75 @@ func (f *Fake) TrashRepo(_ context.Context, ref sourcecontrol.RepoRef) error {
 	return nil
 }
 
-// RegisterWebhook ensures the hook delivering to the pod's URL and answers
-// its id: an existing one is answered with its events replaced by these, as
-// the pod's register-hook ("one call is an ensure") does.
-func (f *Fake) RegisterWebhook(_ context.Context, ref sourcecontrol.RepoRef, events []string) (int64, error) {
+// RegisterWebhook ensures the hook as the pod's register-hook does: the
+// stored hook, when ref still has it, is reconfigured in place (it now
+// delivers to the pod's URL); else the hook to the pod's URL is, else one is
+// created. The hook then carries the org's config rev (HookConfigRevs).
+func (f *Fake) RegisterWebhook(_ context.Context, ref sourcecontrol.RepoRef, storedID int64, events []string) (sourcecontrol.EnsuredHook, error) {
 	st, unlock, err := f.issueOp(OpRegisterWebhook, ref)
 	if err != nil {
-		return 0, err
+		return sourcecontrol.EnsuredHook{}, err
 	}
 	defer unlock()
-	if _, ok := st.hooks[st.podHook]; ok {
-		st.hooks[st.podHook] = slices.Clone(events)
-		return st.podHook, nil
+	id := st.podHook
+	if _, ok := st.hooks[storedID]; ok && storedID > 0 {
+		id = storedID
 	}
-	f.nextHookID++
-	st.hooks[f.nextHookID] = slices.Clone(events)
-	st.podHook = f.nextHookID
-	return f.nextHookID, nil
+	if _, ok := st.hooks[id]; !ok || id == 0 {
+		f.nextHookID++
+		id = f.nextHookID
+	}
+	rev := f.hookConfigRevLocked(ref.Org)
+	st.hooks[id] = slices.Clone(events)
+	st.hookRevs[id] = rev
+	st.podHook = id
+	return sourcecontrol.EnsuredHook{ID: id, ConfigRev: rev}, nil
+}
+
+// HookConfigRev answers the org's config rev (DefaultHookConfigRev until
+// SetHookConfigRev).
+func (f *Fake) HookConfigRev(_ context.Context, org string) (string, error) {
+	if err := f.begin(Call{Op: OpHookConfigRev, Ref: sourcecontrol.RepoRef{Org: org}}); err != nil {
+		return "", err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hookConfigRevLocked(org), nil
+}
+
+// DefaultHookConfigRev is every org's config rev until SetHookConfigRev.
+const DefaultHookConfigRev = "0123456789abcdef"
+
+// SetHookConfigRev moves org's pod onto another hook config (a moved relay
+// channel, a new webhook secret). Its hooks no longer match the pod's URL,
+// so none is the pod's hook until one is ensured again.
+func (f *Fake) SetHookConfigRev(org, rev string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hookRevs == nil {
+		f.hookRevs = map[string]string{}
+	}
+	f.hookRevs[org] = rev
+	for key, st := range f.repos {
+		if key.org == org {
+			st.podHook = 0
+		}
+	}
+}
+
+// HookConfigRevs answers ref's hooks: hook id → the config rev it was last
+// ensured with ("" for another integration's hook).
+func (f *Fake) HookConfigRevs(ref sourcecontrol.RepoRef) map[int64]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.state(ref).hookRevs)
+}
+
+func (f *Fake) hookConfigRevLocked(org string) string {
+	if rev, ok := f.hookRevs[org]; ok {
+		return rev
+	}
+	return DefaultHookConfigRev
 }
 
 // SeedHook installs another integration's hook (not to the pod's URL) on
@@ -131,6 +184,7 @@ func (f *Fake) DeleteWebhook(_ context.Context, ref sourcecontrol.RepoRef, hookI
 	}
 	defer unlock()
 	delete(st.hooks, hookID)
+	delete(st.hookRevs, hookID)
 	return nil
 }
 

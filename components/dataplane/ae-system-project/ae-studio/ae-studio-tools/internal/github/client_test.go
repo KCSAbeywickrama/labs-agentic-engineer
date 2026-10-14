@@ -19,6 +19,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -83,6 +84,16 @@ func TestRecurrenceStateReasonReads(t *testing.T) {
 				t.Errorf("detail closure identity = %q", issue.ClosedAt)
 			}
 		})
+	}
+}
+
+// GitHub's issues API answers a pull request's number too; GetIssue reads it
+// as no such issue, so nothing that takes an issue (an issue's chat, its
+// tools, adoption) can be pointed at a pull request.
+func TestGetIssue_PullRequestIsNotFound(t *testing.T) {
+	client, _ := newFake(t, http.StatusOK, `{"number":42,"state":"open","pull_request":{"url":"https://api.github.com/repos/acme/repo/pulls/42"}}`)
+	if _, err := client.GetIssue(context.Background(), "acme", "repo", 42); !errors.Is(err, ErrIssueNotFound) {
+		t.Fatalf("err = %v, want ErrIssueNotFound", err)
 	}
 }
 
@@ -203,6 +214,22 @@ func TestListIssuesExcludesPullRequests(t *testing.T) {
 	}
 	if len(issues) != 1 || issues[0].Number != 1 {
 		t.Fatalf("issues = %+v, want only the non-PR issue #1", issues)
+	}
+}
+
+// TestListIssuesReadsTheMilestone: an issue in a version's milestone says
+// which one; an issue in none reads 0.
+func TestListIssuesReadsTheMilestone(t *testing.T) {
+	c, _ := fakeIssuePages(t, func(int) string {
+		return `[{"number":2,"title":"in v1","state":"open","labels":[],"milestone":{"number":5,"title":"v1"}},` +
+			`{"number":1,"title":"bare","state":"open","labels":[],"milestone":null}]`
+	})
+	issues, err := c.ListIssues(context.Background(), "acme", "repo", nil)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Milestone != 5 || issues[1].Milestone != 0 {
+		t.Fatalf("issues = %+v, want #2 in milestone 5 and #1 in none", issues)
 	}
 }
 

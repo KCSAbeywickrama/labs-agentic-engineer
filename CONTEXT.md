@@ -49,8 +49,8 @@ watched over a replayable stream.
 **Conversation**:
 The agent's thread of turns for one entity: a project, a Skill, a Resource, or the
 organization; the chat shows the Conversation of the entity in view. A project has
-one current Conversation, shared by everyone working on it; the user may rotate it,
-and it rotates by itself at 80 % of the model connection's context window (or past
+one current Conversation per Chat view, shared by everyone working on it; the user
+may rotate the main chat's, and each rotates by itself at 80 % of the model connection's context window (or past
 8 MiB of thread when the connection declares none). The design agent also serves
 marketplace Conversations: each belongs to the user who started it, and a user may
 hold several (no console page opens one today). Conversations live only in the
@@ -503,6 +503,12 @@ _Avoid_: modal, dialog, Panel (a different thing).
 A small window over a Page for one short task, used without the agent: the build
 picker, Try it. It has no address and leaves the Turn scope as it was.
 _Avoid_: Card, modal.
+
+**Chat view**:
+The main-panel view whose agent the chat talks to: the Issues Page has its own,
+and so does each open issue (on its card); everything else talks to the
+project's main chat. Each chat view owns its own Conversation.
+_Avoid_: branch, sub-agent (on screen).
 
 **Turn scope**:
 What one turn of a Conversation is about, set by the Card in view: a feature, the

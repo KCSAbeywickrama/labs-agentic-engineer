@@ -5179,6 +5179,13 @@ components:
           - no_change_verdict
           - escalated
           type: string
+        milestoneNumber:
+          description: >-
+            The number of the issue's milestone, if any (handing an issue over
+            puts it in the deployed version's and arms it with the `aep` label).
+            Omitted when the issue is in none.
+          format: int64
+          type: integer
       required:
       - Number
       - Title
@@ -7641,7 +7648,7 @@ components:
         agent:
           description: >-
             How the project's agent history stands (#562), derived from the newest finished
-            `agent_turns` row (the finished-turn ledger). `never-started` — no turn has EVER run
+            main-chat `agent_turns` row (the finished-turn ledger; the Issues chats' turns are excluded). `never-started` — no turn has EVER run
             for this project; `""` — a turn has run and the newest one completed; `failed` — the
             newest turn ended in failure and none has finished since. `never-started` is distinct
             from `""` because the two need opposite treatment: one means the journey has not begun

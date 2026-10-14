@@ -61,14 +61,18 @@ type TurnRecord struct {
 	Project        string
 	ConversationID string
 	Kind           string // TurnKindBrowser | TurnKindKickoff | TurnKindPlan
-	Flow           string
-	Status         string // completed | failed
-	Reason         string
-	Code           string
-	BaseRef        string
-	SkillsRef      string
-	StartedAt      time.Time
-	FinishedAt     time.Time
+	// ChatView is the chat a browser turn ran in when it is not the main
+	// chat: "issues" (the Issues area's own) or "issue" (that area focused on
+	// one issue); "" for the main chat and every other kind (AgentTurn.ChatView).
+	ChatView   string
+	Flow       string
+	Status     string // completed | failed
+	Reason     string
+	Code       string
+	BaseRef    string
+	SkillsRef  string
+	StartedAt  time.Time
+	FinishedAt time.Time
 	// AuthorID and AuthorName credit the user who sent the turn; both "" for
 	// a turn nobody sent (a kickoff with no credit, a marketplace turn).
 	AuthorID   string
@@ -109,8 +113,10 @@ type TurnRepository interface {
 	// artifact service reads them.
 	DesignLedger
 
-	// Newest returns the project's most recent turn row across every
-	// conversation, or (nil, nil) when nothing has ever run.
+	// Newest returns the project's most recent main-chat turn row across every
+	// conversation, or (nil, nil) when nothing has ever run there. A turn of
+	// the Issues chat or of an issue's chat is never spec work, so it is
+	// never the newest.
 	//
 	// Two callers, both needing "has this project ever had an agent work on
 	// it, and how did the last attempt end" (#562): the kickoff's idempotence
@@ -171,6 +177,7 @@ func (r *turnRepository) ledgerRow(org string, rec TurnRecord) AgentTurn {
 		ProjectID:           rec.Project,
 		ConversationID:      rec.ConversationID,
 		Kind:                rec.Kind,
+		ChatView:            rec.ChatView,
 		Flow:                rec.Flow,
 		BaseRef:             rec.BaseRef,
 		SkillsRef:           rec.SkillsRef,
@@ -206,15 +213,17 @@ func (r *turnRepository) ledgerRow(org string, rec TurnRecord) AgentTurn {
 	return row
 }
 
-// Newest reads one row off `ix_agent_turns_project_newest`
+// Newest walks `ix_agent_turns_project_newest`
 // (org_id, project_id, created_at DESC — migrate/agent_turns.go), whose column
-// order IS this query's, so it is a single index read rather than a sort of
-// every turn the project has ever run. That matters: the status poll runs this
-// every 5s per viewer while an agent works.
+// order IS this query's, so it reads from the newest row down rather than
+// sorting every turn the project has ever run; chat_view filters the rows as
+// the index is walked (an Issues or issue chat's turns are the only ones it
+// skips). That matters: the status poll runs this every 5s per viewer while
+// an agent works.
 func (r *turnRepository) Newest(ctx context.Context, orgID, projectID string) (*AgentTurn, error) {
 	var t AgentTurn
 	err := r.db.WithContext(ctx).
-		Where("org_id = ? AND project_id = ?", orgID, projectID).
+		Where("org_id = ? AND project_id = ? AND chat_view = ''", orgID, projectID).
 		Order("created_at DESC").
 		First(&t).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -860,6 +860,18 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("SRE handoff enabled", "observer", cfg.Observability.BaseURL)
 	}
 
+	// The design agent's Issues and issue chats act with the issue tools on
+	// the pod's org credential (InternalDeps.IssuesMCP); a closed issue's
+	// chat thread is removed in the pod, where the agent keeps it. Reports
+	// are classified here, with the platform's Jev key, never in the pod.
+	issueThreads := podIssueThreads{repos: repoRepo, pod: studioTools}
+	issuesMCP := scissues.NewUserMCPHandler(issueService, scissues.IssueAgentPorts{
+		Promoter:   issueAgentPromoter{commands: taskCommands},
+		Components: designComponents{store: artifactStore},
+		Threads:    issueThreads,
+		Classifier: reportClassifier(cfg.AEStudio.Jev),
+	})
+
 	// Controllers
 	params := edge.AppParams{
 		Config: cfg,
@@ -885,6 +897,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			TurnLedger: turnRepo,
 			// The pod's verified GitHub hook deliveries.
 			WebhookIngestor: webhookIngestor,
+			// The design agent's Issues and issue chats' issue tools.
+			IssuesMCP: issuesMCP,
 		},
 		ConfigRepo:          configRepo,
 		ThunderJWKS:         thunderJWKS,
@@ -904,7 +918,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// The gitpat submit writes the org secrets, then converges AE Studio.
 		WithAEStudio(orgSecretWriter, aeStudio).
 		// A section reads as configured only when its reference rows exist.
-		WithOrgSecretRefs(orgSecretRepo)
+		WithOrgSecretRefs(orgSecretRepo).
+		// A (re)connect re-syncs the org's repo hooks with its pod's config.
+		WithRepoHookResync(webhookRegService)
 
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
@@ -1304,6 +1320,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// router is a pointer held by the already-built controller, so a late Register
 	// (before serve) is picked up.
 	registerWebhook("issues", "closed", provisioningSvc.OnIssueClosed)
+	// A closed issue's chat thread goes with it, whoever closed it (round
+	// three §4); the issue agent's own close_issue removes it too (Threads on
+	// the issues MCP handler above). A reopen removes whatever the close left,
+	// so a reopened issue starts a fresh thread.
+	threadRemoval := issueThreadRemoval{repos: repoLocator{db: db}, threads: issueThreads}
+	registerWebhook("issues", "closed", threadRemoval.OnIssueEvent)
+	registerWebhook("issues", "reopened", threadRemoval.OnIssueEvent)
 	// Deprovision a project's OC Resource model on project delete (OC does not
 	// cascade the logically-owned Resources/bindings).
 	projectService.SetResourceDeprovisioner(provisioningSvc)

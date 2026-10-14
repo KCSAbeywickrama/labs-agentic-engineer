@@ -68,6 +68,8 @@ type IssueInfo struct {
 	StateReason string
 	ClosedAt    string
 	Labels      []string
+	// Milestone is the number of the milestone the issue is in; 0 for none.
+	Milestone int
 }
 
 // PullRequestState is a pull request's open/closed state, whether it merged,

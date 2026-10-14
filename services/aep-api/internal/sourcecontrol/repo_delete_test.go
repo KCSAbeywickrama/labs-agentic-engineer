@@ -152,7 +152,7 @@ func TestRepoDeleteMark_BeginAndAbort(t *testing.T) {
 	if row, _ := svc.GetRepo(testContext(), "org1", "proj1"); row.Status != sourcecontrol.RepoStatusDeleting {
 		t.Fatalf("status %q, want deleting", row.Status)
 	}
-	if err := svc.SetWebhookID(testContext(), "org1", "proj1", 5); !errors.Is(err, sourcecontrol.ErrRepoNotFound) {
+	if err := svc.SetWebhookID(testContext(), "org1", "proj1", 5, "r"); !errors.Is(err, sourcecontrol.ErrRepoNotFound) {
 		t.Fatalf("SetWebhookID on a deleting row: %v, want ErrRepoNotFound", err)
 	}
 	if err := svc.AbortDelete(testContext(), "org1", "proj1"); err != nil {

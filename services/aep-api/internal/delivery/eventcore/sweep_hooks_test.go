@@ -31,11 +31,25 @@ import (
 )
 
 // hookSpy is the HookEnsurer: it records each project it was asked to ensure
-// and answers the error programmed for that project, if any.
+// and answers the error programmed for that project, if any. HookRev answers
+// rev[org] ("" when unset) or revFail[org], counting the reads.
 type hookSpy struct {
 	mu       sync.Mutex
 	projects []string
 	fail     map[string]error
+	rev      map[string]string
+	revFail  map[string]error
+	revReads int
+}
+
+func (h *hookSpy) HookRev(_ context.Context, orgID string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.revReads++
+	if err := h.revFail[orgID]; err != nil {
+		return "", err
+	}
+	return h.rev[orgID], nil
 }
 
 func (h *hookSpy) Register(_ context.Context, _, projectID string) (*int64, error) {
@@ -102,18 +116,66 @@ func hookSweep(h *harness, hooks HookEnsurer, repos ...RepoRef) *Sweep {
 }
 
 // A ready row with no hook id is the one a failed create-time registration
-// leaves behind: the sweep ensures its hook. A row that holds
-// one is left alone, whatever its age (R12: no migration of old hooks).
+// leaves behind: the sweep ensures its hook. A row whose hook was ensured at
+// the org's current config rev is left alone.
 func TestSweep_RepairsMissingHooks(t *testing.T) {
 	h := newHarness(t)
-	hooks := &hookSpy{}
+	hooks := &hookSpy{rev: map[string]string{"default": "r1"}}
 	s := hookSweep(h, hooks,
 		RepoRef{OrgID: "default", ProjectID: "p", FullName: "acme/g", HasHook: false},
-		RepoRef{OrgID: "default", ProjectID: "q", FullName: "acme/h", HasHook: true},
+		RepoRef{OrgID: "default", ProjectID: "q", FullName: "acme/h", HasHook: true, HookRev: "r1"},
 	)
 	_ = s.Once(context.Background())
 	if !slices.Equal(hooks.ensured(), []string{"p"}) {
 		t.Fatalf("ensured %v, want [p]", hooks.ensured())
+	}
+}
+
+// A row whose hook was ensured at another config rev than the one the org's
+// AE Studio installs now (its relay channel moved, its webhook secret
+// changed, or the row predates revs) is re-ensured, so GitHub stops posting
+// to a dead channel or with a secret the pod refuses (401). A row at the
+// current rev costs no GitHub call, a platform repo is never touched, and
+// the org's rev is read once per pass, not per row.
+func TestSweep_ResyncsHooksEnsuredAtAnotherConfig(t *testing.T) {
+	logs := captureHookLogs(t)
+	h := newHarness(t)
+	hooks := &hookSpy{rev: map[string]string{"default": "r2"}}
+	s := hookSweep(h, hooks,
+		RepoRef{OrgID: "default", ProjectID: "stale", FullName: "acme/stale", HasHook: true, HookRev: "r1"},
+		RepoRef{OrgID: "default", ProjectID: "legacy", FullName: "acme/legacy", HasHook: true},
+		RepoRef{OrgID: "default", ProjectID: "current", FullName: "acme/current", HasHook: true, HookRev: "r2"},
+		RepoRef{OrgID: "default", ProjectID: "_skills", FullName: "acme/skills", HookExempt: true},
+	)
+	_ = s.Once(context.Background())
+	if got := hooks.ensured(); !slices.Equal(got, []string{"stale", "legacy"}) {
+		t.Fatalf("ensured %v, want [stale legacy]", got)
+	}
+	if hooks.revReads != 1 {
+		t.Fatalf("rev reads = %d, want one per org per pass", hooks.revReads)
+	}
+	repaired := logs.events(t, "eventcore.hook_repaired")
+	if len(repaired) != 2 || repaired[0]["reason"] != "stale" {
+		t.Fatalf("hook_repaired = %v, want two lines with reason stale", repaired)
+	}
+}
+
+// An org whose AE Studio cannot answer its config rev this pass keeps its
+// stored hooks as they are until the next pass; another org is untouched.
+func TestSweep_HookResyncWaitsForAnOrgWhoseRevIsUnreadable(t *testing.T) {
+	h := newHarness(t)
+	hooks := &hookSpy{
+		rev:     map[string]string{"up": "r2"},
+		revFail: map[string]error{"down": sourcecontrol.ErrAEStudioUnavailable},
+	}
+	s := hookSweep(h, hooks,
+		RepoRef{OrgID: "down", ProjectID: "a1", FullName: "acme/a1", HasHook: true, HookRev: "r1"},
+		RepoRef{OrgID: "down", ProjectID: "a2", FullName: "acme/a2", HasHook: true, HookRev: "r1"},
+		RepoRef{OrgID: "up", ProjectID: "b1", FullName: "acme/b1", HasHook: true, HookRev: "r1"},
+	)
+	_ = s.Once(context.Background())
+	if got := hooks.ensured(); !slices.Equal(got, []string{"b1"}) {
+		t.Fatalf("ensured %v, want [b1]", got)
 	}
 }
 

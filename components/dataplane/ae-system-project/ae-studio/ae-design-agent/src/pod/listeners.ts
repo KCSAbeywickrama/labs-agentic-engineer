@@ -178,6 +178,7 @@ export async function startPodListeners(cfg: PodConfig, deps: PodListenerDeps): 
   const turnApp = createTurnSocketApp({
     turns: deps.edge.turns,
     desk: deps.edge.desk,
+    threads: deps.edge.threads,
     ...(deps.edge.keepAliveMs ? { keepAliveMs: deps.edge.keepAliveMs } : {}),
   });
   const health = await listen(healthApp(() => ready), cfg.healthPort);

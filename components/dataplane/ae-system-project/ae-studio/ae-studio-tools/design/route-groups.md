@@ -78,7 +78,10 @@ client (`AE_STUDIO_CLIENT_ID`, `AE_STUDIO_CLIENT_SECRET`), minted at
 
 - `/internal/v1/ae-studio/*`: project and skills repository lookups,
   dependency completions, turn usage, the webhook forward;
-- `/internal/v1/mcp`: the forwarded MCP tools (below).
+- `/internal/v1/mcp`: the forwarded MCP tools (below);
+- `/internal/v1/ae-studio/projects/{p}/issues/mcp` and
+  `.../issues/{n}/mcp`: the issue tools of the design agent's Issues and
+  issue chats (below).
 
 `aep-api` refuses it on `runs/`. The org's publisher client stays with the
 coding Jobs; this container never holds it.
@@ -111,6 +114,25 @@ The ten forwarded descriptors match `aep-api`'s
 `internal/dependencies/mcpdiscovery/mcp_tools.go`; the two remote-git ones match the
 coding runner's `runners/remote-worker/src/lib/remote_git.ts`. A change to a
 tool changes all three.
+
+### The issue chats' tools
+
+The MCP socket's `POST /projects/{p}/issues/mcp` (the Issues chat) and
+`POST /projects/{p}/issues/{n}/mcp` (one issue's chat) are forwarded to
+`aep-api`'s surface for that project (and issue) with the same token
+(`internal/mcp/issues.go`). The descriptors are `aep-api`'s
+(`sourcecontrol/issues/user_mcp_tools.go`, `issue_mcp_tools.go`), kept to a
+pinned list per route (`IssuesTools`, `IssueTools`, pinned by
+`TestIssueToolLists_Pinned`): `tools/list` drops any other name `aep-api`
+lists, and `tools/call` of one is `-32602` before anything is forwarded.
+
+- **Issues chat:** `search_issues`, `create_issue`, `classify_report` (aep-api
+  classifies with the platform's Jev key; the pod never holds it).
+- **An issue's chat:** `get_issue`, `list_components`, `comment_issue`,
+  `edit_issue`, `close_issue`, `reopen_issue`, `hand_to_coding_agent`.
+
+The design agent picks the route from the chat a turn runs in, so a model
+never names a project, an org or an issue number.
 
 ## Problem codes as aep-api reads them
 

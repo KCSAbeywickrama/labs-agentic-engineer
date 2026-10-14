@@ -45,6 +45,14 @@ type AgentTurn struct {
 	// derived it for the rows the in-process engine wrote.
 	Kind string `gorm:"type:text;not null;default:'browser'" json:"-"`
 
+	// ChatView is the chat a browser turn ran in when it is not the
+	// project's main chat, from the record's area and focus: "issues" (the
+	// Issues area's own chat) or "issue" (that area focused on one issue).
+	// "" for a main-chat turn, every other kind, and every row older than the
+	// column (AutoMigrate adds it with that default). Newest reads main-chat
+	// rows only: those chats never edit the spec.
+	ChatView string `gorm:"type:text;not null;default:''" json:"-"`
+
 	// Flow is the `/<skill>` token this turn ran ("design", "start", …); "" for
 	// plain chat. Recorded (#575) because the status read has to find "the
 	// newest successful DESIGN run" to answer whether the requirements have

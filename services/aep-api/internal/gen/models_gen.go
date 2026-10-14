@@ -2039,6 +2039,9 @@ type IssueInfo struct {
 
 	// AttentionReason Console attention state. Omitted when the issue needs no attention.
 	AttentionReason IssueInfoAttentionReason `json:"attentionReason,omitempty"`
+
+	// MilestoneNumber The number of the issue's milestone, if any (handing an issue over puts it in the deployed version's and arms it with the `aep` label). Omitted when the issue is in none.
+	MilestoneNumber int64 `json:"milestoneNumber,omitempty"`
 }
 
 // IssueInfoAttentionReason Console attention state. Omitted when the issue needs no attention.
@@ -3130,7 +3133,7 @@ type SourceDocumentRow struct {
 
 // SpecStage Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
 type SpecStage struct {
-	// Agent How the project's agent history stands (#562), derived from the newest finished `agent_turns` row (the finished-turn ledger). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `failed` — the newest turn ended in failure and none has finished since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Whether a turn is running right now is the org's AE Studio pod's to say (its active-turn read), not this field's.
+	// Agent How the project's agent history stands (#562), derived from the newest finished main-chat `agent_turns` row (the finished-turn ledger; the Issues chats' turns are excluded). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `failed` — the newest turn ended in failure and none has finished since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Whether a turn is running right now is the org's AE Studio pod's to say (its active-turn read), not this field's.
 	Agent string `json:"agent"`
 
 	// Availability Whether the git-derived facts below could be read. `unavailable` — the org's AE Studio could not answer for the repository (GitHub not connected, AE Studio restarting or misconfigured): exists, version, dirty, design and designOutdated are then zero values that say nothing, and the flat hasSpec / hasDesign / specStatus / phase fields are left unset. The build and deploy stages and `agent` are unaffected, and the poll still answers 200. The console renders the spec leg as "Spec status unavailable".

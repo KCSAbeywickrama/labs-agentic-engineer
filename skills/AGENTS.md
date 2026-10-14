@@ -15,6 +15,11 @@ reads this tree directly; a cluster picks up edits after `make dev-update`.
 - `architecture` pins stack skills in `design.json` `skillsPinned`; a pinned
   body joins the coding run's system prompt.
 - `aep` (coding) and `validation-task` (validation) are always on, one per run.
+- An area chat's sub-agent inlines its scope's chat skills (`issue-triage` in
+  the Issues chat, `issue-work` in an issue's chat; the area profiles in
+  `ae-design-agent/src/areas/profiles.ts`) and lists its other chat skills.
+  Editing `issue-*` changes the design agent's prompt snapshots: run its tests
+  with `UPDATE_PROMPT_SNAPSHOTS=1`.
 - Everything else loads on demand from its `description`.
 
 ## Frontmatter
@@ -22,7 +27,11 @@ reads this tree directly; a cluster picks up edits after `make dev-update`.
 - `name` equals the directory name; a mismatch drops the skill.
 - `metadata.aep.kind`: `platform` is read-only to orgs; `org`, or absent, is
   editable.
-- `metadata.aep.audience`: `[design]`, `[coding]`, or absent for both.
+- `metadata.aep.audience`: `[design]`, `[coding]`, or absent for both. `[chat]`
+  is an area chat's sub-agent: opt-in only, never loaded by a design turn or
+  mirrored to a coding run. A chat skill states know-how only; the questions
+  and options that confirm a write are the tool registry's
+  (`ae-design-agent/src/tools/registry.ts`).
 
 ## Generated blocks
 

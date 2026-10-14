@@ -27,7 +27,8 @@ import (
 // Sentinels the client returns where GitHub's answer has a domain meaning.
 var (
 	// ErrIssueNotFound: GetIssue / ListIssueComments when the repo holds no
-	// issue with that number (GitHub answered 404, or GraphQL a null issue).
+	// issue with that number (GitHub answered 404, or GraphQL a null issue);
+	// GetIssue also for a pull request's number.
 	ErrIssueNotFound = errors.New("issue not found")
 	// ErrMilestoneNotFound: the milestone reads when no milestone carries
 	// that number.

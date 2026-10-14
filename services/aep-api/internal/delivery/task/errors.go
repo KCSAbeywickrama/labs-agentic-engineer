@@ -41,9 +41,6 @@ var (
 	// project has no versioned (tagged) spec. Mapped to 400 (the build-first
 	// gate — the version tag certifies a validated requirements+design pair).
 	ErrNoSpecVersion = errors.New("planning requires a versioned spec — build the project first")
-	// ErrIssueClosed is returned when execute is requested on a closed issue
-	// (closed = no new dispatches, §4). Mapped to 409.
-	ErrIssueClosed = errors.New("issue is closed")
 	// ErrComponentNameRequired is returned by PromoteAndExecute when the caller
 	// omits the component name — a client input error, not a server fault, so
 	// the HTTP edge maps it to 400 rather than a generic 500.

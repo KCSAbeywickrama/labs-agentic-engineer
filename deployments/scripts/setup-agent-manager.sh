@@ -272,22 +272,16 @@ for key in amp agentmanager am-gateway gateway; do
   name regex (.+\\.)?${host}\\.${AE_DOMAIN_RE} host.k3d.internal
   answer auto
 }"
-    current="$(kubectl get cm coredns-custom -n kube-system -o jsonpath="{.data.${cm_key}}" 2>/dev/null || true)"
+    # The key's dot escaped: unescaped, jsonpath reads data.amp.override as a
+    # nested path, finds nothing, and every run rewrote and restarted CoreDNS.
+    current="$(kubectl get cm coredns-custom -n kube-system -o jsonpath="{.data.${cm_key//./\\.}}" 2>/dev/null || true)"
     [ "$current" = "$desired" ] && continue
-    kubectl get cm coredns-custom -n kube-system -o json 2>/dev/null \
-        | CM_KEY="$cm_key" REWRITE_HOST="$host" SUFFIX_RE="$AE_DOMAIN_RE" python3 -c "
-import json, os, sys
-cm = json.load(sys.stdin)
-cm.setdefault('data', {})[os.environ['CM_KEY']] = (
-    'rewrite stop {\n'
-    '  name regex (.+\\\\.)?' + os.environ['REWRITE_HOST']
-    + '\\\\.' + os.environ['SUFFIX_RE'] + ' host.k3d.internal\n'
-    '  answer auto\n'
-    '}'
-)
-cm['metadata'] = {'name': cm['metadata']['name'], 'namespace': cm['metadata']['namespace']}
-json.dump(cm, sys.stdout)
-" | kubectl apply -f - >/dev/null
+    # A merge patch of this one key, never an apply of the whole ConfigMap: an
+    # apply records every key in its last-applied annotation, and the next
+    # apply of a partial manifest then prunes the keys other scripts own
+    # (setup-env-for-aectl.sh's CoreDNS step says which).
+    kubectl patch cm coredns-custom -n kube-system --type merge \
+        -p "$(K="$cm_key" V="$desired" python3 -c 'import json,os; print(json.dumps({"data": {os.environ["K"]: os.environ["V"]}}))')" >/dev/null
     coredns_changed=1
 done
 if [ "$coredns_changed" = 1 ]; then
@@ -434,11 +428,14 @@ DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.${AE_DOMAIN}}"
 #     and the environment over from the field manager that wrote them
 #     ("kubectl-client-side-apply" for the getting-started samples). Taking
 #     them over is the point of step 4's hand-over, so --force-conflicts. Helm 3
-#     has no such flag and no such check.
+#     has no such flag and no such check. --server-side=true goes with it: Helm
+#     4's default ("auto") reuses the previous release's apply method, and a
+#     release a Helm 3 run left client-side then fails every upgrade with
+#     "forceConflicts enabled when serverSideApply disabled".
 post_renderer="$POST_RENDERER"
 takeover=()
 if helm version --short 2>/dev/null | grep -q '^v[4-9]'; then
-    takeover=(--force-conflicts)
+    takeover=(--server-side=true --force-conflicts)
     helm plugin uninstall "$POST_RENDERER_PLUGIN" >/dev/null 2>&1 || true
     helm plugin install "$POST_RENDERER_DIR" >/dev/null \
         || fail "Could not install the $POST_RENDERER_PLUGIN Helm plugin." "Step 5's post-renderer runs as a plugin on Helm 4."

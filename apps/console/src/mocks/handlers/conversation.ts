@@ -19,6 +19,7 @@
 import { http, HttpResponse } from "msw";
 import { SSE_DONE } from "@aep/agent-stream";
 import { parsePrototypeCommand } from "@aep/contracts/commands";
+import { chatIssue, ISSUES_CHAT, issueChat, MAIN_CHAT, type ChatRef } from "../../features/agent-chat/chatRef";
 import { scopeOfBody, type TurnBody } from "../../features/agent-chat/turnScope";
 import { webApplications } from "../../features/prototype/model/prototypes";
 import { projectSpecDoc } from "../../features/spec/collab/specDoc";
@@ -26,6 +27,7 @@ import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import type { components } from "../../generated/ae-design-agent";
 import { MOCK_USER } from "../../auth/mockSession";
 import {
+  chatOfConversation,
   conversationIdFor,
   finishedTurns,
   findTurn,
@@ -41,9 +43,12 @@ import { aeStudioUrls } from "../fixtures/aeStudio";
 import { liveDesign } from "../designState";
 import { acmeExpensesHistory } from "../fixtures/conversation";
 import { scriptDesignTurn } from "../fixtures/designTurns";
+import { scriptIssueTurn } from "../fixtures/issueAgent";
+import { scriptIssuesTurn } from "../fixtures/issuesAgent";
 import { scriptTurn } from "../fixtures/interview";
 import { scriptPrototypeTurn } from "../fixtures/prototype";
 import { specView } from "../specState";
+import { changeMockIssue, fileMockIssue, issueThreadOpen, issuesOf, nextIssueNumber } from "./issues";
 
 type ProjectConversationView = components["schemas"]["ProjectConversationView"];
 type ConversationMessages = components["schemas"]["ConversationMessages"];
@@ -67,6 +72,15 @@ type Problem = components["schemas"]["Problem"];
 // Acme Expenses starts with a conversation; a project made through New
 // project starts with the platform's kickoff (handlers/projects.ts); every
 // other project's is empty, which the real server answers the same way.
+//
+// The Issues Page's chat is a second conversation (`area=issues`) with its own
+// agent (fixtures/issuesAgent.ts): a turn sent to its thread goes to it, and
+// the running turn is looked up per chat, so the two chats never block each other.
+// Each open issue has one more (the area focused on it,
+// `focus[kind]=issue&focus[id]=<n>`), with the issue's own agent (fixtures/issueAgent.ts). A closed issue has none:
+// resolving or sending to its thread is refused as the design agent refuses
+// it (409 `issue_closed`), so closing an issue removes its thread; reading its
+// running turn is not refused.
 
 const AUTHOR = { id: "u-developer", displayName: MOCK_USER.name };
 
@@ -91,6 +105,23 @@ function historyFor(conversationId: string): ConversationMessage[] {
   ];
 }
 
+/**
+ * The chat a request's `area` and `focus` query names, as the design agent
+ * reads it: none is the main chat; `issues` the Issues area's; with
+ * `focus[kind]=issue` and a positive `focus[id]` that issue's. Null for
+ * anything else (400).
+ */
+function chatOf(url: URL): ChatRef | null {
+  const area = url.searchParams.get("area");
+  const kind = url.searchParams.get("focus[kind]");
+  const id = url.searchParams.get("focus[id]");
+  const focused = kind !== null || id !== null;
+  if (area === null) return focused ? null : MAIN_CHAT;
+  if (area !== "issues") return null;
+  if (!focused) return ISSUES_CHAT;
+  return kind === "issue" && id !== null && /^[1-9][0-9]*$/.test(id) ? issueChat(Number(id)) : null;
+}
+
 function statusOf(turn: MockTurn): TurnStatus {
   const running = isRunning(turn);
   return {
@@ -108,8 +139,39 @@ function statusOf(turn: MockTurn): TurnStatus {
   };
 }
 
-/** Start a turn: what the mock agent does with the message, scheduled from now. */
-export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
+/** A turn in the Issues area's chat: the Issues agent's, filing the issue it drafted once the user says so. */
+function startIssuesTurn(projectName: string, body: TurnBody): MockTurn {
+  const conversationId = conversationIdFor(projectName, ISSUES_CHAT);
+  const history = finishedTurns(conversationId).map((t) => t.instruction);
+  const scripted = scriptIssuesTurn(body.instruction, nextIssueNumber(projectName), history, projectName);
+  const frames = scripted.frames;
+  if (scripted.filed) fileMockIssue(projectName, scripted.filed, Date.now() + (frames.at(-1)?.at ?? 0));
+  return recordTurn({ projectName, conversationId, area: "issues", instruction: scripted.display, frames, reply: scripted.reply });
+}
+
+/** A turn in an issue's own chat: its agent's, making a confirmed change once the turn ends. */
+function startIssueTurn(projectName: string, issueNumber: number, body: TurnBody): MockTurn {
+  const conversationId = conversationIdFor(projectName, issueChat(issueNumber));
+  const history = finishedTurns(conversationId).map((t) => t.instruction);
+  const info = issuesOf(projectName).find((i) => i.Number === issueNumber);
+  const issue = {
+    number: issueNumber,
+    title: info?.Title ?? `Issue #${issueNumber}`,
+    body: info?.Body ?? "",
+    state: info?.State === "closed" ? ("closed" as const) : ("open" as const),
+  };
+  const scripted = scriptIssueTurn(body.instruction, issue, history);
+  const frames = scripted.frames;
+  if (scripted.change) changeMockIssue(projectName, issueNumber, scripted.change, Date.now() + (frames.at(-1)?.at ?? 0));
+  const focus = { kind: "issue", id: issueNumber } as const;
+  return recordTurn({ projectName, conversationId, area: "issues", focus, instruction: scripted.display, frames, reply: scripted.reply });
+}
+
+/** Start a turn in a chat (the main chat by default): what the mock agent does with the message, scheduled from now. */
+export function startMockTurn(projectName: string, body: TurnBody, chat: ChatRef = MAIN_CHAT): MockTurn {
+  const issue = chatIssue(chat);
+  if (issue !== undefined) return startIssueTurn(projectName, issue, body);
+  if (chat.area === "issues") return startIssuesTurn(projectName, body);
   const scope = scopeOfBody(body);
   const turnKey = `t${Date.now().toString(36)}`;
   const prototypeTurn = parsePrototypeCommand(body.instruction)
@@ -201,14 +263,19 @@ function problem(status: number, code: string, detail: string): Response {
 const POD = `${aeStudioUrls.designAgent}/v1/projects/:projectName`;
 
 export const conversationHandlers = [
-  http.get(`${POD}/conversations/current`, ({ params }) =>
-    HttpResponse.json<ProjectConversationView>({
-      conversationId: conversationIdFor(String(params.projectName)),
+  http.get(`${POD}/conversations/current`, ({ params, request }): Response => {
+    const projectName = String(params.projectName);
+    const chat = chatOf(new URL(request.url));
+    if (!chat) return problem(400, "invalid_chat", "area and focus name no chat");
+    const issue = chatIssue(chat);
+    if (issue !== undefined && !issueThreadOpen(projectName, issue)) return problem(409, "issue_closed", "the issue is closed");
+    return HttpResponse.json<ProjectConversationView>({
+      conversationId: conversationIdFor(projectName, chat),
       createdAt: "2026-09-29T09:00:00Z",
       createdBy: "Developer",
       current: true,
-    }),
-  ),
+    });
+  }),
 
   http.get(`${POD}/conversations/:conversationId/messages`, ({ params }) =>
     HttpResponse.json<ConversationMessages>({ messages: historyFor(String(params.conversationId)) }),
@@ -218,19 +285,27 @@ export const conversationHandlers = [
     const projectName = String(params.projectName);
     const body = (await request.json()) as TurnBody;
     if (!body.instruction?.trim()) return problem(400, "invalid_turn", "instruction is required");
-    if (String(params.conversationId) !== conversationIdFor(projectName)) {
+    // The thread names its chat, as the design agent knows it.
+    const chat = chatOfConversation(projectName, String(params.conversationId));
+    if (!chat) {
       return HttpResponse.json<TurnConflict>({ code: "conversation_rotated" }, { status: 409 });
     }
-    const running = runningTurn(projectName);
+    const issue = chatIssue(chat);
+    if (issue !== undefined && !issueThreadOpen(projectName, issue)) {
+      return HttpResponse.json<TurnConflict>({ code: "issue_closed" }, { status: 409 });
+    }
+    const running = runningTurn(projectName, chat);
     if (running) {
       return HttpResponse.json<TurnConflict>({ code: "turn_in_progress", activeTurnId: running.turnId }, { status: 409 });
     }
-    const turn = startMockTurn(projectName, body);
+    const turn = startMockTurn(projectName, body, chat);
     return HttpResponse.json<TurnOutputBody>({ turnId: turn.turnId }, { status: 202 });
   }),
 
-  http.get(`${POD}/turns/active`, ({ params }): Response => {
-    const running = runningTurn(String(params.projectName));
+  http.get(`${POD}/turns/active`, ({ params, request }): Response => {
+    const chat = chatOf(new URL(request.url));
+    if (!chat) return problem(400, "invalid_chat", "area and focus name no chat");
+    const running = runningTurn(String(params.projectName), chat);
     return running ? HttpResponse.json<TurnStatus>(statusOf(running)) : new HttpResponse(null, { status: 204 });
   }),
 

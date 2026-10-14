@@ -23,51 +23,62 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
 type syncRecorder struct {
-	seeded, nudged, setup int
-	skip                  map[string]string
+	seeded, synced, postgres, setup int
+	skip                            map[string]string
+	order                           []string
 }
 
-func (r *syncRecorder) steps(missing []string, seeded []seededSecret, awaitSkip map[string]string) syncClientsSteps {
+func (r *syncRecorder) steps(missing []string, seeded []seededSecret, unsynced map[string]string) syncClientsSteps {
 	return syncClientsSteps{
 		missingRequired: func(context.Context) ([]string, error) { return missing, nil },
-		seed:            func(context.Context) ([]seededSecret, error) { r.seeded++; return seeded, nil },
-		nudge:           func(context.Context, []string) { r.nudged++ },
-		awaitSynced:     func(context.Context, []seededSecret) map[string]string { return awaitSkip },
+		seed: func(context.Context) ([]seededSecret, error) {
+			r.seeded++
+			r.order = append(r.order, "seed")
+			return seeded, nil
+		},
+		syncSecrets: func(context.Context) (map[string]string, error) {
+			r.synced++
+			r.order = append(r.order, "sync")
+			return unsynced, nil
+		},
+		syncPostgres: func(context.Context, map[string]string) error {
+			r.postgres++
+			r.order = append(r.order, "postgres")
+			return nil
+		},
 		setupThunder: func(_ context.Context, skip map[string]string) error {
 			r.setup++
+			r.order = append(r.order, "thunder")
 			r.skip = skip
 			return nil
 		},
 	}
 }
 
-func TestSyncClients_NothingSeededNoNudge(t *testing.T) {
+// ESO is always made to re-read OpenBao before anything reads a Secret, even
+// with nothing seeded: a Secret may hold a value ESO is about to replace.
+func TestSyncClients_SyncsSecretsBeforeReadersEvenWithNothingSeeded(t *testing.T) {
 	r := &syncRecorder{}
 	if err := syncClients(context.Background(), r.steps(nil, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if r.nudged != 0 || r.setup != 1 {
-		t.Fatalf("nudged=%d setup=%d", r.nudged, r.setup)
+	if got := strings.Join(r.order, ","); got != "seed,sync,postgres,thunder" {
+		t.Fatalf("order = %s", got)
 	}
 }
 
-func TestSyncClients_SeededNudgesAndSkipsUnsynced(t *testing.T) {
+// A client whose Secret did not sync is skipped, not registered stale.
+func TestSyncClients_SkipsClientsOfUnsyncedSecrets(t *testing.T) {
 	r := &syncRecorder{}
-	skip := map[string]string{"ae-studio-internal-client": "not synced"}
-	err := syncClients(context.Background(), r.steps(nil, []seededSecret{{"aep/thunder-clients/ae-studio-internal", "v"}}, skip))
-	if err != nil {
+	unsynced := map[string]string{aeStudioInternalSecretsName: "not synced"}
+	if err := syncClients(context.Background(), r.steps(nil, []seededSecret{{path: "aep/thunder-clients/ae-studio-internal", value: "v"}}, unsynced)); err != nil {
 		t.Fatal(err)
 	}
-	if r.nudged != 1 || r.setup != 1 || len(r.skip) != 1 {
-		t.Fatalf("nudged=%d setup=%d skip=%v", r.nudged, r.setup, r.skip)
+	if r.setup != 1 || len(r.skip) != 1 || r.skip["ae-studio-internal-client"] == "" {
+		t.Fatalf("setup=%d skip=%v", r.setup, r.skip)
 	}
 }
 
@@ -78,8 +89,8 @@ func TestSyncClients_WipedStoreRefusesWritingNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "wiped") || !strings.Contains(err.Error(), "aep/postgres-password") {
 		t.Fatalf("err = %v", err)
 	}
-	if r.seeded != 0 || r.nudged != 0 || r.setup != 0 {
-		t.Fatalf("seeded=%d nudged=%d setup=%d", r.seeded, r.nudged, r.setup)
+	if len(r.order) != 0 {
+		t.Fatalf("ran %v", r.order)
 	}
 }
 
@@ -87,19 +98,17 @@ func TestSyncClients_SeedErrorStopsBeforeThunder(t *testing.T) {
 	r := &syncRecorder{}
 	st := r.steps(nil, nil, nil)
 	st.seed = func(context.Context) ([]seededSecret, error) { return nil, errors.New("boom") }
-	if err := syncClients(context.Background(), st); err == nil || r.setup != 0 {
-		t.Fatalf("err=%v setup=%d", err, r.setup)
+	if err := syncClients(context.Background(), st); err == nil || r.setup != 0 || r.postgres != 0 {
+		t.Fatalf("err=%v setup=%d postgres=%d", err, r.setup, r.postgres)
 	}
 }
 
-// A create-only write the store refuses (key appeared meanwhile) is "exists",
-// not a failure, and is not reported as seeded.
-func TestSeedMissingGeneratedSecrets_CASConflictIsExists(t *testing.T) {
-	seeded, err := seedMissingGeneratedSecrets(
-		func(string) (bool, error) { return false, nil },
-		func(string, string) error { return errSecretExists })
-	if err != nil || len(seeded) != 0 {
-		t.Fatalf("seeded=%v err=%v", seeded, err)
+func TestSyncClients_PostgresErrorStopsBeforeThunder(t *testing.T) {
+	r := &syncRecorder{}
+	st := r.steps(nil, nil, nil)
+	st.syncPostgres = func(context.Context, map[string]string) error { return errors.New("boom") }
+	if err := syncClients(context.Background(), st); err == nil || r.setup != 0 {
+		t.Fatalf("err=%v setup=%d", err, r.setup)
 	}
 }
 
@@ -140,26 +149,6 @@ func TestGeneratedNamesMatchClientVaultNames(t *testing.T) {
 		if !have[n] {
 			t.Errorf("no client reads generated key %s", n)
 		}
-	}
-}
-
-func TestAwaitSeededSecretsSynced(t *testing.T) {
-	seeded := []seededSecret{{"aep/thunder-clients/ae-studio-internal", "new-value"}}
-	sec := func(v string) *corev1.Secret {
-		return &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: aeStudioInternalSecretsName, Namespace: "ns"},
-			Data:       map[string][]byte{"AE_STUDIO_INTERNAL_CLIENT_SECRET": []byte(v)},
-		}
-	}
-	if skip := awaitSeededSecretsSynced(context.Background(), fake.NewSimpleClientset(sec("new-value")), "ns", seeded, time.Second); len(skip) != 0 {
-		t.Fatalf("synced Secret skipped: %v", skip)
-	}
-	skip := awaitSeededSecretsSynced(context.Background(), fake.NewSimpleClientset(sec("stale")), "ns", seeded, 10*time.Millisecond)
-	if len(skip) != 1 || skip["ae-studio-internal-client"] == "" {
-		t.Fatalf("stale Secret must be skipped: %v", skip)
-	}
-	if skip := awaitSeededSecretsSynced(context.Background(), fake.NewSimpleClientset(), "ns", seeded, 10*time.Millisecond); len(skip) != 1 {
-		t.Fatalf("missing Secret must be skipped: %v", skip)
 	}
 }
 

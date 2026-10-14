@@ -83,6 +83,92 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
+  /ae-studio/projects/{projectName}/issues/mcp:
+    post:
+      operationId: call-ae-studio-issues-mcp-tool
+      summary: The Issues chat's issue tools, MCP JSON-RPC (AE Studio tools pod)
+      description: |-
+        One opaque JSON-RPC 2.0 operation; sourcecontrol/issues serves the
+        Issues agent's tools (search_issues, create_issue, classify_report)
+        on the path's project; classify_report asks Jev with the platform's
+        key (rate-limited per org; unknown on any failure). The org is the one the pod's ae-studio client token is
+        recorded for (auth.IssuesMCPGate); no tool takes a project or an org.
+        Declared so this spec lists every internal route. Excluded from code
+        generation (internal/igen/oapi-codegen.yaml exclude-operation-ids): the
+        handler is a raw JSON-RPC handler, not a strict-server method.
+      tags:
+      - AE Studio
+      security:
+      - aeStudioCC: []
+      parameters:
+      - name: projectName
+        in: path
+        required: true
+        description: Project name (DNS-label slug)
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Not a recorded ae-studio client token (plain text).
+  /ae-studio/projects/{projectName}/issues/{issueNumber}/mcp:
+    post:
+      operationId: call-ae-studio-issue-mcp-tool
+      summary: One issue's chat tools, MCP JSON-RPC (AE Studio tools pod)
+      description: |-
+        One opaque JSON-RPC 2.0 operation; sourcecontrol/issues serves an issue
+        agent's tools (get_issue, list_components, comment_issue, edit_issue,
+        close_issue, reopen_issue, hand_to_coding_agent) on the path's issue of
+        the path's project. The org is the one the pod's ae-studio client token
+        is recorded for (auth.IssuesMCPGate); no tool takes a project, an org
+        or an issue number. Declared so this spec lists every internal route.
+        Excluded from code generation (internal/igen/oapi-codegen.yaml
+        exclude-operation-ids): the handler is a raw JSON-RPC handler, not a
+        strict-server method.
+      tags:
+      - AE Studio
+      security:
+      - aeStudioCC: []
+      parameters:
+      - name: projectName
+        in: path
+        required: true
+        description: Project name (DNS-label slug)
+        schema:
+          type: string
+      - name: issueNumber
+        in: path
+        required: true
+        description: The issue the chat is about
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Not a recorded ae-studio client token (plain text).
   /ae-studio/skills/repository:
     get:
       operationId: get-ae-studio-skills-repository
@@ -482,6 +568,22 @@ components:
             $ref: '#/components/schemas/AEStudioTurnRecord'
       required:
       - records
+    AEStudioTurnRecordFocus:
+      type: object
+      additionalProperties: false
+      description: The entity the turn's area chat was narrowed to (one issue's
+        chat, by its number). Absent on the area's own chat.
+      required:
+      - kind
+      - id
+      properties:
+        kind:
+          type: string
+          enum:
+          - issue
+        id:
+          type: integer
+          minimum: 1
     AEStudioTurnRecord:
       type: object
       additionalProperties: false
@@ -518,6 +620,19 @@ components:
           - browser
           - kickoff
           - plan
+        area:
+          type: string
+          enum:
+          - issues
+          description: The area whose chat the turn ran in when it is not the
+            project's main chat (the Issues page's, `issues`). Absent on a
+            main-chat turn and on any turn that is not a browser one. The
+            status read's spec agent state reads main-chat turns only.
+        focus:
+          $ref: '#/components/schemas/AEStudioTurnRecordFocus'
+          # A pointer under the global prefer-skip-optional-pointer: absent must
+          # omit the key, which omitempty cannot do for a struct value.
+          x-go-type-skip-optional-pointer: false
         flow:
           type: string
         status:

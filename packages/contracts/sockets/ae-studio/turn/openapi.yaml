@@ -5,7 +5,8 @@ info:
     Unix-socket API between ae-studio-tools and ae-design-agent inside one AE
     Studio pod (socket path in AE_TURN_SOCKET, served by ae-design-agent, mode
     0660). The mount is the gate, so there is no security scheme. ae-studio-tools
-    calls it to run the turns aep-api starts (kickoff and plan). A turn keeps
+    calls it to run the turns aep-api starts (kickoff and plan), and to remove
+    the chat thread of an issue aep-api saw closed or reopened. A turn keeps
     running when the caller goes away. Errors are RFC 9457 problems
     (application/problem+json) except the 409 turn_in_progress JSON body.
   version: 1.0.0
@@ -14,6 +15,8 @@ servers:
 tags:
 - name: Turns
   description: Start a turn and follow it as NDJSON.
+- name: Threads
+  description: The chat threads the design agent keeps.
 paths:
   /turns:
     post:
@@ -56,10 +59,52 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /projects/{project}/issues/{number}/thread:
+    delete:
+      operationId: remove-issue-thread
+      summary: Remove an issue's chat thread
+      description: |-
+        The issue's chat threads created before `before` go; one started after
+        it (a reopened issue's fresh thread) stays. A thread whose turn is
+        running is removed when that turn ends, so the turn's own save never
+        brings it back. Idempotent: an issue with no thread is a 204.
+      tags:
+      - Threads
+      parameters:
+      - name: project
+        in: path
+        required: true
+        description: Project name (DNS-label slug)
+        schema:
+          type: string
+      - name: number
+        in: path
+        required: true
+        description: The issue number
+        schema:
+          type: integer
+          minimum: 1
+      - name: before
+        in: query
+        required: true
+        description: When the close or reopen that removes the thread happened
+          (RFC 3339)
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '204':
+          description: Removed, deferred to the running turn's end, or there was
+            none
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
-      description: 'RFC 9457 problem. Codes: invalid_turn, project_unknown, no_default_key,
+      description: 'RFC 9457 problem. Codes: invalid_turn, invalid_request (a thread
+        removal''s issue number or time), project_unknown, no_default_key,
         payload_too_large (a body over 4 MiB), shutting_down.'
       content:
         application/problem+json:

@@ -280,11 +280,16 @@ a smee.io channel instead:
   WARN at boot (`webhook relay ON: …`) naming no channel.
 - **Key changes:** a new seed, or a rotated `CREDENTIAL_ENCRYPTION_KEY` under a
   derived key, moves every org's channel; switching the relay off drops it.
-  Existing repository hooks keep the old URL (the hook sweep leaves a repo that
-  holds a hook id alone), so GitHub keeps posting those repos' payloads to the
-  old smee.io channel, readable by anyone holding its URL, while the pod no
-  longer receives them. Re-point or delete those hooks after any such change;
-  aep-api does not.
+  Existing repository hooks are re-pointed by aep-api: every repository row
+  stores the config rev its hook was ensured at, `ae-studio-tools` answers its
+  current one (`get-hook-config`: 16 hex of HMAC-SHA256 keyed by
+  `GITHUB_WEBHOOK_SECRET` over `AE_WEBHOOK_URL`), and the reconcile sweep's hook
+  repair re-ensures each hook whose rev differs once the pod runs on the new
+  channel. `register-hook` reconfigures the stored hook in place (URL, content
+  type, secret, events, active), re-creating it when GitHub lost it. Until the
+  pod rolls and the next sweep pass runs (60 s), GitHub keeps posting to the
+  old channel, readable by anyone holding its URL. A new webhook secret is
+  healed the same way.
 
 ## gVisor switch
 

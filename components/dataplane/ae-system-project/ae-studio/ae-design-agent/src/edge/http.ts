@@ -35,9 +35,13 @@ export function sendProblem(
 }
 
 /** The contract's 404, by what was not found. */
-export function notFound(res: Response, code: "project_unknown" | "conversation_unknown" | "turn_unknown" | "not_found"): void {
+export function notFound(
+  res: Response,
+  code: "project_unknown" | "conversation_unknown" | "turn_unknown" | "issue_unknown" | "not_found",
+): void {
   const detail = {
     project_unknown: "no such project",
+    issue_unknown: "no such issue",
     conversation_unknown: "no such conversation",
     turn_unknown: "no such turn",
     not_found: "no such route",
@@ -49,12 +53,12 @@ export function notFound(res: Response, code: "project_unknown" | "conversation_
 const RETRY_AFTER_SECONDS = "5";
 
 /**
- * A refused turn start. `turn_in_progress` and `conversation_rotated` are the
- * contract's plain-JSON TurnConflict (the console reads them by code); every
- * other refusal is a problem.
+ * A refused turn start. `turn_in_progress`, `conversation_rotated` and
+ * `issue_closed` are the contract's plain-JSON TurnConflict (the console reads
+ * them by code); every other refusal is a problem.
  */
 export function sendTurnStartError(res: Response, err: TurnStartError): void {
-  if (err.code === "turn_in_progress" || err.code === "conversation_rotated") {
+  if (err.code === "turn_in_progress" || err.code === "conversation_rotated" || err.code === "issue_closed") {
     res.status(409).json({ code: err.code, ...(err.activeTurnId ? { activeTurnId: err.activeTurnId } : {}) });
     return;
   }

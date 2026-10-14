@@ -357,12 +357,26 @@ type Head struct {
 
 // Hook defines model for Hook.
 type Hook struct {
-	ID int64 `json:"id"`
+	// ConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+	ConfigRev HookConfigRev `json:"configRev"`
+	ID        int64         `json:"id"`
 }
+
+// HookConfig defines model for HookConfig.
+type HookConfig struct {
+	// ConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+	ConfigRev HookConfigRev `json:"configRev"`
+}
+
+// HookConfigRev 16 hex characters of HMAC-SHA256 keyed by the webhook secret over the delivery URL; neither can be recovered from it.
+type HookConfigRev = string
 
 // HookEventsRequest defines model for HookEventsRequest.
 type HookEventsRequest struct {
 	Events []HookEventsRequestEvents `json:"events"`
+
+	// HookID The hook the caller stored for this repository, to be reconfigured in place (re-created when GitHub no longer has it).
+	HookID int64 `json:"hookId,omitempty,omitzero"`
 }
 
 // HookEventsRequestEvents defines model for HookEventsRequest.Events.
@@ -414,7 +428,10 @@ type IssueInfo struct {
 	// ClosedAt GitHub's closed_at; absent while open
 	ClosedAt string   `json:"closedAt,omitempty,omitzero"`
 	Labels   []string `json:"labels"`
-	Number   int      `json:"number"`
+
+	// Milestone The number of the milestone the issue is in; absent when it is in none
+	Milestone int `json:"milestone,omitempty,omitzero"`
+	Number    int `json:"number"`
 
 	// State open or closed
 	State string `json:"state"`
@@ -450,6 +467,11 @@ type IssueResult struct {
 
 	// URL The issue's html_url
 	URL string `json:"url"`
+}
+
+// IssueTitleRequest defines model for IssueTitleRequest.
+type IssueTitleRequest struct {
+	Title string `json:"title"`
 }
 
 // KeepAliveFrame One line of the turn stream, sent every 15 s.
@@ -790,6 +812,12 @@ type GetGithubIdentityParams struct {
 	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
 }
 
+// GetHookConfigParams defines parameters for GetHookConfig.
+type GetHookConfigParams struct {
+	// XImpersonateOrg The org the call acts for; must be the pod's org id.
+	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
+}
+
 // CreateRepoParams defines parameters for CreateRepo.
 type CreateRepoParams struct {
 	// XImpersonateOrg The org the call acts for; must be the pod's org id.
@@ -942,6 +970,24 @@ type SetIssueMilestoneParams struct {
 
 // ReopenIssueParams defines parameters for ReopenIssue.
 type ReopenIssueParams struct {
+	// XImpersonateOrg The org the call acts for; must be the pod's org id.
+	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
+}
+
+// RemoveIssueThreadParams defines parameters for RemoveIssueThread.
+type RemoveIssueThreadParams struct {
+	// Project The project the repository is (a DNS label)
+	Project string `form:"project" json:"project"`
+
+	// Before When the event that removes the thread happened (RFC 3339)
+	Before time.Time `form:"before" json:"before"`
+
+	// XImpersonateOrg The org the call acts for; must be the pod's org id.
+	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
+}
+
+// SetIssueTitleParams defines parameters for SetIssueTitle.
+type SetIssueTitleParams struct {
 	// XImpersonateOrg The org the call acts for; must be the pod's org id.
 	XImpersonateOrg ImpersonateOrg `json:"X-Impersonate-Org"`
 }
@@ -1129,6 +1175,9 @@ type SetIssueLabelsJSONRequestBody = IssueLabelsRequest
 // SetIssueMilestoneJSONRequestBody defines body for SetIssueMilestone for application/json ContentType.
 type SetIssueMilestoneJSONRequestBody = IssueMilestoneRequest
 
+// SetIssueTitleJSONRequestBody defines body for SetIssueTitle for application/json ContentType.
+type SetIssueTitleJSONRequestBody = IssueTitleRequest
+
 // EnsureLabelJSONRequestBody defines body for EnsureLabel for application/json ContentType.
 type EnsureLabelJSONRequestBody = EnsureLabelRequest
 
@@ -1226,6 +1275,9 @@ type ClientInterface interface {
 	// GetGithubIdentity request
 	GetGithubIdentity(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetHookConfig request
+	GetHookConfig(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateRepoWithBody request with any body
 	CreateRepoWithBody(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1301,6 +1353,14 @@ type ClientInterface interface {
 	// ReopenIssue request
 	ReopenIssue(ctx context.Context, owner Owner, repo Repo, number Number, params *ReopenIssueParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RemoveIssueThread request
+	RemoveIssueThread(ctx context.Context, owner Owner, repo Repo, number Number, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetIssueTitleWithBody request with any body
+	SetIssueTitleWithBody(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetIssueTitle(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// EnsureLabelWithBody request with any body
 	EnsureLabelWithBody(ctx context.Context, owner Owner, repo Repo, params *EnsureLabelParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1373,6 +1433,18 @@ type ClientInterface interface {
 
 func (c *Client) GetGithubIdentity(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetGithubIdentityRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetHookConfig(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHookConfigRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1719,6 +1791,42 @@ func (c *Client) ReopenIssue(ctx context.Context, owner Owner, repo Repo, number
 	return c.Client.Do(req)
 }
 
+func (c *Client) RemoveIssueThread(ctx context.Context, owner Owner, repo Repo, number Number, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveIssueThreadRequest(c.Server, owner, repo, number, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetIssueTitleWithBody(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetIssueTitleRequestWithBody(c.Server, owner, repo, number, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetIssueTitle(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetIssueTitleRequest(c.Server, owner, repo, number, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) EnsureLabelWithBody(ctx context.Context, owner Owner, repo Repo, params *EnsureLabelParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnsureLabelRequestWithBody(c.Server, owner, repo, params, contentType, body)
 	if err != nil {
@@ -2029,6 +2137,46 @@ func NewGetGithubIdentityRequest(server string, params *GetGithubIdentityParams)
 	}
 
 	operationPath := fmt.Sprintf("/github/identity")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Impersonate-Org", params.XImpersonateOrg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Impersonate-Org", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetHookConfigRequest generates requests for GetHookConfig
+func NewGetHookConfigRequest(server string, params *GetHookConfigParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/hooks/config")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3533,6 +3681,172 @@ func NewReopenIssueRequest(server string, owner Owner, repo Repo, number Number,
 	return req, nil
 }
 
+// NewRemoveIssueThreadRequest generates requests for RemoveIssueThread
+func NewRemoveIssueThreadRequest(server string, owner Owner, repo Repo, number Number, params *RemoveIssueThreadParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "owner", owner, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "repo", repo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "number", number, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/repos/%s/%s/issues/%s/thread", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "project", params.Project, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "before", params.Before, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Impersonate-Org", params.XImpersonateOrg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Impersonate-Org", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewSetIssueTitleRequest calls the generic SetIssueTitle builder with application/json body
+func NewSetIssueTitleRequest(server string, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetIssueTitleRequestWithBody(server, owner, repo, number, params, "application/json", bodyReader)
+}
+
+// NewSetIssueTitleRequestWithBody generates requests for SetIssueTitle with any type of body
+func NewSetIssueTitleRequestWithBody(server string, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "owner", owner, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "repo", repo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "number", number, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/repos/%s/%s/issues/%s/title", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Impersonate-Org", params.XImpersonateOrg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Impersonate-Org", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 // NewEnsureLabelRequest calls the generic EnsureLabel builder with application/json body
 func NewEnsureLabelRequest(server string, owner Owner, repo Repo, params *EnsureLabelParams, body EnsureLabelJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -4968,6 +5282,9 @@ type ClientWithResponsesInterface interface {
 	// GetGithubIdentityWithResponse request
 	GetGithubIdentityWithResponse(ctx context.Context, params *GetGithubIdentityParams, reqEditors ...RequestEditorFn) (*GetGithubIdentityResponse, error)
 
+	// GetHookConfigWithResponse request
+	GetHookConfigWithResponse(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*GetHookConfigResponse, error)
+
 	// CreateRepoWithBodyWithResponse request with any body
 	CreateRepoWithBodyWithResponse(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRepoResponse, error)
 
@@ -5042,6 +5359,14 @@ type ClientWithResponsesInterface interface {
 
 	// ReopenIssueWithResponse request
 	ReopenIssueWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *ReopenIssueParams, reqEditors ...RequestEditorFn) (*ReopenIssueResponse, error)
+
+	// RemoveIssueThreadWithResponse request
+	RemoveIssueThreadWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*RemoveIssueThreadResponse, error)
+
+	// SetIssueTitleWithBodyWithResponse request with any body
+	SetIssueTitleWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error)
+
+	SetIssueTitleWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error)
 
 	// EnsureLabelWithBodyWithResponse request with any body
 	EnsureLabelWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, params *EnsureLabelParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnsureLabelResponse, error)
@@ -5142,6 +5467,39 @@ func (r GetGithubIdentityResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetGithubIdentityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetHookConfigResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *HookConfig
+	ApplicationProblemJSON401 *Problem
+	ApplicationProblemJSON403 *Problem
+	ApplicationProblemJSON503 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHookConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHookConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHookConfigResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -5823,6 +6181,75 @@ func (r ReopenIssueResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ReopenIssueResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RemoveIssueThreadResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationProblemJSON400 *Problem
+	ApplicationProblemJSON401 *Problem
+	ApplicationProblemJSON403 *Problem
+	ApplicationProblemJSON404 *Problem
+	ApplicationProblemJSON503 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveIssueThreadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveIssueThreadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RemoveIssueThreadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetIssueTitleResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationProblemJSON400 *Problem
+	ApplicationProblemJSON401 *Problem
+	ApplicationProblemJSON403 *Problem
+	ApplicationProblemJSON429 *RateLimited
+	ApplicationProblemJSON502 *GitHubAPIError
+	ApplicationProblemJSON503 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r SetIssueTitleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetIssueTitleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetIssueTitleResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6518,6 +6945,15 @@ func (c *ClientWithResponses) GetGithubIdentityWithResponse(ctx context.Context,
 	return ParseGetGithubIdentityResponse(rsp)
 }
 
+// GetHookConfigWithResponse request returning *GetHookConfigResponse
+func (c *ClientWithResponses) GetHookConfigWithResponse(ctx context.Context, params *GetHookConfigParams, reqEditors ...RequestEditorFn) (*GetHookConfigResponse, error) {
+	rsp, err := c.GetHookConfig(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHookConfigResponse(rsp)
+}
+
 // CreateRepoWithBodyWithResponse request with arbitrary body returning *CreateRepoResponse
 func (c *ClientWithResponses) CreateRepoWithBodyWithResponse(ctx context.Context, params *CreateRepoParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRepoResponse, error) {
 	rsp, err := c.CreateRepoWithBody(ctx, params, contentType, body, reqEditors...)
@@ -6759,6 +7195,32 @@ func (c *ClientWithResponses) ReopenIssueWithResponse(ctx context.Context, owner
 		return nil, err
 	}
 	return ParseReopenIssueResponse(rsp)
+}
+
+// RemoveIssueThreadWithResponse request returning *RemoveIssueThreadResponse
+func (c *ClientWithResponses) RemoveIssueThreadWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*RemoveIssueThreadResponse, error) {
+	rsp, err := c.RemoveIssueThread(ctx, owner, repo, number, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveIssueThreadResponse(rsp)
+}
+
+// SetIssueTitleWithBodyWithResponse request with arbitrary body returning *SetIssueTitleResponse
+func (c *ClientWithResponses) SetIssueTitleWithBodyWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error) {
+	rsp, err := c.SetIssueTitleWithBody(ctx, owner, repo, number, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetIssueTitleResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetIssueTitleWithResponse(ctx context.Context, owner Owner, repo Repo, number Number, params *SetIssueTitleParams, body SetIssueTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*SetIssueTitleResponse, error) {
+	rsp, err := c.SetIssueTitle(ctx, owner, repo, number, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetIssueTitleResponse(rsp)
 }
 
 // EnsureLabelWithBodyWithResponse request with arbitrary body returning *EnsureLabelResponse
@@ -7028,6 +7490,53 @@ func ParseGetGithubIdentityResponse(rsp *http.Response) (*GetGithubIdentityRespo
 			return nil, err
 		}
 		response.ApplicationProblemJSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetHookConfigResponse parses an HTTP response from a GetHookConfigWithResponse call
+func ParseGetHookConfigResponse(rsp *http.Response) (*GetHookConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHookConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HookConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Problem
@@ -8260,6 +8769,121 @@ func ParseReopenIssueResponse(rsp *http.Response) (*ReopenIssueResponse, error) 
 	}
 
 	response := &ReopenIssueResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest GitHubAPIError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveIssueThreadResponse parses an HTTP response from a RemoveIssueThreadWithResponse call
+func ParseRemoveIssueThreadResponse(rsp *http.Response) (*RemoveIssueThreadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveIssueThreadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetIssueTitleResponse parses an HTTP response from a SetIssueTitleWithResponse call
+func ParseSetIssueTitleResponse(rsp *http.Response) (*SetIssueTitleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetIssueTitleResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

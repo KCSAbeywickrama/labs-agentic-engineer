@@ -156,6 +156,20 @@ func (a *Applier) Get(ctx context.Context, apiVersion, kind, namespace, name str
 	return obj, nil
 }
 
+// List returns every object of apiVersion/kind in namespace, or in all
+// namespaces when namespace is "" (cluster-scoped kinds ignore it).
+func (a *Applier) List(ctx context.Context, apiVersion, kind, namespace string) ([]unstructured.Unstructured, error) {
+	ri, _, err := a.resourceFor(apiVersion, kind, namespace)
+	if err != nil {
+		return nil, err
+	}
+	list, err := ri.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", kind, err)
+	}
+	return list.Items, nil
+}
+
 // Delete removes a single object identified by apiVersion/kind/namespace/name,
 // resolving the GVK through discovery. A missing object is not an error (delete
 // is idempotent). namespace is ignored for cluster-scoped kinds.

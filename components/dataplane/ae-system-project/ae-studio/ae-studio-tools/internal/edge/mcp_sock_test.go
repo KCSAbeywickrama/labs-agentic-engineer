@@ -178,7 +178,10 @@ type mcpHarnessOpt func(*mcpHarnessConfig)
 type mcpHarnessConfig struct {
 	owner     string
 	snapshots files.Reader
+	issues    IssuesUpstreams
 }
+
+func withIssues(u IssuesUpstreams) mcpHarnessOpt { return func(c *mcpHarnessConfig) { c.issues = u } }
 
 func withOwner(o string) mcpHarnessOpt { return func(c *mcpHarnessConfig) { c.owner = o } }
 
@@ -224,7 +227,7 @@ func newMCPHarness(t *testing.T, up mcp.Upstream, opts ...mcpHarnessOpt) *mcpHar
 		t.Fatal(err)
 	}
 	srv := &http.Server{
-		Handler:           MCPSocketRoutes(MCPSocketDeps{MCP: server, Snapshots: cfg.snapshots, Usage: sink}),
+		Handler:           MCPSocketRoutes(MCPSocketDeps{MCP: server, IssuesUpstreams: cfg.issues, Snapshots: cfg.snapshots, Usage: sink}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() { _ = srv.Serve(ln) }()
@@ -583,7 +586,7 @@ func TestTurnUsage_OptionalFieldsStayAbsent(t *testing.T) {
 		t.Fatalf("outbox = %+v", got)
 	}
 	sent, _ := json.Marshal(got[0])
-	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`, `"endRef"`, `"changedPaths"`} {
+	for _, key := range []string{`"author"`, `"project"`, `"reason"`, `"code"`, `"contextTokens"`, `"designFeatures"`, `"endRef"`, `"changedPaths"`, `"area"`, `"focus"`} {
 		if strings.Contains(string(sent), key) {
 			t.Fatalf("%s invented: %s", key, sent)
 		}
@@ -604,6 +607,20 @@ func TestTurnUsage_DesignFeaturesCarriedOver(t *testing.T) {
 	}
 	sent, _ := json.Marshal(got[0])
 	if !strings.Contains(string(sent), `"designFeatures":["F1","F2"]`) {
+		t.Fatalf("record = %s", sent)
+	}
+}
+
+// The chat an area turn ran in (its area, and its focus when narrowed to an
+// issue) reaches the record aep-api gets.
+func TestTurnUsage_AreaAndFocusCarriedOver(t *testing.T) {
+	s := newMCPHarness(t, &fakeUpstream{})
+	record := strings.Replace(turnRecordJSON, `,"contextTokens":15}`, `,"contextTokens":15,"area":"issues","focus":{"kind":"issue","id":7}}`, 1)
+	if c, body := s.post("/turn-usage", record); c != http.StatusAccepted {
+		t.Fatalf("POST /turn-usage = %d %s", c, body)
+	}
+	sent, _ := json.Marshal(s.usage.got()[0])
+	if !strings.Contains(string(sent), `"area":"issues"`) || !strings.Contains(string(sent), `"focus":{"id":7,"kind":"issue"}`) {
 		t.Fatalf("record = %s", sent)
 	}
 }
@@ -639,6 +656,12 @@ func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 		"201 features":           strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","designFeatures":[`+strings.Repeat(`"F1",`, 200)+`"F1"]`, 1),
 		"201 changed paths":      strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[`+strings.Repeat(`"specs/a.md",`, 200)+`"specs/a.md"]`, 1),
 		"an empty changed path":  strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","changedPaths":[""]`, 1),
+		"a retired view":         strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","view":"issue"`, 1),
+		"a focus of no kind":     strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"board","id":7}`, 1),
+		"a focus id of 0":        strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","area":"issues","focus":{"kind":"issue","id":0}`, 1),
+		// aep-api refuses a whole batch for a focus without its area, so the
+		// socket refuses the one record.
+		"a focus without an area": strings.Replace(turnRecordJSON, `"model":"m"`, `"model":"m","focus":{"kind":"issue","id":7}`, 1),
 	} {
 		if c, out := s.post("/turn-usage", body); c != http.StatusBadRequest || !strings.Contains(out, "invalid_request") {
 			t.Fatalf("%s: POST /turn-usage = %d %s", name, c, out)
@@ -646,5 +669,67 @@ func TestTurnUsage_InvalidRecordIs400(t *testing.T) {
 	}
 	if n := len(s.usage.got()); n != 0 {
 		t.Fatalf("outbox = %d records", n)
+	}
+}
+
+// fakeIssuesUpstreams opens one fakeUpstream per surface, keyed by the
+// project (and issue) the route named.
+type fakeIssuesUpstreams struct {
+	mu       sync.Mutex
+	surfaces map[string]*fakeUpstream
+	tools    []string
+	err      error
+}
+
+func (f *fakeIssuesUpstreams) surface(key string) *fakeUpstream {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.surfaces == nil {
+		f.surfaces = map[string]*fakeUpstream{}
+	}
+	if f.surfaces[key] == nil {
+		f.surfaces[key] = &fakeUpstream{tools: f.tools, err: f.err}
+	}
+	return f.surfaces[key]
+}
+
+func (f *fakeIssuesUpstreams) Issues(project string) mcp.Upstream {
+	return f.surface("issues/" + project)
+}
+
+func (f *fakeIssuesUpstreams) Issue(project string, number int) mcp.Upstream {
+	return f.surface(fmt.Sprintf("issue/%s/%d", project, number))
+}
+
+// An issue route forwards a pinned call to the surface of its own project and
+// issue; tools/list keeps aep-api's list to the pinned names.
+func TestMCPSocket_IssueRoutesForwardToTheirSurface(t *testing.T) {
+	up := &fakeIssuesUpstreams{tools: []string{"get_issue", "close_issue", "drop_database"}}
+	h := newMCPHarness(t, &fakeUpstream{}, withIssues(up))
+
+	status, body := h.post("/projects/shop/issues/7/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"close_issue","arguments":{"reason":"done"}}}`)
+	if status != http.StatusOK || !strings.Contains(body, "from aep-api: close_issue") {
+		t.Fatalf("issue call = %d %s", status, body)
+	}
+	if up.surface("issue/shop/7").count("close_issue") != 1 {
+		t.Fatal("the call did not reach the issue's own surface")
+	}
+	_, list := h.post("/projects/shop/issues/7/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if !strings.Contains(list, "get_issue") || strings.Contains(list, "drop_database") {
+		t.Fatalf("issue tools/list = %s", list)
+	}
+	status, body = h.post("/projects/shop/issues/mcp", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"close_issue"}}`)
+	if status != http.StatusOK || !strings.Contains(body, `"error"`) || up.surface("issues/shop").count("close_issue") != 0 {
+		t.Fatalf("an issue tool on the Issues route = %d %s", status, body)
+	}
+}
+
+// aep-api unreachable on an issue route is a 502, as on /mcp.
+func TestMCPSocket_IssueRouteUpstreamDownIs502(t *testing.T) {
+	up := &fakeIssuesUpstreams{err: mcp.ErrUpstreamUnavailable}
+	h := newMCPHarness(t, &fakeUpstream{}, withIssues(up))
+	status, body := h.post("/projects/shop/issues/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	if status != http.StatusBadGateway || !strings.Contains(body, "aep_api_unavailable") {
+		t.Fatalf("status = %d %s", status, body)
 	}
 }

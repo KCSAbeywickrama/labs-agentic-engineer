@@ -44,6 +44,8 @@ function recordingSink() {
     activity: (a) => calls.push(["activity", a]),
     question: (q) => calls.push(["question", q]),
     withdrawQuestion: (id) => calls.push(["withdraw", id]),
+    handoff: (h) => calls.push(["handoff", h]),
+    filed: (f) => calls.push(["filed", f]),
     wrote: (p) => calls.push(["wrote", p.toolCallId]),
     error: (t) => calls.push(["error", t]),
     ended: (o) => calls.push(["ended", o]),
@@ -118,6 +120,42 @@ describe("foldTurn", () => {
     ]);
   });
 
+  it("announces a hand-off from its complete call, and nothing for another tool it does not know", async () => {
+    const { of, calls } = await fold([
+      { type: "tool-input-start", id: "h1", toolName: "hand_off" },
+      { type: "tool-input-delta", id: "h1", delta: '{"area":"issues","request":"Save does nothing"}' },
+      { type: "tool-input-end", id: "h1" },
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issues", request: "Save does nothing" } },
+      {
+        type: "tool-result",
+        toolCallId: "h1",
+        toolName: "hand_off",
+        input: { area: "issues", request: "Save does nothing" },
+        output: { status: "awaiting_handoff", area: "issues" },
+      },
+      { type: "tool-call", toolCallId: "x1", toolName: "some_other_tool", input: { request: "no" } },
+      { type: "turn-completed" },
+    ]);
+    expect(of("handoff")).toEqual([{ toolCallId: "h1", area: "issues", request: "Save does nothing" }]);
+    expect(calls.map(([k]) => k)).toEqual(["handoff", "ended"]);
+  });
+
+  it("announces no hand-off the SDK rejected", async () => {
+    const { of } = await fold([
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issues", request: "x" }, invalid: true },
+    ]);
+    expect(of("handoff")).toEqual([]);
+  });
+
+  it("announces no hand-off to an area it does not know", async () => {
+    const { of, calls } = await fold([
+      { type: "tool-call", toolCallId: "h1", toolName: "hand_off", input: { area: "issue", request: "x" } },
+      { type: "tool-call", toolCallId: "h2", toolName: "hand_off", input: { request: "x" } },
+    ]);
+    expect(of("handoff")).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   it("withdraws a question the SDK rejected", async () => {
     const { of } = await fold([
       { type: "tool-call", toolCallId: "q1", toolName: "ask_question", input: { nope: true }, invalid: true },
@@ -162,6 +200,16 @@ describe("foldTurn", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("names the issue create_issue filed, from its result, and nothing for a refused one", async () => {
+    const { of } = await fold([
+      { type: "tool-call", toolCallId: "c1", toolName: "create_issue", input: { title: "Save" } },
+      { type: "tool-result", toolCallId: "c1", toolName: "create_issue", output: JSON.stringify({ number: 15, url: "u" }) },
+      { type: "tool-result", toolCallId: "c2", toolName: "create_issue", output: "could not file the issue right now" },
+      { type: "turn-completed" },
+    ]);
+    expect(of("filed")).toEqual([{ toolCallId: "c1", issueNumber: 15 }]);
   });
 });
 

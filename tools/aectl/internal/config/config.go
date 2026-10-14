@@ -61,6 +61,8 @@ var ConfigMapKeys = []string{
 	"codingagent.openbao_direct.enabled",
 	"openbao.addr",
 	"ae_studio.webhook_relay.enabled",
+	"ae_studio.jev.enabled",
+	"ae_studio.jev.url",
 	"gateway.hostname",
 	"environment.idp_base_domain",
 	"environment.gateway_base_domain",
@@ -131,6 +133,13 @@ var keyRegistry = map[string]configKeyMeta{
 	// cluster GitHub cannot reach. Passed as aeStudio.webhookRelay.enabled on
 	// install and update; absent is false. Never true in production.
 	"ae_studio.webhook_relay.enabled": {required: false, kind: kindBool},
+	// The platform's Jev key (issue classification): passed as
+	// aeStudio.jev.enabled / aeStudio.jev.url on install and update, so a
+	// re-install keeps it on. Absent is off; an empty url is Jev's default.
+	// The key itself is a secret: `aectl platform secret import --path
+	// aep/jev-api-key`.
+	"ae_studio.jev.enabled": {required: false, kind: kindBool},
+	"ae_studio.jev.url":     {required: false, kind: kindString},
 	// gateway.hostname, when set, lets `aectl platform install` configure the
 	// external gateway ingress non-interactively (CI-friendly path).
 	"gateway.hostname": {required: false, kind: kindString},

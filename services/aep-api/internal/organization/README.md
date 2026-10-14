@@ -208,6 +208,9 @@ model-connection / idp services.*
   missing or disagreeing OU): the connection is saved, and saving the token again retries every failure
   but the OU ones, whose message names the operator action. OUs compare as UUIDs, whatever their case. With no converger or no secrets
   delivery the submit succeeds and logs `ae_studio_not_configured`. Nothing waits for the pod.
+  Before the converge, the submit asks for a re-sync of the org's repo hooks (`RepoHookResyncer`,
+  `WebhookService.ResyncOrg`; best effort, `ae_studio.hook_resync_failed` on failure): the sweep's hook
+  repair then re-ensures every stored hook with the pod's current URL and secret.
 - **A gitpat disconnect takes the org's AE Studio down before the credential goes** (`OrgDisconnectService`,
   [ADR-0045](../../../../docs/decisions/ADR-0045-design-work-runs-in-the-organizations-ae-studio.md)): the repo hooks are unregistered through the pod while it still holds the
   gitpat (best effort, `WebhookService.UnregisterOrg`); the Resource `ae-studio` is deleted

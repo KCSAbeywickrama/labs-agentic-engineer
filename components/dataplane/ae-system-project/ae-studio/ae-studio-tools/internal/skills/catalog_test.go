@@ -37,6 +37,7 @@ func TestFrontmatterAudience(t *testing.T) {
 		{"unrecognised values only", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [ops, qa]\n---\nbody", []string{"design", "coding"}},
 		{"unrecognised value dropped, one kept", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [coding, ops]\n---\nbody", []string{"coding"}},
 		{"whitespace value", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: ['  coding  ']\n---\nbody", []string{"coding"}},
+		{"chat only (opt-in, never the default)", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [chat]\n---\nbody", []string{"chat"}},
 		{"BOM and leading blank lines", "\n\ufeff---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [coding]\n---\nbody", []string{"coding"}},
 	}
 	for _, tc := range cases {

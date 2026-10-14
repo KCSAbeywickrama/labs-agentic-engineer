@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
@@ -248,6 +249,12 @@ type TurnRequest struct {
 // TurnRequestKind defines model for TurnRequest.Kind.
 type TurnRequestKind string
 
+// RemoveIssueThreadParams defines parameters for RemoveIssueThread.
+type RemoveIssueThreadParams struct {
+	// Before When the close or reopen that removes the thread happened (RFC 3339)
+	Before time.Time `form:"before" json:"before"`
+}
+
 // StartTurnJSONRequestBody defines body for StartTurn for application/json ContentType.
 type StartTurnJSONRequestBody = TurnRequest
 
@@ -324,10 +331,25 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+	// RemoveIssueThread request
+	RemoveIssueThread(ctx context.Context, project string, number int, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// StartTurnWithBody request with any body
 	StartTurnWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	StartTurn(ctx context.Context, body StartTurnJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+func (c *Client) RemoveIssueThread(ctx context.Context, project string, number int, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveIssueThreadRequest(c.Server, project, number, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 func (c *Client) StartTurnWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -352,6 +374,70 @@ func (c *Client) StartTurn(ctx context.Context, body StartTurnJSONRequestBody, r
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewRemoveIssueThreadRequest generates requests for RemoveIssueThread
+func NewRemoveIssueThreadRequest(server string, project string, number int, params *RemoveIssueThreadParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "project", project, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "number", number, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/projects/%s/issues/%s/thread", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "before", params.Before, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewStartTurnRequest calls the generic StartTurn builder with application/json body
@@ -437,10 +523,44 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
+	// RemoveIssueThreadWithResponse request
+	RemoveIssueThreadWithResponse(ctx context.Context, project string, number int, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*RemoveIssueThreadResponse, error)
+
 	// StartTurnWithBodyWithResponse request with any body
 	StartTurnWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartTurnResponse, error)
 
 	StartTurnWithResponse(ctx context.Context, body StartTurnJSONRequestBody, reqEditors ...RequestEditorFn) (*StartTurnResponse, error)
+}
+
+type RemoveIssueThreadResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	ApplicationProblemJSON400 *Problem
+	ApplicationProblemJSON404 *Problem
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveIssueThreadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveIssueThreadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RemoveIssueThreadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type StartTurnResponse struct {
@@ -478,6 +598,15 @@ func (r StartTurnResponse) ContentType() string {
 	return ""
 }
 
+// RemoveIssueThreadWithResponse request returning *RemoveIssueThreadResponse
+func (c *ClientWithResponses) RemoveIssueThreadWithResponse(ctx context.Context, project string, number int, params *RemoveIssueThreadParams, reqEditors ...RequestEditorFn) (*RemoveIssueThreadResponse, error) {
+	rsp, err := c.RemoveIssueThread(ctx, project, number, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveIssueThreadResponse(rsp)
+}
+
 // StartTurnWithBodyWithResponse request with arbitrary body returning *StartTurnResponse
 func (c *ClientWithResponses) StartTurnWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartTurnResponse, error) {
 	rsp, err := c.StartTurnWithBody(ctx, contentType, body, reqEditors...)
@@ -493,6 +622,39 @@ func (c *ClientWithResponses) StartTurnWithResponse(ctx context.Context, body St
 		return nil, err
 	}
 	return ParseStartTurnResponse(rsp)
+}
+
+// ParseRemoveIssueThreadResponse parses an HTTP response from a RemoveIssueThreadWithResponse call
+func ParseRemoveIssueThreadResponse(rsp *http.Response) (*RemoveIssueThreadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveIssueThreadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseStartTurnResponse parses an HTTP response from a StartTurnWithResponse call

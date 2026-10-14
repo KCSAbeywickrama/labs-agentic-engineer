@@ -18,9 +18,11 @@
 
 import { SURFACES, type Surface } from "@aep/agent-stream";
 import {
+  designSkills,
   EMPTY_SKILL_SOURCE,
   SERVICE_AUDIENCE,
   type LoadedSkillBody,
+  type SkillCatalogEntry,
   type SkillSource,
 } from "./skill-source.js";
 
@@ -41,6 +43,10 @@ Tools:
   indentation and newlines. oldString must match EXACTLY ONE place.
 - addFile(path, content) — create a NEW file (emits a whole body). Use only for files that do not exist yet.
 - removeFile(path) — delete a file.
+- hand_off(area, request) — when the user's message belongs in an area's own chat (the tool's description
+  names each area and when), call this with that area and their own words instead of editing files; never do
+  that area's work yourself. Not for changes the user wants made to the spec, the design or the prototype —
+  make those yourself; hand off only what an area's chat does.
 
 Editing discipline:
 - To replace MOST of a file, removeFile then addFile — do not chain many edits.
@@ -107,7 +113,12 @@ const UNCATALOGUED_SKILLS: readonly string[] = [ORG_DEFAULTS_SKILL, ...SURFACES]
  * byte-identical to a skill-free turn.
  */
 export function buildSkillCatalog(skills: SkillSource | undefined): string {
-  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog().filter((e) => !UNCATALOGUED_SKILLS.includes(e.name));
+  // The design agent's view (`designSkills`): a chat-only skill (an area
+  // chat's, `src/areas/`) is no guidance for this agent and nothing a
+  // component pins, so it has no row here at all.
+  const entries = designSkills(skills ?? EMPTY_SKILL_SOURCE)
+    .catalog()
+    .filter((e) => !UNCATALOGUED_SKILLS.includes(e.name));
   if (entries.length === 0) return "";
   // Audience split (ADR-0013): `loadable` is this service's own (design) rows —
   // the catalog and reference note below are built from those ONLY, so a
@@ -117,14 +128,6 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   // just no loadSkill invitation, appended as a separate block.
   const loadable = entries.filter((e) => e.audience.includes(SERVICE_AUDIENCE));
   const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE));
-
-  const lines = loadable.map((e) => `- ${e.name}: ${e.description}`).join("\n");
-  // The reference note appears only when some LOADABLE skill carries reference
-  // files — a reference note about a skill this agent cannot load is useless.
-  const hasRefs = loadable.some((e) => e.hasReferences);
-  const refNote = hasRefs
-    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
-    : "";
 
   // Emitted ONLY when something is pin-only, so a design-only library keeps the
   // exact prompt text (and cached prefix) it had before audiences existed.
@@ -145,20 +148,31 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   // If nothing is loadable (a pin-only-only library), skip the "call
   // loadSkill" invitation and its empty list — only the heading survives, and
   // `pinBlock` carries the rest of the explanation.
-  const header =
-    loadable.length === 0
-      ? `
+  const header = loadable.length === 0 ? `\n\n# Skills` : loadableSkillsBlock(loadable);
 
-# Skills`
-      : `
+  return header + pinBlock;
+}
+
+/**
+ * The `# Skills` block over skills the reader may load: the loadSkill
+ * invitation and one line per skill, with the reference note only when one of
+ * them carries reference files (a note about a skill it cannot load is
+ * useless). "" for none. The design catalog (`buildSkillCatalog`) and an area
+ * chat's catalog of its other skills (`src/areas/prompt.ts`) both render it.
+ */
+export function loadableSkillsBlock(entries: readonly SkillCatalogEntry[]): string {
+  if (entries.length === 0) return "";
+  const lines = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
+  const refNote = entries.some((e) => e.hasReferences)
+    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
+    : "";
+  return `
 
 # Skills
 
 You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. Call loadSkill ONCE with every relevant skill's name (names: [...]) to read their guidance BEFORE applying any of them — never guess a skill's contents.${refNote}
 
 ${lines}`;
-
-  return header + pinBlock;
 }
 
 /**

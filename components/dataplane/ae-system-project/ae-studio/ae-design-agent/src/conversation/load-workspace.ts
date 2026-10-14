@@ -64,7 +64,7 @@ import { parse as parseYaml } from "yaml";
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { DESIGN_REVIEW_PATH, FRONTMATTER_RE, lf } from "@aep/agent-stream";
 import type { SkillAudience, SkillLoadResult } from "../agents/main/skill-source.js";
-import { ALL_AUDIENCES, SERVICE_AUDIENCE } from "../agents/main/skill-source.js";
+import { SERVICE_AUDIENCE, UNMARKED_AUDIENCES } from "../agents/main/skill-source.js";
 import {
   SkillReadError,
   type SkillCatalogEntry,
@@ -521,17 +521,18 @@ function parseSkillMd(raw: string): {
     }
   }
   // `metadata.aep.audience` — which agents may load this skill (ADR-0013).
-  // Unrecognised values are dropped rather than becoming a third audience; a
-  // skill left with nothing declared resolves to EVERY audience, so an unmarked
+  // Unrecognised values are dropped rather than becoming another audience; a
+  // skill left with nothing declared resolves to the design and coding agents
+  // (`UNMARKED_AUDIENCES`; `chat` is opt-in only), so an unmarked
   // (or misspelt) skill stays loadable instead of silently disappearing.
   const aep = (fm.metadata as Record<string, unknown> | undefined)?.aep as Record<string, unknown> | undefined;
   const declared = Array.isArray(aep?.audience) ? aep.audience : [];
-  const audience = declared.filter((a): a is SkillAudience => a === "design" || a === "coding");
+  const audience = declared.filter((a): a is SkillAudience => a === "design" || a === "coding" || a === "chat");
   return {
     ...(typeof fm.name === "string" && fm.name.trim() !== "" ? { name: fm.name } : {}),
     description: typeof fm.description === "string" ? fm.description : "",
     body,
-    audience: audience.length > 0 ? audience : ALL_AUDIENCES,
+    audience: audience.length > 0 ? audience : UNMARKED_AUDIENCES,
   };
 }
 
@@ -602,12 +603,12 @@ export class SnapshotSkillSource implements SkillSource {
     }));
   }
 
-  load(name: string): SkillLoadResult {
+  load(name: string, audience: SkillAudience = SERVICE_AUDIENCE): SkillLoadResult {
     const row = this.byName.get(name);
     if (row === undefined) return undefined;
     // Audience gate before any disk read: this consumer may see the row (it
     // needs the name to pin the skill onto a component) but not the body.
-    if (!row.audience.includes(SERVICE_AUDIENCE)) return { refused: true };
+    if (!row.audience.includes(audience)) return { refused: true };
     const abs = join(row.dir, "SKILL.md");
     const raw = readSkillText(abs, this.log);
     if (raw === undefined) return undefined;

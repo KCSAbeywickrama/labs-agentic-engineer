@@ -157,10 +157,38 @@ silence the warning. With the relay on, `aectl platform update` (and
 `aectl platform install --reuse-secrets`) also creates the relay seed `aep/webhook-relay-seed` in OpenBao when it is missing (create-only:
 an existing seed is never rewritten, and the value is never printed); every
 org's channel URL is derived from it. GitHub hooks of projects created before
-the upgrade keep the URL they were created with, which no longer receives
-anything (no hook is migrated): re-create such a project, or disconnect and
-reconnect the org's GitHub in Settings, which forgets the org's hook ids so the
-sweep's hook repair installs every project's hook on the relay URL.
+the upgrade are re-pointed by aep-api's hook repair once the org's `ae-studio`
+pod runs on the relay (see
+[Runs wait for a merged PR](#runs-wait-for-a-merged-pr-webhooks-401-or-go-nowhere)).
+
+**The Jev key (issue classification).** The platform holds one Jev (TypeSafe)
+key. aep-api alone reads it, and classifies reports (bug, feature, improvement)
+for every org's Issues agent: the pod's `classify_report` reaches aep-api over
+its Issues MCP route, and no org's AE Studio pod is ever given the key. Off by
+default, when the agent asks the user the kind instead. Import the key, then
+turn it on:
+
+```sh
+./tools/aectl/aectl-skaffold platform secret import --path aep/jev-api-key --value-file <file>
+# in your aectl config (a copy of skaffold/defaults.yaml):
+#   ae_studio:
+#     jev:
+#       enabled: true
+#       url: ""            # optional endpoint; "" is Jev's default
+./tools/aectl/aectl-skaffold platform config import --config <your config>
+make dev-update            # or: make dev-env AECTL_CONFIG=<your config>
+```
+
+The switch lives in the aectl config, not in a `--set`: `aectl platform
+install` (every `make dev-env`) resets the release's values and re-derives
+`aeStudio.jev.*` from the config, as `platform update` does. A local
+OpenBao restart keeps the key: the next `make dev-env` restores it from
+`aep-jev`.
+
+aep-api reads the key from the ESO Secret `aep-jev` (optional: it boots,
+classifying nothing, before the import) at start; ESO refreshes it hourly, so
+restart aep-api after re-importing a key
+(`kubectl rollout restart deployment/aep-api -n wso2-aep`).
 
 **Upgrading an install that mounted `/workspaces` on aep-api.** aep-api no
 longer has a workspace volume: the chart drops PVC `aep-workspaces`, the mount,
@@ -328,26 +356,96 @@ bash deployments/scripts/restore-host-k3d-internal.sh         # repair
 ```
 
 It writes the name into `coredns-custom`, which no controller reconciles, so
-one run survives later restarts too. Re-running `make dev-env` does **not** fix
-this — nothing in that chain defines the name, and the cluster-create step it
-would come from is skipped on an existing cluster.
+one run survives later restarts too. `make dev-env` (its CoreDNS step) and
+`make dev-update` (first thing) run it as well, so either repairs the name.
+
+Every script writes its own `coredns-custom` key by merge patch. An earlier
+`setup-env-for-aectl.sh` wrote its key with `kubectl apply` while
+`setup-agent-manager.sh` applied the whole ConfigMap. Every second `make dev-env`
+then pruned the keys the last apply had recorded, `hostk3dinternal.override`
+among them, and died at the Agent Manager environment check. The CoreDNS step
+now also drops that stale `last-applied-configuration` annotation.
 
 **OpenBao forgets every platform secret.** It runs `bao server -dev`
 (in-memory) and its `postStart` re-seeds only OpenChoreo's own fixtures, so the
 `aep/*` paths `aectl platform install` writes are gone once that pod restarts.
-Re-running the install re-seeds them — but it generates a fresh
-`aep/postgres-password` while the Postgres PVC keeps the old one, and Postgres
-only honours `POSTGRES_PASSWORD` when it initialises an empty data directory.
-If `aep-api` then fails to reach its database, re-initialise it (this discards
-the AEP database). To keep the install and its secrets instead, restore the
-keys from their Kubernetes Secrets: [Local OpenBao wipe recovery](#local-openbao-wipe-recovery).
+Re-run `make dev-env`: the install writes its inputs again and restores each
+generated key (Postgres password, Thunder client secrets, webhook relay seed)
+from the cluster Secret ESO last synced it into, so no holder of the old value
+breaks. It never rewrites a generated key the store still has, so a re-run on
+an intact OpenBao rotates nothing. Then follow steps 3 to 5 of
+[Local OpenBao wipe recovery](#local-openbao-wipe-recovery) for what the
+install does not own (environment bindings, org secrets, aep-api's access).
+
+**`make dev-env` drops Helm values set by hand.** Its `aectl platform install`
+is a `helm upgrade --install` that resets the release to the chart's defaults
+plus the values aectl derives from its config. A toggle set with `helm upgrade
+--set` or `platform update --set` is therefore gone after a re-run. Set it in
+the aectl config instead (`make dev-env AECTL_CONFIG=<your copy of
+skaffold/defaults.yaml>`; `ae_studio.webhook_relay.enabled`,
+`ae_studio.jev.*`). The runner images `make dev-runner` sets are dropped too:
+run `make dev-runner` again after `make dev-env`.
+
+**`UPGRADE FAILED: ... forceConflicts enabled when serverSideApply disabled`.**
+Helm 4's `--server-side=auto` reuses a release's previous apply method, so a
+release a Helm 3 run left client-side refused `--force-conflicts`
+(`amp-platform-resources` in `setup-agent-manager.sh`, the observability plane
+in `aectl sre install`). Both now pass `--server-side=true` with it; re-run
+`make dev-env`.
+
+**Secrets and their holders drift (`failed SASL auth`, `invalid_client`).**
+ESO refreshes an ExternalSecret hourly, and running pods keep the env they
+started with, so a changed `aep/*` key breaks only the NEXT pod start: an
+`aep-api` that crash-loops with `password authentication failed for user
+"aep"`, or `GET /projects` 500s on a Thunder `invalid_client`. It happens when
+the role or a client is set from a Secret ESO has not refreshed since the key
+changed. `make dev-env` and `make dev-update` (`aectl platform sync-clients`)
+make ESO re-read OpenBao first, then set the role and the clients, so either
+repairs a drifted cluster. When the role's password does change, they restart
+every Deployment that reads `postgres-secrets`: a running `temporal-frontend`
+keeps the old password in its env and fails every persistence call
+(`pq: password authentication failed` in its log) while its TCP readiness
+probe keeps it Ready, so aep-api logs `run: worker start failed, re-dialing
+... context deadline exceeded` without end.
 
 ```bash
-# foreground, so postgres-0 is gone before the PVC: pvc-protection holds a
-# claim that a running pod still mounts, and the delete below would hang
-kubectl -n wso2-aep delete statefulset postgres --cascade=foreground
-kubectl -n wso2-aep delete pvc data-postgres-0
+./tools/aectl/aectl-skaffold platform sync-clients   # ESO sync, Postgres role (+ its clients), Thunder clients
 ```
+
+### Runs wait for a merged PR (webhooks 401 or go nowhere)
+
+A repository hook GitHub holds carries a delivery URL and a signing secret
+from the time it was last ensured. When the org's relay channel moves (a new
+relay seed, a rotated `CREDENTIAL_ENCRYPTION_KEY` under a derived key) or its
+webhook secret changes (an OpenBao wipe and the GitHub token re-entered), the
+hook posts to a channel nobody reads, or `ae-studio-tools` answers 401
+`signature_invalid` at `/webhooks/github` (`webhook.rejected` in its log).
+Either way `aep-api` hears nothing: a coding cycle's PR merges on GitHub while
+the run keeps waiting for it, and new issues are only picked up by the sweep.
+
+`aep-api` heals it without help. Each repository row stores the config rev its
+hook was ensured at (`git_repositories.webhook_config_rev`: the pod's URL and
+secret as an HMAC, plus the subscribed events). The reconcile sweep (every
+60 s) asks each org's pod for its current rev (`get-hook-config`, no GitHub
+call) and re-ensures every hook whose rev differs, PATCHing the stored hook in
+place with the pod's URL, secret, content type, events and `active`, or
+creating it again when GitHub no longer has it (log
+`eventcore.hook_repaired {reason: stale}`). Saving the GitHub token in
+Settings (a reconnect) clears the org's revs, so every hook is re-ensured on
+the next pass even when nothing changed on the platform's side (a hook edited
+by hand).
+
+To check a repository by hand, compare the hook with the relay container's
+channel (no secret is printed):
+
+```bash
+gh api repos/<owner>/<repo>/hooks --jq '.[] | {id, url: .config.url, active}'
+kubectl -n <org dataplane ns> get deploy -o json | jq -r '[.items[].spec.template.spec.containers[] | select(.name=="webhook-relay").args[1]][0]'
+```
+
+A delivery made while the hook was stale is not replayed by the re-sync; the
+run's landing timer re-dispatches the cycle. Redeliver it from the hook's
+Recent Deliveries once the hook is current to land it at once.
 
 ## Tear down
 
@@ -371,10 +469,12 @@ from the cluster's DNS. Repair the name first with
 `deployments/scripts/restore-host-k3d-internal.sh`, which restores it in
 CoreDNS ([After a host restart](#after-a-host-restart)).
 
-**Do NOT run `make dev-env`, `aectl platform install` or `--reuse-secrets`.**
-`install` regenerates and overwrites every `aep/*` key (only Postgres is
-rescued), which rotates secrets under the running platform. Never write a value
-with `value=-` over `kubectl exec -i`: it intermittently stores an empty value.
+**Step 1 is what `make dev-env` (`aectl platform install`) does.** It writes
+the install's inputs again and restores every generated `aep/*` key from its
+Secret before it would generate one, and never rewrites a key the store has.
+Do the manual steps below only for what it does not own (steps 3 to 5), or
+without a re-install. Never write a value with `value=-` over
+`kubectl exec -i`: it intermittently stores an empty value.
 
 Never print a value, not even to compare. Compare lengths or sha256 hashes.
 Never put a value on a command line (no `echo`, no `value=<literal>`). That
@@ -415,6 +515,7 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    | `aep/postgres-password` | `postgres-secrets` | `POSTGRES_PASSWORD` |
    | `aep/thunder-clients/<name>` | `aep-thunder-secrets` (and `aep-ae-studio-internal-secrets` for `ae-studio-internal`) | `OC_WORKLOAD_PUBLISHER_SECRET`, `OC_OBSERVER_READER_SECRET`, `AEP_API_CLIENT_SECRET`, `BFF_TO_GIT_SERVICE_SECRET`, `BFF_TO_REMOTE_WORKER_SECRET`, `LOCAL_DEV_SEEDER_SECRET`, `THUNDER_SYSTEM_CLIENT_SECRET`, `OC_RCA_AGENT_SECRET`, `AE_STUDIO_INTERNAL_CLIENT_SECRET` (for `oc-workload-publisher`, `oc-observer-reader`, `aep-api-client`, `bff-git-service`, `bff-remote-worker`, `local-dev-seeder`, `system-client`, `openchoreo-rca-agent`, `ae-studio-internal`, in that order) |
    | `aep/webhook-relay-seed` | `aep-webhook-relay` | `AE_STUDIO_WEBHOOK_RELAY_SEED` |
+   | `aep/jev-api-key` (only with `aeStudio.jev.enabled`) | `aep-jev` | `AE_STUDIO_JEV_API_KEY` |
 
    The SRE handoff key is not in OpenBao: `aectl sre install` keeps it in the
    Kubernetes Secrets `sre-handoff` (`wso2-aep`) and `sre-agent-aep` (the
@@ -427,13 +528,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    `aep/anthropic-api-key`, `aep/opensearch-username` and `aep/opensearch-password`
    have no ESO target Secret; re-enter them from where you hold them (the
    OpenSearch pair is in the observability plane's own Secret, if installed).
-   Restore the `aep/thunder-clients/*` keys too, from their Secrets. Leaving
-   one out does not preserve it. The sync step's `sync-clients` seeds a **new** random
-   value for each missing key, syncs it into the Secret and updates the Thunder
-   client to match. That is a rotation of that client's secret. Every holder of
-   the old value then fails until it restarts on the new Secret. Do it only if
-   a rotation is what you want. `sync-clients` also refuses until every
-   non-generated path above is back.
+   A missing `aep/thunder-clients/*` key is restored from its Secret by the
+   sync step's `sync-clients` (a new value only when no Secret holds one).
+   `sync-clients` refuses until every non-generated path above is back.
 2. **Verify** each written key by length (or sha256) against the Secret it came
    from.
 3. **Environment identity bindings.** Each environment with a Thunder binding
@@ -472,7 +569,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    that `org_secrets` names but no Secret feeds has no surviving copy:
    re-enter it in Settings (the GitHub token regenerates the webhook secret
    and both org clients; the model key and the Claude token are re-saved on
-   their cards). Do not delete `org_secrets` rows by hand.
+   their cards; the org's repository hooks are re-keyed with the new secret
+   by aep-api's hook repair once the pod rolls). Do not delete `org_secrets`
+   rows by hand.
 5. **aep-api's OpenBao access.** The wipe also took aep-api's write-only
    policy `aep-api-writer` and its Kubernetes-auth role `aep-api`; until they
    are back every secret write aep-api makes fails (log event
@@ -490,9 +589,9 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    if it fails, add `<k3d network gateway, e.g. 172.18.0.1> host.k3d.internal`
    to both and restart CoreDNS. Do not stop and start the cluster to fix it:
    that wipes OpenBao again.
-7. **Sync.** Force-sync the ExternalSecrets
-   (`kubectl annotate externalsecret <name> -n wso2-aep force-sync=$(date +%s) --overwrite`)
-   and run `aectl platform sync-clients`.
+7. **Sync.** Run `aectl platform sync-clients`: it force-syncs the platform
+   ExternalSecrets, then sets the Postgres role and the Thunder clients from
+   them.
 
 ## Upgrading to write-only secrets
 

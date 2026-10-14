@@ -36,7 +36,7 @@ The proposal has these four sections:
 - Put in a skill the information that an agent needs to make its decisions.
 - The agent uses the name and the description to select the skill. Write a description that tells clearly what the skill does and when to use it. Keep it as short as possible.
 - Give each fact one owner and one area.
-- `metadata.aep.audience` sets which agents read a skill: design agents, coding runs, or both (if the field is not there). Put a fact in a skill that its reader loads.
+- `metadata.aep.audience` sets which agents read a skill: design agents, coding runs, or both (if the field is not there). `chat` is for an area chat's sub-agent only, and only a skill that names it. Put a fact in a skill that its reader loads.
 - Record the history of a rule in git or in an ADR, not in the skill.
 - Make the skill easy to maintain. Put related items together.
 - If the agent can read content only when it needs it, put that content in a reference file, not in the skill body.

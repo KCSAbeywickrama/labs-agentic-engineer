@@ -93,14 +93,15 @@ func frontmatterKind(fm frontmatter) string {
 	}
 }
 
-// frontmatterAudience is metadata.aep.audience filtered to design and
-// coding; empty (or naming neither) is both. It must agree with the TS
-// agents' derivation, which reads the same frontmatter.
+// frontmatterAudience is metadata.aep.audience filtered to design, coding
+// and chat; empty (or naming none of them) is design and coding (chat is
+// opt-in only). It must agree with the TS agents' derivation, which reads the
+// same frontmatter.
 func frontmatterAudience(fm frontmatter) []string {
 	out := make([]string, 0, len(fm.Metadata.Aep.Audience))
 	for _, a := range fm.Metadata.Aep.Audience {
 		switch a = strings.TrimSpace(a); a {
-		case AudienceDesign, AudienceCoding:
+		case AudienceDesign, AudienceCoding, AudienceChat:
 			out = append(out, a)
 		}
 	}

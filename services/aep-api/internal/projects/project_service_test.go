@@ -76,7 +76,7 @@ func (f *fakeRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*so
 	}
 	return f.GetRepoFunc(ctx, orgID, projectID)
 }
-func (f *fakeRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
+func (f *fakeRepoSvc) SetWebhookID(context.Context, string, string, int64, string) error {
 	panic("fakeRepoSvc: SetWebhookID not expected in project tests")
 }
 

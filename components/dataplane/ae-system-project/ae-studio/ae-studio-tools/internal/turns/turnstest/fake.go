@@ -21,7 +21,8 @@
 // streamed every frame so far, then follows the turn, or gets the finished
 // stream whole); a different turnId while a turn runs for the project is 409
 // turn_in_progress {activeTurnId}; an `at` that is not a commit sha, or on a
-// turn that is not a plan, is 400 invalid_turn.
+// turn that is not a plan, is 400 invalid_turn. A thread removal is
+// recorded and answered 204.
 //
 // The streams it plays are the golden lines kept beside the spec
 // (packages/contracts/sockets/ae-studio/turn/golden/*.ndjson, Golden), which
@@ -68,7 +69,16 @@ type Server struct {
 	requests []json.RawMessage // every start request's body, refused or not
 	turns    map[string]*turn  // by turnId, kept after the turn ends
 	active   map[string]string // project → its running turnId
+	removals []ThreadRemoval
 	running  sync.WaitGroup
+}
+
+// ThreadRemoval is one remove-issue-thread request the fake received: the
+// project and issue its path named and its `before` query, as sent.
+type ThreadRemoval struct {
+	Project string
+	Issue   string
+	Before  string
 }
 
 // turn is one turn's frames so far. changed is closed and replaced on every
@@ -89,9 +99,25 @@ func New(t *testing.T, s Script) *Server {
 	srv := &Server{script: s, turns: map[string]*turn{}, active: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /turns", srv.startTurn)
+	mux.HandleFunc("DELETE /projects/{project}/issues/{number}/thread", srv.removeThread)
 	srv.path = ServeHandler(t, mux)
 	t.Cleanup(srv.running.Wait)
 	return srv
+}
+
+// removeThread records a thread removal and answers 204.
+func (s *Server) removeThread(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.removals = append(s.removals, ThreadRemoval{Project: r.PathValue("project"), Issue: r.PathValue("number"), Before: r.URL.Query().Get("before")})
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Removals answers every thread removal the fake received, in order.
+func (s *Server) Removals() []ThreadRemoval {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.removals)
 }
 
 // Path is the socket's path.

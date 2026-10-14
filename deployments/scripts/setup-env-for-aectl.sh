@@ -452,31 +452,30 @@ CURRENT_STEP="   OpenBao: aep-api policy and role"
 bash "${SCRIPT_DIR}/openbao-aep-api-auth.sh"
 
 step "   CoreDNS rewrite"
-# The guide's own coredns-custom.yaml, with the suffix taken from AE_DOMAIN.
-# Applied from here rather than fetched because upstream's copy hardcodes
-# "openchoreo.localhost", which is the one thing that moves. For
-# AE_DOMAIN=localhost this ConfigMap is byte-identical to theirs.
+# The guide's own coredns-custom.yaml rewrite, with the suffix taken from
+# AE_DOMAIN. Written from here rather than fetched because upstream's copy
+# hardcodes "openchoreo.localhost", which is the one thing that moves. For
+# AE_DOMAIN=localhost the openchoreo.override key is byte-identical to theirs.
 #
 # What it buys: a pod resolving a cluster hostname gets host.k3d.internal —
 # the k3d loadbalancer — rather than its own loopback or (on a re-domained
 # cluster) a round trip out to the node's external address.
 #
-# setup-agent-manager.sh merges its own rewrites into this same ConfigMap and
-# key, so the name and the "<suffix>.override" data key are a contract
-# between the two scripts.
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: coredns-custom
-  namespace: kube-system
-data:
-  openchoreo.override: |
-    rewrite stop {
-      name regex (.+\\.)?${OC_DOMAIN_RE} host.k3d.internal
-      answer auto
-    }
-EOF
+# setup-agent-manager.sh and restore-host-k3d-internal.sh add their own keys to
+# this same ConfigMap, so its name and the "<suffix>.override" data keys are a
+# contract between the scripts.
+#
+# Every key goes in by merge patch, never `kubectl apply`. An apply prunes each
+# key its last-applied annotation recorded and the new manifest lacks: once
+# setup-agent-manager.sh applied the whole ConfigMap, the next dev-env's apply
+# of the one key below deleted every other key, hostk3dinternal.override among
+# them, so DNS lost host.k3d.internal and dev-env died at Agent Manager's
+# environment check. The annotation an earlier apply left is dropped too, so
+# no later apply can prune.
+OC_REWRITE="rewrite stop {
+  name regex (.+\\.)?${OC_DOMAIN_RE} host.k3d.internal
+  answer auto
+}"
 
 # The one deviation in this step: the official override covers only
 # *.openchoreo.localhost, not *.openchoreoapis.localhost, the data plane's
@@ -485,9 +484,6 @@ EOF
 # preflight (runners/remote-worker ADR-0006) fails ENOTFOUND and validation
 # never starts. Rewritten to host.k3d.internal like the official key, so the
 # request hairpins through the k3d load balancer with its Host header intact.
-# Its own key beside the official one, checked on every run: the apply above
-# prunes it on a re-run once setup-agent-manager.sh's own apply of this
-# ConfigMap has recorded it.
 #
 # Built from DP_INGRESS_HOST rather than the literal openchoreoapis.localhost:
 # that suffix is only correct when AE_DOMAIN is localhost, and on a re-domained
@@ -499,12 +495,23 @@ OC_APIS_REWRITE="rewrite stop {
   name regex (.+\\.)?${DP_INGRESS_HOST//./\\.} host.k3d.internal
   answer auto
 }"
-if [ "$(kubectl get cm coredns-custom -n kube-system -o jsonpath='{.data.openchoreoapis\.override}')" != "$OC_APIS_REWRITE" ]; then
+kubectl get cm coredns-custom -n kube-system >/dev/null 2>&1 \
+    || kubectl create cm coredns-custom -n kube-system
+kubectl annotate cm coredns-custom -n kube-system kubectl.kubernetes.io/last-applied-configuration- >/dev/null
+if [ "$(kubectl get cm coredns-custom -n kube-system -o jsonpath='{.data.openchoreo\.override}')" != "$OC_REWRITE" ] \
+    || [ "$(kubectl get cm coredns-custom -n kube-system -o jsonpath='{.data.openchoreoapis\.override}')" != "$OC_APIS_REWRITE" ]; then
     kubectl patch cm coredns-custom -n kube-system --type merge \
-        -p "$(V="$OC_APIS_REWRITE" python3 -c 'import json,os; print(json.dumps({"data": {"openchoreoapis.override": os.environ["V"]}}))')"
+        -p "$(A="$OC_REWRITE" B="$OC_APIS_REWRITE" python3 -c 'import json,os; print(json.dumps({"data": {"openchoreo.override": os.environ["A"], "openchoreoapis.override": os.environ["B"]}}))')"
     kubectl -n kube-system rollout restart deployment/coredns
     kubectl -n kube-system rollout status deployment/coredns --timeout=120s
 fi
+
+# Every rewrite above answers host.k3d.internal, which k3s drops from NodeHosts
+# at each node restart (colima or host reboot). This pins the name in
+# coredns-custom before any later step resolves a cluster hostname from a pod.
+# Idempotent: a no-op when the key is already right.
+CURRENT_STEP="   CoreDNS: host.k3d.internal"
+CLUSTER_NAME="${CLUSTER_NAME}" bash "${SCRIPT_DIR}/restore-host-k3d-internal.sh"
 
 # ── WSO2 API Platform operator ──────────────────────────────────────────────
 # Not part of the official k3d guide. `aectl platform install` requires the

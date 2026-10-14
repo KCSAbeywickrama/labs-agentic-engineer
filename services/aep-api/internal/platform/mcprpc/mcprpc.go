@@ -137,6 +137,21 @@ func WriteToolError(w http.ResponseWriter, id json.RawMessage, text string) {
 	})
 }
 
+// ToolErrorCodeKey is the _meta key under which a tool error names its code:
+// the reason a program calling the tool branches on, where the text is the
+// model's to read. MCP lets a result carry _meta; the "aep/" prefix keeps
+// the key ours.
+const ToolErrorCodeKey = "aep/code"
+
+// WriteToolErrorCode is WriteToolError with code under _meta[ToolErrorCodeKey].
+func WriteToolErrorCode(w http.ResponseWriter, id json.RawMessage, code, text string) {
+	WriteResult(w, id, map[string]any{
+		"content": []map[string]any{{"type": "text", "text": text}},
+		"isError": true,
+		"_meta":   map[string]string{ToolErrorCodeKey: code},
+	})
+}
+
 // MustJSON marshals v for a text block, or a JSON error object if it cannot.
 func MustJSON(v any) string {
 	b, err := json.Marshal(v)

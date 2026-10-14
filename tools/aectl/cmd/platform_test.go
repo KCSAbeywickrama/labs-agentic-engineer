@@ -119,7 +119,7 @@ func TestAEStudioOverrides_NoThunderURLOmitsIdPURLs(t *testing.T) {
 
 // A store seeded before ae-studio-internal existed is topped up with only the
 // missing generated key; existing generated keys are never rewritten.
-func TestSeedMissingGeneratedSecrets_OnlyMissing(t *testing.T) {
+func TestSeedGeneratedThunderClientSecrets_OnlyMissing(t *testing.T) {
 	have := map[string]bool{}
 	for _, n := range generatedThunderClientNames {
 		if n != "ae-studio-internal" {
@@ -127,15 +127,16 @@ func TestSeedMissingGeneratedSecrets_OnlyMissing(t *testing.T) {
 		}
 	}
 	var wrote []string
-	seeded, err := seedMissingGeneratedSecrets(
-		func(p string) (bool, error) { return have[p], nil },
-		func(p, v string) error {
+	seeded, err := seedGeneratedSecrets(generatedThunderClientSecrets(), seedStore{
+		exists: func(p string) (bool, error) { return have[p], nil },
+		put: func(p, v string) error {
 			if v == "" {
 				t.Errorf("empty value for %s", p)
 			}
 			wrote = append(wrote, p)
 			return nil
-		})
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,6 +283,35 @@ func TestHelmUpgradeArgs_WebhookRelay(t *testing.T) {
 	}
 }
 
+// The Jev switch and endpoint come from the aectl config on install and on
+// every update, both ways, so neither a `make dev-env` (a helm install that
+// resets values) nor a later update drops a Jev an operator turned on.
+func TestAEStudioOverrides_JevFollowsConfig(t *testing.T) {
+	for _, tc := range []struct {
+		enabled bool
+		url     string
+	}{{true, "https://jev.example/v1"}, {false, ""}} {
+		t.Run(fmt.Sprintf("enabled=%t", tc.enabled), func(t *testing.T) {
+			setValidUpdateConfig(t)
+			viper.Set("ae_studio.jev.enabled", tc.enabled)
+			viper.Set("ae_studio.jev.url", tc.url)
+			got, err := helmUpgradeArgs(updateConfigFromFlags())
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(got, "\x00")
+			for _, want := range []string{
+				fmt.Sprintf("--set\x00aeStudio.jev.enabled=%t", tc.enabled),
+				"--set\x00aeStudio.jev.url=" + tc.url,
+			} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("args lack %q: %v", want, got)
+				}
+			}
+		})
+	}
+}
+
 // Missing or partial aectl config must fail loudly, not derive http/empty
 // values the upgrade would write over a working install. platformUpdate runs
 // this check first, for `platform update` and `sre install` alike.
@@ -379,9 +409,10 @@ func TestReuseSecrets_TopsUpTheRelaySeed(t *testing.T) {
 			t.Cleanup(viper.Reset)
 			viper.Set("ae_studio.webhook_relay.enabled", tc.enabled)
 			var checked, wrote []string
-			err := topUpWebhookRelaySeed(
-				func(p string) (bool, error) { checked = append(checked, p); return tc.present, nil },
-				func(p, v string) error { wrote = append(wrote, p); return nil })
+			err := topUpWebhookRelaySeed(seedStore{
+				exists: func(p string) (bool, error) { checked = append(checked, p); return tc.present, nil },
+				put:    func(p, v string) error { wrote = append(wrote, p); return nil },
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

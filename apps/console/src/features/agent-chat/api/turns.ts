@@ -25,7 +25,9 @@
 import type { components } from "../../../generated/ae-design-agent";
 import { designAgentCall, PodRequestError } from "../../../api/aeStudio";
 import { retryAfterMs } from "../../../api/errors";
+import { wireQuery, type ChatRef } from "../chatRef";
 import type { TurnBody } from "../turnScope";
+import { IssueClosedError } from "./errors";
 
 export type TurnStatus = components["schemas"]["TurnStatus"];
 type TurnConflict = components["schemas"]["TurnConflict"];
@@ -81,20 +83,23 @@ export async function startTurn(projectName: string, conversationId: string, bod
   );
   if (data !== undefined) return data.turnId;
   if (response.status === 409) {
-    // The plain TurnConflict (turn_in_progress / conversation_rotated, #430);
-    // any other 409 is a problem (no_default_key) and reads by its words.
+    // The plain TurnConflict (turn_in_progress / conversation_rotated, #430 /
+    // issue_closed); any other 409 is a problem (no_default_key) and reads by
+    // its words.
     const conflict = error as Partial<TurnConflict> | undefined;
+    if (conflict?.code === "issue_closed") throw new IssueClosedError();
     if (conflict?.code === "conversation_rotated") throw new ConversationRotatedError();
     if (conflict?.code === "turn_in_progress") throw new TurnInProgressError(conflict.activeTurnId);
   }
   throw podFailure(error, response, UNREACHABLE);
 }
 
-/** The project's running turn, or null (204, or the read failed). */
-export async function getActiveTurn(projectName: string): Promise<TurnStatus | null> {
+/** The project's running turn in a chat (the main chat's by default), or null (204, or the read failed). */
+export async function getActiveTurn(projectName: string, chat?: ChatRef): Promise<TurnStatus | null> {
+  const query = wireQuery(chat);
   try {
     const { data } = await designAgentCall(UNREACHABLE, (agent) =>
-      agent.GET("/projects/{projectName}/turns/active", { params: { path: { projectName } } }),
+      agent.GET("/projects/{projectName}/turns/active", { params: { path: { projectName }, ...(query ? { query } : {}) } }),
     );
     return data ?? null;
   } catch {

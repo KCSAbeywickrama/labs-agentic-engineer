@@ -77,7 +77,7 @@ func (s *stubRepoSvc) CreateRepo(context.Context, string, string, string, string
 func (s *stubRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("stubRepoSvc: EnsureBareRepo not expected")
 }
-func (s *stubRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
+func (s *stubRepoSvc) SetWebhookID(context.Context, string, string, int64, string) error {
 	panic("stubRepoSvc: SetWebhookID not expected")
 }
 func (s *stubRepoSvc) BeginDelete(context.Context, string, string) error { return nil }

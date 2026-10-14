@@ -53,6 +53,23 @@ const upstreamRequestID = 1
 // error is relayed as *RPCError; anything but a 200 JSON-RPC response is
 // ErrUpstreamUnavailable naming the status, never the body.
 func (u aepAPIUpstream) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	return exchange(ctx, method, params, func(ctx context.Context, body io.Reader) (int, []byte, error) {
+		resp, err := u.client.CallMcpToolWithBodyWithResponse(ctx, "application/json", body)
+		if err != nil {
+			return 0, nil, err
+		}
+		return resp.StatusCode(), resp.Body, nil
+	})
+}
+
+// post sends one encoded JSON-RPC request to an aep-api MCP route and
+// answers the HTTP status and body.
+type post func(ctx context.Context, body io.Reader) (int, []byte, error)
+
+// exchange is one JSON-RPC request over post: aep-api's result, its JSON-RPC
+// error as *RPCError, or ErrUpstreamUnavailable naming the status (never the
+// body) for anything but a 200 JSON-RPC response.
+func exchange(ctx context.Context, method string, params json.RawMessage, send post) (json.RawMessage, error) {
 	body, err := json.Marshal(struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      int             `json:"id"`
@@ -62,12 +79,12 @@ func (u aepAPIUpstream) Call(ctx context.Context, method string, params json.Raw
 	if err != nil {
 		return nil, fmt.Errorf("encode request: %w", err)
 	}
-	resp, err := u.client.CallMcpToolWithBodyWithResponse(ctx, "application/json", bytes.NewReader(body))
+	status, raw, err := send(ctx, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUpstreamUnavailable, err)
 	}
-	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("%w: aep-api answered %d", ErrUpstreamUnavailable, resp.StatusCode())
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("%w: aep-api answered %d", ErrUpstreamUnavailable, status)
 	}
 	var reply struct {
 		Result json.RawMessage `json:"result"`
@@ -76,7 +93,7 @@ func (u aepAPIUpstream) Call(ctx context.Context, method string, params json.Raw
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(resp.Body, &reply); err != nil {
+	if err := json.Unmarshal(raw, &reply); err != nil {
 		return nil, fmt.Errorf("%w: aep-api answered an unreadable body", ErrUpstreamUnavailable)
 	}
 	if reply.Error != nil {

@@ -38,7 +38,9 @@ import (
 // ae-design-agent is its only caller (the socket's emptyDir is mounted into
 // that container and this one only, and the socket is 0660), so there is no
 // token gate. It is the in-pod agent's only door out of the pod: POST /mcp
-// (the JSON-RPC tool surface, mcp.Server), GET /projects/{p} and GET /skills (the snapshots a turn reads,
+// (the JSON-RPC tool surface, mcp.Server), POST /projects/{p}/issues/mcp and
+// /projects/{p}/issues/{n}/mcp (the Issues and issue chats' issue tools,
+// mcp.IssuesServer), GET /projects/{p} and GET /skills (the snapshots a turn reads,
 // mcp_sock_projects.go), and POST /turn-usage (a finished turn's record,
 // handed to the usage outbox).
 
@@ -55,11 +57,22 @@ const (
 // MCPSocketDeps is what the MCP socket's routes need.
 type MCPSocketDeps struct {
 	MCP mcp.Server
+	// Issues answers the issue tools' routes against IssuesUpstreams, the
+	// route's aep-api surface.
+	Issues          mcp.IssuesServer
+	IssuesUpstreams IssuesUpstreams
 	// Snapshots resolves a project or the org's skills repository and writes
 	// the snapshots the agent reads.
 	Snapshots files.Reader
 	// Usage is the outbox the turns' records are handed to (usage.Sender).
 	Usage UsageOutbox
+}
+
+// IssuesUpstreams opens the aep-api surface an issues route forwards to
+// (mcp.IssuesUpstreams).
+type IssuesUpstreams interface {
+	Issues(project string) mcp.Upstream
+	Issue(project string, number int) mcp.Upstream
 }
 
 // UsageOutbox takes one finished turn's record for delivery to aep-api; it
@@ -72,7 +85,7 @@ type UsageOutbox interface {
 // contract does not declare is 404 at the validator; a request that does not
 // match its operation is 400 invalid_request.
 func mcpSocketHandler(d MCPSocketDeps) http.Handler {
-	strict := mcpsock.NewStrictHandlerWithOptions(mcpSocketServer{mcp: d.MCP, snapshots: d.Snapshots, usage: d.Usage}, nil, mcpsock.StrictHTTPServerOptions{
+	strict := mcpsock.NewStrictHandlerWithOptions(mcpSocketServer{mcp: d.MCP, issues: d.Issues, issuesUp: d.IssuesUpstreams, snapshots: d.Snapshots, usage: d.Usage}, nil, mcpsock.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  writeMCPSocketRequestError,
 		ResponseErrorHandlerFunc: writeMCPSocketResponseError,
 	})
@@ -91,6 +104,8 @@ const mcpSocketInvalidCode = "invalid_request"
 // mcpSocketServer implements the MCP socket operations.
 type mcpSocketServer struct {
 	mcp       mcp.Server
+	issues    mcp.IssuesServer
+	issuesUp  IssuesUpstreams
 	snapshots files.Reader
 	usage     UsageOutbox
 }
@@ -104,27 +119,77 @@ func (s mcpSocketServer) CallMcp(ctx context.Context, req mcpsock.CallMcpRequest
 	if req.Body.ID == nil {
 		return mcpsock.CallMcp202Response{}, nil
 	}
-	params, err := json.Marshal(req.Body.Params)
-	if err != nil {
-		return nil, err
+	reply, unavailable, err := answerRPC(ctx, *req.Body, s.mcp.Call)
+	if unavailable != nil {
+		return mcpsock.CallMcp502ApplicationProblemPlusJSONResponse(*unavailable), nil
 	}
-	result, err := s.mcp.Call(ctx, req.Body.Method, params)
+	return reply, err
+}
+
+// CallIssuesMcp answers one JSON-RPC request of the Issues chat on the path's
+// project, as CallMcp answers one of the design tools.
+func (s mcpSocketServer) CallIssuesMcp(ctx context.Context, req mcpsock.CallIssuesMcpRequestObject) (mcpsock.CallIssuesMcpResponseObject, error) {
+	if req.Body.ID == nil {
+		return mcpsock.CallIssuesMcp202Response{}, nil
+	}
+	up := s.issuesUp.Issues(req.ProjectName)
+	reply, unavailable, err := answerRPC(ctx, *req.Body, func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+		return s.issues.Call(ctx, up, mcp.IssuesTools, method, params)
+	})
+	if unavailable != nil {
+		return mcpsock.CallIssuesMcp502ApplicationProblemPlusJSONResponse(*unavailable), nil
+	}
+	return reply, err
+}
+
+// CallIssueMcp answers one JSON-RPC request of the path's issue's chat.
+func (s mcpSocketServer) CallIssueMcp(ctx context.Context, req mcpsock.CallIssueMcpRequestObject) (mcpsock.CallIssueMcpResponseObject, error) {
+	if req.Body.ID == nil {
+		return mcpsock.CallIssueMcp202Response{}, nil
+	}
+	up := s.issuesUp.Issue(req.ProjectName, req.Number)
+	reply, unavailable, err := answerRPC(ctx, *req.Body, func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+		return s.issues.Call(ctx, up, mcp.IssueTools, method, params)
+	})
+	if unavailable != nil {
+		return mcpsock.CallIssueMcp502ApplicationProblemPlusJSONResponse(*unavailable), nil
+	}
+	return reply, err
+}
+
+// answerRPC runs one JSON-RPC request through call: the reply (a result, or
+// a refusal or an error aep-api answered as a JSON-RPC error), or the 502
+// aep_api_unavailable problem when aep-api could not answer.
+func answerRPC(ctx context.Context, req mcpsock.JSONRPCRequest, call func(context.Context, string, json.RawMessage) (json.RawMessage, error)) (jsonRPCReply, *mcpsock.Problem, error) {
+	params, err := json.Marshal(req.Params)
+	if err != nil {
+		return jsonRPCReply{}, nil, err
+	}
+	result, err := call(ctx, req.Method, params)
 	var rpcErr *mcp.RPCError
 	switch {
 	case errors.As(err, &rpcErr):
-		return jsonRPCReply{ID: req.Body.ID, Error: &jsonRPCError{Code: rpcErr.Code, Message: rpcErr.Message}}, nil
+		return jsonRPCReply{ID: req.ID, Error: &jsonRPCError{Code: rpcErr.Code, Message: rpcErr.Message}}, nil, nil
 	case err != nil:
-		slog.WarnContext(ctx, "mcp.upstream_failed", "method", req.Body.Method, "error", err)
-		return mcpsock.CallMcp502ApplicationProblemPlusJSONResponse(
-			mcpSocketProblem(http.StatusBadGateway, "aep_api_unavailable", "aep-api could not answer the call")), nil
+		slog.WarnContext(ctx, "mcp.upstream_failed", "method", req.Method, "error", err)
+		p := mcpSocketProblem(http.StatusBadGateway, "aep_api_unavailable", "aep-api could not answer the call")
+		return jsonRPCReply{}, &p, nil
 	}
-	return jsonRPCReply{ID: req.Body.ID, Result: result}, nil
+	return jsonRPCReply{ID: req.ID, Result: result}, nil, nil
 }
 
 // PostTurnUsage hands one finished turn's record (validated against the
 // contract) to the outbox and answers 202; delivery to aep-api is the
 // outbox's (usage.Sender).
 func (s mcpSocketServer) PostTurnUsage(_ context.Context, req mcpsock.PostTurnUsageRequestObject) (mcpsock.PostTurnUsageResponseObject, error) {
+	// aep-api refuses a whole outbox batch for a focus without the area it
+	// narrows (storableTurnRecord), so the one record is refused here.
+	if req.Body.Focus != nil && req.Body.Area == "" {
+		return mcpsock.PostTurnUsage400ApplicationProblemPlusJSONResponse{ProblemApplicationProblemPlusJSONResponse: mcpsock.ProblemApplicationProblemPlusJSONResponse{
+			Type: "about:blank", Title: http.StatusText(http.StatusBadRequest), Status: http.StatusBadRequest,
+			Code: mcpSocketInvalidCode, Detail: "a focus is taken only with an area",
+		}}, nil
+	}
 	s.usage.Enqueue(turnRecord(*req.Body))
 	return mcpsock.PostTurnUsage202Response{}, nil
 }
@@ -137,6 +202,7 @@ func turnRecord(r mcpsock.TurnRecord) usage.TurnRecord {
 		Project:             r.Project,
 		ConversationID:      r.ConversationID,
 		Kind:                aepapi.AEStudioTurnRecordKind(r.Kind),
+		Area:                aepapi.AEStudioTurnRecordArea(r.Area),
 		Flow:                r.Flow,
 		Status:              aepapi.AEStudioTurnRecordStatus(r.Status),
 		Reason:              aepapi.AEStudioTurnRecordReason(r.Reason),
@@ -159,6 +225,9 @@ func turnRecord(r mcpsock.TurnRecord) usage.TurnRecord {
 	if r.Author != nil {
 		out.Author = &aepapi.AEStudioTurnRecordAuthor{ID: r.Author.ID, Name: r.Author.Name}
 	}
+	if r.Focus != nil {
+		out.Focus = &aepapi.AEStudioTurnRecordFocus{Kind: aepapi.AEStudioTurnRecordFocusKind(r.Focus.Kind), ID: r.Focus.ID}
+	}
 	return out
 }
 
@@ -177,7 +246,15 @@ type jsonRPCError struct {
 	Message string `json:"message"`
 }
 
-func (r jsonRPCReply) VisitCallMcpResponse(w http.ResponseWriter) error {
+func (r jsonRPCReply) VisitCallMcpResponse(w http.ResponseWriter) error { return r.write(w) }
+
+// VisitCallIssuesMcpResponse writes the reply of an Issues chat request.
+func (r jsonRPCReply) VisitCallIssuesMcpResponse(w http.ResponseWriter) error { return r.write(w) }
+
+// VisitCallIssueMcpResponse writes the reply of an issue chat request.
+func (r jsonRPCReply) VisitCallIssueMcpResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r jsonRPCReply) write(w http.ResponseWriter) error {
 	body := struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      any             `json:"id"`

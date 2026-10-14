@@ -63,6 +63,7 @@ const (
 	OpReopenIssue          = "reopen-issue"
 	OpCommentIssue         = "comment-issue"
 	OpEditIssueBody        = "edit-issue-body"
+	OpEditIssueTitle       = "edit-issue-title"
 	OpAddIssueLabels       = "add-issue-labels"
 	OpRemoveIssueLabel     = "remove-issue-label"
 	OpSetIssueLabels       = "set-issue-labels"
@@ -82,6 +83,7 @@ const (
 
 	// Hooks.
 	OpRegisterWebhook = "register-webhook"
+	OpHookConfigRev   = "hook-config-rev"
 	OpDeleteWebhook   = "delete-webhook"
 )
 
@@ -128,6 +130,7 @@ type Fake struct {
 	script       []aestudiotools.TurnEvent
 	clock        time.Time
 	nextHookID   int64
+	hookRevs     map[string]string // org → hook config rev (SetHookConfigRev)
 }
 
 var (

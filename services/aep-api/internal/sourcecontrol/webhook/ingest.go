@@ -146,7 +146,7 @@ func (i *Ingestor) accept(ctx context.Context, org, deliveryID, event string, bo
 	slog.InfoContext(ctx, "webhook: accepted — dispatching", append(attrs, "attempt", res.Attempts, "result", "dispatched")...)
 	attempt := deliveryAttempt{
 		deliveryID: deliveryID, event: event, action: action, ocOrgID: org,
-		attempt: res.Attempts, payload: body, source: source,
+		attempt: res.Attempts, receivedAt: res.ReceivedAt, payload: body, source: source,
 	}
 	// context.WithoutCancel: the correlation id survives, the request's
 	// cancellation does not (the caller answers before the handlers finish).

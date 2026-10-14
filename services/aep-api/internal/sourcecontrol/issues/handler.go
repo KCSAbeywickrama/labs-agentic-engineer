@@ -106,6 +106,7 @@ func issueInfoWire(iss sourcecontrol.IssueInfo) gen.IssueInfo {
 		StateReason:     iss.StateReason,
 		Labels:          iss.Labels,
 		AttentionReason: issueAttentionReason(iss.AttentionReason),
+		MilestoneNumber: int64(iss.MilestoneNumber),
 	}
 }
 

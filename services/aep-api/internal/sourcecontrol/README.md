@@ -25,6 +25,8 @@ flowchart LR
 | Slice | Use-case | Entry |
 |---|---|---|
 | `issues` | file / search a project's issues | `POST`+`GET /projects/{projectName}/issues` |
+| `issues` (Issues agent) | the design agent's Issues chat searches / files issues on its one project | `POST /internal/v1/ae-studio/projects/{p}/issues/mcp` (`search_issues`, `create_issue`, `classify_report`; `user_mcp.go`, `classify.go`: Jev with the platform's key, `clients/jev`, rate-limited per org, `unknown` on any failure) |
+| `issues` (issue agent) | one issue's chat agent reads and works that one issue | `POST /internal/v1/ae-studio/projects/{p}/issues/{n}/mcp` (`get_issue`, `list_components`, `comment_issue`, `edit_issue`, `close_issue`, `reopen_issue`, `hand_to_coding_agent`; `issue_mcp.go`) |
 
 *In the domain root rather than a slice: repo lifecycle, the Git port, and webhook register/receive
 (including the delivery ledger and its `webhook.Replayer`).*
@@ -40,6 +42,9 @@ flowchart LR
 | `IssueService`, `RepoService` | offers | every domain that needs repos, issues or milestones |
 | `IssueAdopter` | needs | delivery admission for newly filed or reopened SRE work; refusal is returned as `adoptionError` |
 | `IncidentRecurrence` | needs | durable recurrence evidence before reopening; defaults to the GitHub-body ledger writer |
+| `issues.Promoter` | needs | the issue agent's hand-off — delivery's promote command (adapted in `app`); answers `issues.HandOffRefusedError` (no deployed version, a closed issue, not the coding agent's) in the words the user reads |
+| `issues.ComponentLister` | needs | the design's component names, sorted (spec's design, adapted in `app`) |
+| `issues.IssueThreadRemover` | needs (optional) | removes a closed issue's chat thread after `close_issue` — the threads created before the close, never one started after it; must not wait on the calling turn nor use its ctx once it returns; a failure is logged, never the tool's. `close_issue` posts the reason as a comment before closing, and says so when it could not. `app` asks the org's AE Studio pod (`remove-issue-thread`), where the design agent keeps the threads; the same adapter serves GitHub's `issues.closed` / `issues.reopened` webhooks |
 
 ## Owns
 - `git_repositories` (the repo coordinate registry) and `webhook_deliveries` — gorm + entities in this
@@ -48,6 +53,18 @@ flowchart LR
   no wire split.
 
 ## Invariants — don't break
+- **The Issues agent is fenced to one project.** `user_mcp.go` takes org + project only from the
+  `auth.IssuesMCPScope` that `auth.IssuesMCPGate` binds: the org the AE Studio pod's `ae-studio-<org>`
+  client token is recorded for, the project from the route (the pod picks the route from the chat the
+  turn runs in); no tool schema declares a project, org or labels, and unknown arguments are ignored.
+  Labels are server-set: `[kind, src/user]` with kind `bug | feature | improvement`. The tool names are
+  a contract with the design agent's filing gate, which keys on `create_issue`, and with the pod's
+  pinned list (`mcp.IssuesTools`).
+- **An issue's agent is fenced to one issue.** The issue's route (`.../issues/{n}/mcp`) serves the
+  issue tools only, and every one acts on the route's number — no schema declares a number, project,
+  org or labels. Each route lists and calls only its own set; anything else is a tool error. Writes
+  are confirmed by the design agent's gate before they reach here; the tool names are its contract
+  (and the pod's `mcp.IssueTools`).
 - **SRE creation owns incident identity and outcomes.** A trusted transport binds the opaque incident
   identity with `WithIncidentContext`. Creation combines it with tenant/project and normalized component,
   ignoring the client dedupe key. `ops.ClassifyActions` determines classification; config-only ledger
@@ -81,6 +98,12 @@ flowchart LR
   1000 items). The bell polls the unfiltered list per alerting project every minute, so the cap bounds
   that poll's rate cost. Past it the oldest issues are missing from the list (logged); `GetIssue` still
   reads any issue by number. Paging the API contract itself is the follow-up if repositories outgrow it.
+- **A filed issue is listed at once (read-your-writes).** GitHub's list endpoint lags a creation by 3-10 s,
+  so `ListIssues` merges in the issues this process filed in the last minute (`recent_issues.go`, per
+  `owner/repo`) that GitHub's answer lacks and that satisfy the label filter, newest first; an entry is
+  dropped when GitHub lists it or after 60 s. The platform's own close, reopen and title/body edits update
+  the remembered entry in place, and the dedupe lookups read the same merged list. The memory is per process: it holds for the single
+  replica the deployment runs, and a list answered by another replica still sees the lag.
 - **No GitHub specifics above the ports.** Whether an op rides REST or GraphQL, and every GitHub
   wire rule, is the pod's; this domain addresses a repository only by its `RepoRef`.
 - **A milestone is addressed by NUMBER, never by title.** Titles are renamable, and the host enforces
@@ -118,6 +141,13 @@ flowchart LR
   A ready project row with no hook id is what the eventcore sweep's hook repair ensures a hook for;
   platform repos (`IsPlatformRepo`: project ids starting with `_`, the skills and resource-docs repos)
   carry none.
+- **A stored hook is re-synced when the pod's config moves.** `Register` hands the pod the stored hook
+  id, so the pod reconfigures THAT hook in place (URL, content type, secret, events, active; re-created
+  when GitHub answers 404) rather than adding a second one beside a hook still posting to an old relay
+  channel. The row stores the hook's config rev (`webhook_config_rev`: the pod's `configRev`, an HMAC of
+  its delivery URL under its webhook secret, folded with the subscribed events); `HookRev` answers the
+  rev a hook ensured now would get, and the hook repair re-ensures every row whose rev differs.
+  `ResyncOrg` (a gitpat (re)submit) clears the org's revs and keeps the ids, so every hook is re-ensured.
 - **`DeleteRepo` trashes before it drops.** The pod's mirror and reference documents go first
   (`TrashOps`), because the row is what names the repository; a trash the pod cannot do is logged
   (`repo.trash_failed`) and the row goes anyway. The GitHub repository is never deleted.
@@ -134,8 +164,10 @@ flowchart LR
   replayed. The last failed attempt logs `webhook: delivery abandoned` and the row keeps its error.
   What a delivery past its window was for is `eventcore`'s reconcile sweeps' to heal
   (`webhook.ReplayHorizon` sets their grace). Every handler must stay idempotent: a replay re-runs
-  whatever the failed attempt got through. A routing failure is answered before anything is
-  persisted, so nothing replays it. The persist/claim/dispatch tail is `webhook.Ingestor`, shared by
+  whatever the failed attempt got through, and a replay can run long after the event, so a handler
+  that needs the event's time reads the payload's own stamp, else `webhook.ReceivedAt(ctx)` — the
+  delivery's first receipt, carried by every attempt. A routing failure is answered before anything
+  is persisted, so nothing replays it. The persist/claim/dispatch tail is `webhook.Ingestor`, shared by
   `webhook.Receive` and the AE Studio tools pod's `ingest-webhook-event` (`Ingestor.Ingest`).
 - **A delivery acts only on its own org's repositories.** `Ingestor.Ingest` refuses
   (`ErrRepositoryUnknown`, nothing stored) a delivery whose `repository.full_name` is not one of the

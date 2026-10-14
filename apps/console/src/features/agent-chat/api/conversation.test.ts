@@ -19,6 +19,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ISSUES_CHAT, issueChat, MAIN_CHAT } from "../chatRef";
 
 // The project conversation's two reads, on the org's design agent.
 
@@ -30,6 +31,7 @@ vi.mock("../../../auth/token", () => ({
 
 const { AE_STUDIO_RESTARTING, setAeStudioUrls } = await import("../../../api/aeStudio");
 const { fetchConversationMessages, fetchCurrentConversationId } = await import("./conversation");
+const { IssueClosedError } = await import("./errors");
 
 const POD = "http://ae-design-agent.mock/v1";
 const server = setupServer();
@@ -59,6 +61,38 @@ describe("fetchCurrentConversationId", () => {
       ),
     );
     await expect(fetchCurrentConversationId("shop")).rejects.toThrow(AE_STUDIO_RESTARTING);
+  });
+  it("reads an area chat's own thread by its area and focus, and never puts the main chat on the wire", async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({ conversationId: "conv-v", createdAt: "2026-10-07T09:00:00Z", current: true });
+      }),
+    );
+    await fetchCurrentConversationId("shop", MAIN_CHAT);
+    await fetchCurrentConversationId("shop", ISSUES_CHAT);
+    await fetchCurrentConversationId("shop", issueChat(7));
+    expect(seen).toEqual(["", "?area=issues", "?area=issues&focus[kind]=issue&focus[id]=7"]);
+  });
+
+  it("reads a 409 issue_closed as the issue being closed: it has no thread", async () => {
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ type: "about:blank", title: "Conflict", status: 409, code: "issue_closed" }, { status: 409 }),
+      ),
+    );
+    await expect(fetchCurrentConversationId("shop", issueChat(7))).rejects.toBeInstanceOf(IssueClosedError);
+  });
+
+  it("carries the pod's words for a chat it no longer knows (400 invalid_chat), so a tab older than the pod is told to reload", async () => {
+    const detail = "view no longer names a chat: this page is out of date, reload it";
+    server.use(
+      http.get(`${POD}/projects/shop/conversations/current`, () =>
+        HttpResponse.json({ type: "about:blank", title: "Bad Request", status: 400, code: "invalid_chat", detail }, { status: 400 }),
+      ),
+    );
+    await expect(fetchCurrentConversationId("shop", ISSUES_CHAT)).rejects.toThrow(detail);
   });
 });
 

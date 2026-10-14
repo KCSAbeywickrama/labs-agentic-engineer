@@ -30,6 +30,10 @@
  * pod), sends a `keep-alive` line every 15 s, and ends with
  * one `result` line. A caller that goes away only detaches: the turn runs on,
  * and a retry with the same `turnId` replays it from the start.
+ *
+ * `DELETE /projects/{p}/issues/{n}/thread` removes the chat thread of an issue
+ * aep-api saw closed or reopened: the threads created before `before`, and,
+ * when a turn runs on the thread, at that turn's end (`ThreadBook`).
  */
 
 import express, { type ErrorRequestHandler, type Express, type Response } from "express";
@@ -37,7 +41,9 @@ import { isTurnSpec, PLAN_BUILD } from "@aep/agent-stream";
 import type { components } from "../generated/turn-socket.js";
 import { ReplayTruncatedError, type ReplayFrame, type ReplayPart, type TurnEndPart } from "../turns/replay-buffer.js";
 import type { TurnDesk, TurnStatus } from "../turns/turn-desk.js";
-import { TurnStartError, type ServerTurnRequest, type TurnStarter } from "../turns/start-turn.js";
+import { isProjectName, TurnStartError, type ServerTurnRequest, type TurnStarter } from "../turns/start-turn.js";
+import { removeIssueThread } from "../turns/issue-thread-removal.js";
+import type { ThreadBook } from "../conversations/thread-book.js";
 import { notFound, sendProblem, sendTurnStartError } from "./http.js";
 
 type Schemas = components["schemas"];
@@ -65,6 +71,8 @@ const CREDIT_KEYS = ["userId", "name", "email"] as const;
 export interface TurnSocketDeps {
   turns: TurnStarter;
   desk: TurnDesk;
+  /** Removes an issue's chat thread (`remove-issue-thread`). */
+  threads: ThreadBook;
   /** The keep-alive cadence (default 15 s). */
   keepAliveMs?: number;
 }
@@ -248,7 +256,9 @@ const internalError: ErrorRequestHandler = (_err, _req, res, next) => {
   sendProblem(res, 500, "internal", "");
 };
 
-/** The Turn socket's app: `POST /turns`, nothing else. */
+const ISSUE_NUMBER_RE = /^[1-9][0-9]{0,8}$/;
+
+/** The Turn socket's app: `POST /turns` and `DELETE /projects/{p}/issues/{n}/thread`. */
 export function createTurnSocketApp(deps: TurnSocketDeps): Express {
   const keepAliveMs = deps.keepAliveMs ?? KEEP_ALIVE_MS;
   const app = express();
@@ -264,6 +274,17 @@ export function createTurnSocketApp(deps: TurnSocketDeps): Express {
       return sendTurnStartError(res, err);
     }
     await streamTurn(res, deps.desk, started.turnId, keepAliveMs);
+  });
+  app.delete("/projects/:project/issues/:number/thread", async (req, res) => {
+    const project = req.params.project as string;
+    const number = req.params.number as string;
+    const before = typeof req.query.before === "string" ? new Date(req.query.before) : new Date(NaN);
+    if (!isProjectName(project)) return notFound(res, "project_unknown");
+    if (!ISSUE_NUMBER_RE.test(number) || Number.isNaN(before.getTime())) {
+      return sendProblem(res, 400, "invalid_request", "the issue number must be a positive integer and before an RFC 3339 time");
+    }
+    await removeIssueThread(deps, project, Number(number), before);
+    res.status(204).end();
   });
   app.use((_req, res) => notFound(res, "not_found"));
   app.use(bodyError());

@@ -15,6 +15,8 @@ output-options:
   - get-ae-studio-skills-repository
   - complete-ae-studio-dependencies
   - call-mcp-tool
+  - call-ae-studio-issues-mcp-tool
+  - call-ae-studio-issue-mcp-tool
   - record-turn-usage
   - ingest-webhook-event
   prefer-skip-optional-pointer: true

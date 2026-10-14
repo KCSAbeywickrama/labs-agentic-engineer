@@ -62,10 +62,11 @@ func (planFakeRepoRepo) GetByOrgAndSlug(context.Context, string, string) (*sourc
 func (planFakeRepoRepo) ListAllReady(context.Context) ([]sourcecontrol.GitRepository, error) {
 	return nil, nil
 }
-func (planFakeRepoRepo) SetWebhookIDIfReady(context.Context, string, string, int64) (bool, error) {
+func (planFakeRepoRepo) SetWebhookIDIfReady(context.Context, string, string, int64, string) (bool, error) {
 	panic("not used")
 }
-func (planFakeRepoRepo) ClearWebhookIDs(context.Context, string) error { panic("not used") }
+func (planFakeRepoRepo) ClearWebhookIDs(context.Context, string) error        { panic("not used") }
+func (planFakeRepoRepo) ClearWebhookConfigRevs(context.Context, string) error { panic("not used") }
 func (planFakeRepoRepo) SetStatusIf(context.Context, string, string, string, string) (bool, error) {
 	panic("not used")
 }

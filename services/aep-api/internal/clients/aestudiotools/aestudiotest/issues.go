@@ -37,6 +37,13 @@ type issue struct {
 	comments  []sourcecontrol.IssueComment
 }
 
+// view is the issue as the pod answers it: its milestone's number on it.
+func (is *issue) view() sourcecontrol.IssueInfo {
+	info := cloneInfo(is.info)
+	info.MilestoneNumber = is.milestone
+	return info
+}
+
 type pull struct {
 	state sourcecontrol.PullRequestState
 	files []string
@@ -162,7 +169,7 @@ func (f *Fake) ListIssues(_ context.Context, ref sourcecontrol.RepoRef, labels [
 	var out []sourcecontrol.IssueInfo
 	for _, n := range slices.Backward(slices.Sorted(maps.Keys(st.issues))) {
 		if hasAll(st.issues[n].info.Labels, labels) {
-			out = append(out, cloneInfo(st.issues[n].info))
+			out = append(out, st.issues[n].view())
 		}
 	}
 	return out, nil
@@ -179,7 +186,7 @@ func (f *Fake) GetIssue(_ context.Context, ref sourcecontrol.RepoRef, number int
 	if err != nil {
 		return nil, err
 	}
-	info := cloneInfo(is.info)
+	info := is.view()
 	return &info, nil
 }
 
@@ -264,6 +271,11 @@ func (f *Fake) CommentIssue(_ context.Context, ref sourcecontrol.RepoRef, number
 			Observed: strings.HasPrefix(body, sourcecontrol.ObservedCommentMarker),
 		})
 	})
+}
+
+// EditIssueTitle replaces the title.
+func (f *Fake) EditIssueTitle(_ context.Context, ref sourcecontrol.RepoRef, number int, title string) error {
+	return f.editIssue(OpEditIssueTitle, ref, number, func(is *issue) { is.info.Title = title })
 }
 
 // EditIssueBody replaces the body.
@@ -448,7 +460,7 @@ func (f *Fake) ListMilestoneIssues(_ context.Context, ref sourcecontrol.RepoRef,
 	}
 	var out []sourcecontrol.IssueInfo
 	for _, is := range st.members(filter.Number, filter.State, filter.Labels) {
-		out = append(out, cloneInfo(is.info))
+		out = append(out, is.view())
 	}
 	return out, nil
 }

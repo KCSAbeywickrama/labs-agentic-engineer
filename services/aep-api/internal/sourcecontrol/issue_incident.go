@@ -76,7 +76,7 @@ func (s *issueService) createIncidentIssue(ctx context.Context, orgID, projectID
 	}
 	unlock := s.lockRepoCreates(ref)
 	defer unlock()
-	existing, err := s.github.ListIssues(ctx, ref, []string{label})
+	existing, err := s.listWithRecent(ctx, ref, []string{label})
 	if err != nil {
 		return nil, fmt.Errorf("look up incident: %w", err)
 	}
@@ -136,6 +136,7 @@ func (s *issueService) createIncidentIssue(ctx context.Context, orgID, projectID
 		return nil, err
 	}
 	result.Classification = classification
+	s.rememberCreated(ref, req, result)
 	s.adoptIncident(ctx, orgID, projectID, result)
 	return result, nil
 }

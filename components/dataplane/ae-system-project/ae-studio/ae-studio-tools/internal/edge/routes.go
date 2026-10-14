@@ -60,6 +60,8 @@ type Deps struct {
 	Projects projects.Resolver
 	// Turns relays the turns aep-api starts to the agent's Turn socket.
 	Turns TurnRelay
+	// Threads removes an issue's chat thread in the agent (turns.Client).
+	Threads ThreadRemover
 }
 
 // Routes is the public listener's mount table (design/route-groups.md): one row per
@@ -82,7 +84,7 @@ func Routes(d Deps) http.Handler {
 	internalSrv := internalServer{
 		Handler: d.Git, gitHubOps: d.GitHubOps, skillsOps: d.Skills,
 		gh: d.GitHub, refs: d.References, githubOwner: d.Cfg.GitHubOwner,
-		projects: d.Projects, turns: d.Turns,
+		projects: d.Projects, turns: d.Turns, threads: d.Threads,
 	}
 	nf := http.HandlerFunc(notFound)
 

@@ -428,3 +428,55 @@ func TestParseOwnerRepo(t *testing.T) {
 		}
 	}
 }
+
+// The Issues agent files feature and improvement issues; each kind gets its own
+// colour rather than the grey reserved for dynamic labels.
+func TestCreateIssue_UserIssueKindsHaveTheirOwnColours(t *testing.T) {
+	t.Parallel()
+	svc, f := newIssueSvcOnFake(t)
+
+	if _, err := svc.CreateIssue(testContext(), "org1", "proj1", sourcecontrol.CreateIssueRequest{
+		Title: "Export to CSV", Body: "please", Labels: []string{"feature", "improvement"},
+	}); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if labels := f.Labels(widgets); labels["feature"] != "a2eeef" || labels["improvement"] != "84b6eb" {
+		t.Fatalf("labels = %v", labels)
+	}
+}
+
+// An issue's agent rewrites the title; a blank one is refused before the pod
+// is called.
+func TestEditIssueTitle_ReplacesTheTitle(t *testing.T) {
+	t.Parallel()
+	svc, f := newIssueSvcOnFake(t)
+	n := openIssue(t, f)
+
+	if err := svc.EditIssueTitle(testContext(), "org1", "proj1", n, "a sharper title"); err != nil {
+		t.Fatalf("EditIssueTitle: %v", err)
+	}
+	if got := issueNo(t, f, widgets, n).Title; got != "a sharper title" {
+		t.Fatalf("title = %q", got)
+	}
+	if err := svc.EditIssueTitle(testContext(), "org1", "proj1", n, "  "); err == nil {
+		t.Fatal("a blank title was sent")
+	}
+}
+
+// An issue in a version's milestone says which one when read back.
+func TestGetIssue_ReadsTheMilestone(t *testing.T) {
+	t.Parallel()
+	svc, f := newIssueSvcOnFake(t)
+	n := openIssue(t, f)
+	m, err := f.CreateMilestone(testContext(), widgets, sourcecontrol.CreateMilestoneRequest{Title: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetIssueMilestone(testContext(), "org1", "proj1", n, m.Number); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.GetIssue(testContext(), "org1", "proj1", n)
+	if err != nil || got.MilestoneNumber != m.Number {
+		t.Fatalf("issue = %+v err=%v, want milestone %d", got, err, m.Number)
+	}
+}

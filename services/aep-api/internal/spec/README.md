@@ -204,6 +204,13 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
   the pod's to say. Rows written by aep-api's former in-process turn engine were reshaped by
   migrate's `phase27_agent_turns_ledger`: it gave them a kind and a start, deleted the running ones
   and dropped that engine's columns, guard index and `project_conversations`.
+- **`Newest` reads the main chat only.** A record carries `area` (and `focus`) when its turn ran in
+  one of the design agent's area chats: the Issues area's own chat is stored as `chat_view` `issues`,
+  the area focused on one issue as `issue` (the focus's kind); `''` for the main chat and every other
+  kind. Those chats never edit the spec, so `Newest` — the kickoff guard and the status poll's
+  `spec.agent` — skips their rows. The chats themselves (each area chat's thread, its one running
+  turn, the issue tools, a closed issue's thread removal) live in the pod
+  (`ae-design-agent/design/agent-loop.md`, Areas).
 
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its version tags — every save/tag/discard

@@ -18,18 +18,12 @@ package cmd
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"os/exec"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/wso2/aep/aectl/internal/ui"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
@@ -38,23 +32,24 @@ var syncClientsNamespace string
 
 var syncClientsCmd = &cobra.Command{
 	Use:   "sync-clients",
-	Short: "Seed missing Thunder client secrets and register the Thunder clients",
-	Long: `Brings an already-installed platform up to date with the Thunder clients
-this aectl knows about, without a full install:
+	Short: "Seed missing Thunder client secrets; set the Postgres role and Thunder clients from OpenBao",
+	Long: `Brings an already-installed platform's secret holders in line with
+OpenBao, without a full install and without rotating anything:
 
   0. Refuses, writing nothing, if OpenBao lacks any non-generated platform
-     secret (a wiped store needs the manual "Local OpenBao wipe recovery" in
-     deployments/README.md; never a full install, which overwrites every key).
+     secret (a restarted in-memory OpenBao: re-run 'make dev-env', whose
+     install restores every generated key from the cluster Secrets ESO last
+     synced it into).
   1. Writes only the MISSING generated aep/thunder-clients/* keys to OpenBao
-     (create-only). Existing keys are never rotated, and no database or
-     Thunder admin secret is touched.
-  2. Nudges the ExternalSecrets that sync those keys and waits (90s) until
-     the cluster Secrets hold the seeded values.
-  3. Registers or updates every Thunder client (idempotent), skipping with a
-     warning any whose Secret did not catch up.
+     (create-only), each restored from its cluster Secret when one holds it.
+  2. Makes ESO re-read OpenBao for every platform ExternalSecret and waits
+     (90s) until each has synced, so the steps below read what OpenBao holds,
+     not what ESO synced up to an hour ago.
+  3. Sets the Postgres role's password to postgres-secrets (idempotent).
+  4. Registers or updates every Thunder client (idempotent), skipping with a
+     warning any whose Secret did not sync.
 
-'make dev-update' runs it after the helm upgrade. A client whose Secret is
-still unavailable is skipped with a warning; the others register.`,
+'make dev-update' runs it after the helm upgrade.`,
 	RunE: runSyncClients,
 }
 
@@ -71,20 +66,21 @@ type syncClientsSteps struct {
 	missingRequired func(ctx context.Context) ([]string, error)
 	// seed writes the missing generated keys and returns what it wrote.
 	seed func(ctx context.Context) ([]seededSecret, error)
-	// nudge asks ESO to sync the named ExternalSecrets now.
-	nudge func(ctx context.Context, names []string)
-	// awaitSynced waits until the cluster Secrets hold the seeded values and
-	// returns the clients (clientID -> reason) whose Secret did not catch up.
-	awaitSynced func(ctx context.Context, seeded []seededSecret) map[string]string
+	// syncSecrets makes ESO re-read OpenBao and returns the platform Secrets
+	// that did not catch up (Secret name -> reason).
+	syncSecrets func(ctx context.Context) (map[string]string, error)
+	// syncPostgres sets the Postgres role's password from postgres-secrets,
+	// refusing while that Secret is unsynced.
+	syncPostgres func(ctx context.Context, unsynced map[string]string) error
 	// setupThunder registers the Thunder clients except the skipped ones.
 	setupThunder func(ctx context.Context, skip map[string]string) error
 }
 
 // errOpenBaoWiped is returned when non-generated vault paths are missing:
-// seeding fresh generated keys then would rotate every client secret behind
-// the cluster Secrets' back, so nothing is written.
+// the store restarted (it is in memory) or was never installed. Nothing is
+// written: sync-clients has no source for the install's inputs.
 func errOpenBaoWiped(missing []string) error {
-	return fmt.Errorf("OpenBao is missing %d platform secret(s) (%s): it looks wiped or never installed, so seeding fresh Thunder client secrets would rotate them out from under the running platform.\nNothing was written. Do NOT run a full 'aectl platform install' or 'make dev-env': they regenerate and overwrite every aep/* key. Follow the section titled Local OpenBao wipe recovery in deployments/README.md, then re-run sync-clients",
+	return fmt.Errorf("OpenBao is missing %d platform secret(s) (%s): it looks wiped (the local OpenBao is in memory) or never installed.\nNothing was written. Re-run 'make dev-env' (or 'aectl platform install'): it writes the install's inputs again and restores every generated key from the cluster Secret ESO last synced it into, so nothing rotates. See Local OpenBao wipe recovery in deployments/README.md",
 		len(missing), strings.Join(missing, ", "))
 }
 
@@ -105,18 +101,28 @@ func syncClients(ctx context.Context, st syncClientsSteps) error {
 	if len(seeded) == 0 {
 		ui.Success("All Thunder client secrets already seeded")
 	}
-	for _, p := range seeded {
-		ui.Success("Seeded " + p.path)
+	for _, line := range describeSeeded(seeded) {
+		ui.Success(line)
 	}
 
-	var skip map[string]string
-	if len(seeded) > 0 {
-		st.nudge(ctx, thunderSecretNames())
-		skip = st.awaitSynced(ctx, seeded)
+	ui.Step("Syncing platform Secrets from OpenBao")
+	unsynced, err := st.syncSecrets(ctx)
+	if err != nil {
+		return fmt.Errorf("sync platform Secrets: %w", err)
+	}
+	if len(unsynced) == 0 {
+		ui.Success("Platform Secrets in sync with OpenBao")
+	}
+	for name, reason := range unsynced {
+		ui.Warn(fmt.Sprintf("%s: %s", name, reason))
+	}
+
+	if err := st.syncPostgres(ctx, unsynced); err != nil {
+		return fmt.Errorf("sync postgres password: %w", err)
 	}
 
 	ui.Step("Registering Thunder OAuth clients")
-	if err := st.setupThunder(ctx, skip); err != nil {
+	if err := st.setupThunder(ctx, clientsReadingUnsynced(unsynced)); err != nil {
 		return err
 	}
 	ui.Success("Thunder configured")
@@ -138,79 +144,22 @@ func runSyncClients(cmd *cobra.Command, args []string) error {
 
 	return syncClients(ctx, syncClientsSteps{
 		missingRequired: session.missingRequiredPaths,
-		seed:            session.seedMissingThunderClientSecrets,
-		nudge: func(ctx context.Context, names []string) {
-			forceSyncExternalSecrets(ctx, syncClientsNamespace, names)
+		seed: func(ctx context.Context) ([]seededSecret, error) {
+			recover, err := newClusterSecretRecovery(ctx, syncClientsNamespace)
+			if err != nil {
+				return nil, err
+			}
+			return seedGeneratedSecrets(generatedThunderClientSecrets(), session.seedStore(ctx, recover))
 		},
-		awaitSynced: func(ctx context.Context, seeded []seededSecret) map[string]string {
-			return awaitSeededSecretsSynced(ctx, k8sClient, syncClientsNamespace, seeded, seededSyncTimeout)
+		syncSecrets: func(ctx context.Context) (map[string]string, error) {
+			return syncPlatformExternalSecrets(ctx, syncClientsNamespace)
+		},
+		syncPostgres: func(ctx context.Context, unsynced map[string]string) error {
+			return syncPostgresPassword(ctx, k8sClient, syncClientsNamespace, unsynced)
 		},
 		setupThunder: func(ctx context.Context, skip map[string]string) error {
 			return doThunderSetup(ctx, k8sClient, syncClientsNamespace,
 				viper.GetString("thunder.namespace"), consolePublicURL(), skip)
 		},
 	})
-}
-
-// seededSyncTimeout bounds the wait for ESO to carry freshly seeded keys into
-// the cluster Secrets.
-const seededSyncTimeout = 90 * time.Second
-
-// awaitSeededSecretsSynced waits until, for every seeded key a client reads,
-// the cluster Secret holds the seeded value (compared by hash; values are
-// never logged). Registering a client before that would hand Thunder the
-// stale cluster value while ESO is about to sync the new one, an effective
-// rotation. It returns the clients whose Secret did not catch up in time
-// (clientID -> reason), which the caller skips.
-func awaitSeededSecretsSynced(ctx context.Context, c kubernetes.Interface, namespace string, seeded []seededSecret, timeout time.Duration) map[string]string {
-	pending := map[string]thunderClientDef{}
-	want := map[string][sha256.Size]byte{}
-	for _, sec := range seeded {
-		for _, d := range aepThunderClients {
-			if d.vaultName != "" && "aep/thunder-clients/"+d.vaultName == sec.path {
-				pending[d.clientID] = d
-				want[d.clientID] = sha256.Sum256([]byte(sec.value))
-			}
-		}
-	}
-	deadline := time.Now().Add(timeout)
-	for {
-		for id, d := range pending {
-			sec, err := c.CoreV1().Secrets(namespace).Get(ctx, d.secretNameOrDefault(), metav1.GetOptions{})
-			if err != nil {
-				continue
-			}
-			if sha256.Sum256(sec.Data[d.secretKey]) == want[id] {
-				delete(pending, id)
-			}
-		}
-		if len(pending) == 0 || time.Now().After(deadline) || ctx.Err() != nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(3 * time.Second):
-		}
-	}
-	skip := map[string]string{}
-	for id, d := range pending {
-		skip[id] = fmt.Sprintf("Secret %s/%s did not sync the newly seeded key within %s", namespace, d.secretNameOrDefault(), timeout)
-	}
-	return skip
-}
-
-// forceSyncExternalSecrets asks ESO to reconcile the named ExternalSecrets now.
-// Best effort: a failure only means the next sync waits for its refresh
-// interval, and doThunderSetup's own wait reports a Secret that never appears.
-func forceSyncExternalSecrets(ctx context.Context, namespace string, names []string) {
-	stamp := "force-sync=" + strconv.FormatInt(time.Now().Unix(), 10)
-	for _, name := range names {
-		args := []string{"annotate", "externalsecret", name, "-n", namespace, stamp, "--overwrite"}
-		if kubeconfig != "" {
-			args = append(args, "--kubeconfig", kubeconfig)
-		}
-		if out, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput(); err != nil {
-			ui.Warn(fmt.Sprintf("could not nudge ExternalSecret %s: %v: %s", name, err, out))
-		}
-	}
 }

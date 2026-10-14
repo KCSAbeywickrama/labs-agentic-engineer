@@ -106,6 +106,9 @@ type IssueOps interface {
 	// Used by the tech-lead detail phase to write the LLM-authored body
 	// after the placeholder issue was created.
 	EditIssueBody(ctx context.Context, ref RepoRef, number int, body string) error
+	// EditIssueTitle replaces the issue title. Used by an issue's agent
+	// (edit_issue).
+	EditIssueTitle(ctx context.Context, ref RepoRef, number int, title string) error
 	// AddIssueLabels adds labels to an existing issue (merges with current;
 	// adding a present label is a no-op). Used to stamp aep:status/* projection
 	// and aep:attention flags.
@@ -171,13 +174,27 @@ type IssueOps interface {
 	ListMilestoneIssueComments(ctx context.Context, ref RepoRef, number, perIssue int) (map[int][]IssueComment, error)
 }
 
+// EnsuredHook is a repository hook as the org's pod left it.
+type EnsuredHook struct {
+	ID int64
+	// ConfigRev names the pod's delivery URL and signing secret the hook
+	// now carries, never either itself.
+	ConfigRev string
+}
+
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.
 type WebhookOps interface {
 	// RegisterWebhook ensures the repository webhook delivering to the org's
-	// pod (the pod owns the delivery URL and the signing secret) and returns
-	// its hook ID. An existing hook to that URL is answered with its events
-	// replaced by these and its signing config re-keyed: one call is an ensure.
-	RegisterWebhook(ctx context.Context, ref RepoRef, events []string) (hookID int64, err error)
+	// pod (the pod owns the delivery URL and the signing secret): the hook
+	// leaves carrying the pod's whole config with these events, active.
+	// storedID (0: none) is the hook the platform stored: it is reconfigured
+	// in place whatever URL it had, and re-created when GitHub no longer has
+	// it (the answer then names the new id). Without one, an existing hook to
+	// the pod's URL is reconfigured, else one is created.
+	RegisterWebhook(ctx context.Context, ref RepoRef, storedID int64, events []string) (EnsuredHook, error)
+	// HookConfigRev answers the config rev every hook the org's pod ensures
+	// now carries (EnsuredHook.ConfigRev). No GitHub call.
+	HookConfigRev(ctx context.Context, org string) (string, error)
 	// DeleteWebhook removes the hook the platform registered, addressed by the
 	// stored hook ID so no other integration's delivery can be caught by it. A
 	// hook that is already gone (404, or 410 after GitHub reaped a failing one)

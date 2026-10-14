@@ -124,7 +124,8 @@ func NewSweep(events *Events, repos RepoLister, interval time.Duration) *Sweep {
 
 // WithHookEnsurer turns on the hook repair (sweep_hooks.go): each pass first
 // ensures the hook of every ready project repository whose row holds no hook
-// id. Nil leaves it off.
+// id, or whose hook was ensured at another config rev than its org's pod
+// installs now. Nil leaves it off.
 func (s *Sweep) WithHookEnsurer(h HookEnsurer) *Sweep {
 	s.hooks = hookRepair{ensurer: h}
 	return s

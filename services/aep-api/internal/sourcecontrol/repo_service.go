@@ -46,9 +46,11 @@ type RepoService interface {
 	ListByOrg(ctx context.Context, orgID string) ([]GitRepository, error)
 	// SetWebhookID is called by the webhook registration service after a hook
 	// is provisioned for the repo on GitHub. Stored alongside the repo record
-	// so cleanup can deregister. Only a `ready` row takes it: a row that is
-	// gone or whose project is being deleted is ErrRepoNotFound.
-	SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error
+	// so cleanup can deregister, with the config rev it was ensured at (so
+	// the hook repair can tell when it is stale). Only a `ready` row takes
+	// it: a row that is gone or whose project is being deleted is
+	// ErrRepoNotFound.
+	SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64, configRev string) error
 	// BeginDelete marks the project's row `deleting` before its teardown
 	// starts, so no sweep lists it and no hook id lands on it from then on.
 	// No row (or one already marked) is success.
@@ -254,8 +256,8 @@ func (s *repoService) ListByOrg(ctx context.Context, orgID string) ([]GitReposit
 	return rows, nil
 }
 
-func (s *repoService) SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error {
-	took, err := s.repo.SetWebhookIDIfReady(ctx, orgID, projectID, hookID)
+func (s *repoService) SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64, configRev string) error {
+	took, err := s.repo.SetWebhookIDIfReady(ctx, orgID, projectID, hookID, configRev)
 	if err != nil {
 		return fmt.Errorf("store webhook id: %w", err)
 	}

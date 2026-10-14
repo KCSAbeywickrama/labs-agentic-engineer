@@ -18,7 +18,8 @@
 
 // The in-process ToolsSocket: what a test (or the playground) drives a turn
 // with instead of ae-studio-tools. It answers the MCP JSON-RPC surface with
-// the twelve design tools, records every tool call and usage record, serves
+// the twelve design tools (and, on the Issues and issue chats' routes, their
+// issue tools over a fixed issue table), records every tool call and usage record, serves
 // lookups from a fixed project table (recording each, and answering
 // ref_not_found for a listed missing `at`), and can be told to fail or hold the
 // next usage hand-overs so the outbox's retry paths are testable.
@@ -46,9 +47,25 @@ export const DESIGN_TOOL_NAMES = [
   "slice_openapi_spec",
 ] as const;
 
+/** The Issues chat's tools (ae-studio-tools `mcp.IssuesTools`). */
+export const ISSUES_TOOL_NAMES = ["search_issues", "create_issue", "classify_report"] as const;
+
+/** An issue's chat tools (ae-studio-tools `mcp.IssueTools`). */
+export const ISSUE_TOOL_NAMES = [
+  "get_issue",
+  "list_components",
+  "comment_issue",
+  "edit_issue",
+  "close_issue",
+  "reopen_issue",
+  "hand_to_coding_agent",
+] as const;
+
 export interface FakeToolCall {
   name: string;
   arguments: unknown;
+  /** The route the call came on: `/mcp`, or an Issues or issue chat's. */
+  route?: string;
 }
 
 export interface FakeToolsSocketOptions {
@@ -58,8 +75,15 @@ export interface FakeToolsSocketOptions {
   missingRefs?: string[];
   /** The skills snapshot's sha (`skills()`). */
   skillsSha?: string;
-  /** A tool's text result; defaults to `{"tool": <name>}`. */
+  /** A tool's text result; defaults to `{"tool": <name>}` (an issue route's `get_issue` reads `issues`). */
   callTool?: (call: FakeToolCall) => string;
+  /** Issues by number, as every project's issue routes answer them; any other number is not found. */
+  issues?: Record<number, { state: "open" | "closed"; title?: string }>;
+  /**
+   * What the Issues route's `classify_report` answers (aep-api asking Jev);
+   * absent, it answers `unknown`, as aep-api does with no Jev key.
+   */
+  classification?: { kind: string; confidence: number; alternatives: { kind: string; p: number }[] };
 }
 
 interface JsonRpcRequest {
@@ -87,6 +111,8 @@ export class FakeToolsSocket implements ToolsSocket {
   private readonly missingRefs: ReadonlySet<string>;
   private readonly skillsSha: string;
   private readonly callTool: (call: FakeToolCall) => string;
+  private readonly issues: Record<number, { state: "open" | "closed"; title?: string }>;
+  private readonly classification: NonNullable<FakeToolsSocketOptions["classification"]>;
   private failures = 0;
   private failStatus = 503;
   private held: Promise<void> | null = null;
@@ -98,6 +124,8 @@ export class FakeToolsSocket implements ToolsSocket {
     this.missingRefs = new Set(opts.missingRefs ?? []);
     this.skillsSha = opts.skillsSha ?? "skills-fake";
     this.callTool = opts.callTool ?? ((call) => JSON.stringify({ tool: call.name }));
+    this.issues = opts.issues ?? {};
+    this.classification = opts.classification ?? { kind: "unknown", confidence: 0, alternatives: [] };
   }
 
   /** The next `count` `postUsage` calls fail: 503 (transient), or 400 when `permanent`. */
@@ -145,9 +173,17 @@ export class FakeToolsSocket implements ToolsSocket {
     };
   }
 
-  readonly mcpFetch = (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  /** Close or reopen an issue of the table (as GitHub would, outside the pod). */
+  setIssueState(number: number, state: "open" | "closed"): void {
+    this.issues[number] = { ...this.issues[number], state };
+  }
+
+  readonly mcpFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const req = JSON.parse(String(init?.body ?? "{}")) as JsonRpcRequest;
     if (req.id === undefined) return new Response(null, { status: 202 });
+    const route = new URL(String(input), "http://mcp.sock").pathname;
+    const issueRoute = /^\/projects\/[^/]+\/issues(?:\/(\d+))?\/mcp$/.exec(route);
+    if (issueRoute) return this.issueRoute(req, route, issueRoute[1] === undefined ? undefined : Number(issueRoute[1]));
     if (req.method === "initialize") {
       return json({ jsonrpc: "2.0", id: req.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } } });
     }
@@ -169,6 +205,34 @@ export class FakeToolsSocket implements ToolsSocket {
     }
     return json({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "method not found" } });
   }) as typeof fetch;
+
+  /** An Issues (no number) or issue chat's route: its tools only. */
+  private issueRoute(req: JsonRpcRequest, route: string, number: number | undefined): Response {
+    const names: readonly string[] = number === undefined ? ISSUES_TOOL_NAMES : ISSUE_TOOL_NAMES;
+    if (req.method === "tools/list") {
+      const tools = names.map((name) => ({ name, description: name, inputSchema: { type: "object", properties: {} } }));
+      return json({ jsonrpc: "2.0", id: req.id, result: { tools } });
+    }
+    if (req.method !== "tools/call") return json({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "method not found" } });
+    const call = { name: String(req.params?.name), arguments: req.params?.arguments ?? {}, route };
+    if (!names.includes(call.name)) {
+      return json({ jsonrpc: "2.0", id: req.id, error: { code: -32602, message: `tool not allowed: ${call.name}` } });
+    }
+    this.toolCalls.push(call);
+    if (number === undefined && call.name === "classify_report") {
+      return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: JSON.stringify(this.classification) }] } });
+    }
+    if (number !== undefined && call.name === "get_issue") {
+      const issue = this.issues[number];
+      if (!issue) {
+        const text = "the issue was not found on the project's repository; nothing was done";
+        return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text }], isError: true, _meta: { "aep/code": "issue_not_found" } } });
+      }
+      const text = JSON.stringify({ number, title: issue.title ?? `Issue ${number}`, state: issue.state });
+      return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text }] } });
+    }
+    return json({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: this.callTool(call) }] } });
+  }
 
   async postUsage(r: TurnRecord): Promise<void> {
     this.usageAttempts++;

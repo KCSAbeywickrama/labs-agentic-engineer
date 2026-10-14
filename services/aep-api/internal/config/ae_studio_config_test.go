@@ -40,6 +40,7 @@ func setMinimalEnv(t *testing.T) {
 		"AE_STUDIO_STORAGE_SIZE_LIMIT", "AE_STUDIO_STORAGE_EPHEMERAL_REQUEST",
 		"AE_STUDIO_STORAGE_BUDGET_BYTES", "AE_STUDIO_CPU_REQUEST_DESIGN_AGENT", "AE_STUDIO_CPU_REQUEST_COLLAB", "AE_STUDIO_CPU_REQUEST_STUDIO_TOOLS", "AE_STUDIO_PULL_SECRET_KEY", "AE_STUDIO_PULL_SECRET_PROPERTY",
 		"AE_STUDIO_WEBHOOK_RELAY_SEED", "AE_STUDIO_WEBHOOK_RELAY_IMAGE", "AE_STUDIO_WEBHOOK_RELAY_ENABLED",
+		"AE_STUDIO_JEV_API_KEY", "AE_STUDIO_JEV_URL",
 		"CREDENTIAL_ENCRYPTION_KEY",
 	} {
 		t.Setenv(k, "")
@@ -81,6 +82,23 @@ func TestLoad_AEStudioParsed(t *testing.T) {
 	t.Setenv("AE_STUDIO_EXTRA_EGRESS", `{not json`)
 	if _, err := Load(); err == nil {
 		t.Fatal("malformed AE_STUDIO_EXTRA_EGRESS must fail boot (it is a deployment typo, not an absent feature)")
+	}
+}
+
+// The Jev key is optional and needs nothing else: unset is off, set is on.
+func TestLoad_Jev(t *testing.T) {
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AEStudio.Jev.On() {
+		t.Fatal("no key must be off")
+	}
+	t.Setenv("AE_STUDIO_JEV_API_KEY", "jev-secret")
+	t.Setenv("AE_STUDIO_JEV_URL", "https://jev.example/v1/systemone")
+	if cfg, _ = Load(); !cfg.AEStudio.Jev.On() || cfg.AEStudio.Jev.URL != "https://jev.example/v1/systemone" {
+		t.Fatalf("on=%v url=%q", cfg.AEStudio.Jev.On(), cfg.AEStudio.Jev.URL)
 	}
 }
 

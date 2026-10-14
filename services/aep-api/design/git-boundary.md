@@ -116,4 +116,5 @@ them](../../../components/dataplane/ae-system-project/ae-studio/ae-studio-tools/
 | Run supervisor and validation (`delivery`) | issues, milestones, pull requests, reads at a sha | `sourceControlErr`: unavailable retries, absent fails permanent |
 | Eventcore handlers and sweeps (`delivery/eventcore`) | issues, milestone counts, pull requests, design reads, hook repair | a handler 5xx is replayed, then swept; the hook repair skips an org whose pod is absent or unavailable this pass |
 | SRE issue writes (`/internal/v1/sre-handoff/mcp`) | issues | a tool error to the SRE agent, no fallback |
+| AE Studio issue chats (`/internal/v1/ae-studio/projects/{p}/issues[/{n}]/mcp`) | issues; a pull request's number reads as no issue | a tool error to the agent, coded in `_meta["aep/code"]` (`issue_not_found`, `repo_not_found`, `unavailable`) for the design agent's open check |
 | Credential validator (`organization`) | `GitHubIdentity` | GitHub's 401/403/404 on the gitpat is unauthorized; anything else, the pod's state included, skips the tick |

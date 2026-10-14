@@ -23,6 +23,21 @@ const (
 	PublisherCCScopes publisherCCContextKey = "publisherCC.Scopes"
 )
 
+// Defines values for AEStudioTurnRecordArea.
+const (
+	Issues AEStudioTurnRecordArea = "issues"
+)
+
+// Valid indicates whether the value is a known member of the AEStudioTurnRecordArea enum.
+func (e AEStudioTurnRecordArea) Valid() bool {
+	switch e {
+	case Issues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AEStudioTurnRecordKind.
 const (
 	Browser AEStudioTurnRecordKind = "browser"
@@ -80,6 +95,21 @@ func (e AEStudioTurnRecordStatus) Valid() bool {
 	case Completed:
 		return true
 	case Failed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AEStudioTurnRecordFocusKind.
+const (
+	Issue AEStudioTurnRecordFocusKind = "issue"
+)
+
+// Valid indicates whether the value is a known member of the AEStudioTurnRecordFocusKind enum.
+func (e AEStudioTurnRecordFocusKind) Valid() bool {
+	switch e {
+	case Issue:
 		return true
 	default:
 		return false
@@ -151,6 +181,8 @@ type AEStudioProjectRepository struct {
 
 // AEStudioTurnRecord One finished turn, as the ledger stores it. Idempotent on turnId.
 type AEStudioTurnRecord struct {
+	// Area The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+	Area   AEStudioTurnRecordArea    `json:"area,omitempty"`
 	Author *AEStudioTurnRecordAuthor `json:"author,omitempty"`
 
 	// BaseRef The repo snapshot sha the turn read.
@@ -180,14 +212,17 @@ type AEStudioTurnRecord struct {
 	// the features the turn designed, so the turn's own edits never read
 	// as out of date. Absent when the flush did not land, and on every
 	// other flow; the basis then falls back to baseRef.
-	EndRef       string                 `json:"endRef,omitempty"`
-	FinishedAt   time.Time              `json:"finishedAt"`
-	Flow         string                 `json:"flow"`
-	InputTokens  int64                  `json:"inputTokens"`
-	Kind         AEStudioTurnRecordKind `json:"kind"`
-	Model        string                 `json:"model"`
-	ModelHost    string                 `json:"modelHost"`
-	OutputTokens int64                  `json:"outputTokens"`
+	EndRef     string    `json:"endRef,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Flow       string    `json:"flow"`
+
+	// Focus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+	Focus        *AEStudioTurnRecordFocus `json:"focus,omitempty"`
+	InputTokens  int64                    `json:"inputTokens"`
+	Kind         AEStudioTurnRecordKind   `json:"kind"`
+	Model        string                   `json:"model"`
+	ModelHost    string                   `json:"modelHost"`
+	OutputTokens int64                    `json:"outputTokens"`
 
 	// Project Absent on a marketplace turn.
 	Project string                   `json:"project,omitempty"`
@@ -199,6 +234,9 @@ type AEStudioTurnRecord struct {
 	Status    AEStudioTurnRecordStatus `json:"status"`
 	TurnID    openapi_types.UUID       `json:"turnId"`
 }
+
+// AEStudioTurnRecordArea The area whose chat the turn ran in when it is not the project's main chat (the Issues page's, `issues`). Absent on a main-chat turn and on any turn that is not a browser one. The status read's spec agent state reads main-chat turns only.
+type AEStudioTurnRecordArea string
 
 // AEStudioTurnRecordKind defines model for AEStudioTurnRecord.Kind.
 type AEStudioTurnRecordKind string
@@ -214,6 +252,15 @@ type AEStudioTurnRecordAuthor struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
+
+// AEStudioTurnRecordFocus The entity the turn's area chat was narrowed to (one issue's chat, by its number). Absent on the area's own chat.
+type AEStudioTurnRecordFocus struct {
+	ID   int                         `json:"id"`
+	Kind AEStudioTurnRecordFocusKind `json:"kind"`
+}
+
+// AEStudioTurnRecordFocusKind defines model for AEStudioTurnRecordFocus.Kind.
+type AEStudioTurnRecordFocusKind string
 
 // AEStudioTurnUsageRequest The records of finished turns.
 type AEStudioTurnUsageRequest struct {
@@ -268,6 +315,12 @@ type publisherCCContextKey string
 // sreHandoffKeyContextKey is the context key for sreHandoffKey security scheme
 type sreHandoffKeyContextKey string
 
+// CallAeStudioIssuesMcpToolJSONBody defines parameters for CallAeStudioIssuesMcpTool.
+type CallAeStudioIssuesMcpToolJSONBody = map[string]interface{}
+
+// CallAeStudioIssueMcpToolJSONBody defines parameters for CallAeStudioIssueMcpTool.
+type CallAeStudioIssueMcpToolJSONBody = map[string]interface{}
+
 // IngestWebhookEventParams defines parameters for IngestWebhookEvent.
 type IngestWebhookEventParams struct {
 	// XGitHubDelivery GitHub's delivery id (X-GitHub-Delivery), the dedup key.
@@ -282,6 +335,12 @@ type CallMcpToolJSONBody = map[string]interface{}
 
 // CompleteAeStudioDependenciesJSONRequestBody defines body for CompleteAeStudioDependencies for application/json ContentType.
 type CompleteAeStudioDependenciesJSONRequestBody = AEStudioDependencyCompletionsRequest
+
+// CallAeStudioIssuesMcpToolJSONRequestBody defines body for CallAeStudioIssuesMcpTool for application/json ContentType.
+type CallAeStudioIssuesMcpToolJSONRequestBody = CallAeStudioIssuesMcpToolJSONBody
+
+// CallAeStudioIssueMcpToolJSONRequestBody defines body for CallAeStudioIssueMcpTool for application/json ContentType.
+type CallAeStudioIssueMcpToolJSONRequestBody = CallAeStudioIssueMcpToolJSONBody
 
 // RecordTurnUsageJSONRequestBody defines body for RecordTurnUsage for application/json ContentType.
 type RecordTurnUsageJSONRequestBody = AEStudioTurnUsageRequest
@@ -370,6 +429,16 @@ type ClientInterface interface {
 
 	CompleteAeStudioDependencies(ctx context.Context, body CompleteAeStudioDependenciesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CallAeStudioIssuesMcpToolWithBody request with any body
+	CallAeStudioIssuesMcpToolWithBody(ctx context.Context, projectName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CallAeStudioIssuesMcpTool(ctx context.Context, projectName string, body CallAeStudioIssuesMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CallAeStudioIssueMcpToolWithBody request with any body
+	CallAeStudioIssueMcpToolWithBody(ctx context.Context, projectName string, issueNumber int, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CallAeStudioIssueMcpTool(ctx context.Context, projectName string, issueNumber int, body CallAeStudioIssueMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetAeStudioProjectRepository request
 	GetAeStudioProjectRepository(ctx context.Context, projectName string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -406,6 +475,54 @@ func (c *Client) CompleteAeStudioDependenciesWithBody(ctx context.Context, conte
 
 func (c *Client) CompleteAeStudioDependencies(ctx context.Context, body CompleteAeStudioDependenciesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCompleteAeStudioDependenciesRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CallAeStudioIssuesMcpToolWithBody(ctx context.Context, projectName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallAeStudioIssuesMcpToolRequestWithBody(c.Server, projectName, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CallAeStudioIssuesMcpTool(ctx context.Context, projectName string, body CallAeStudioIssuesMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallAeStudioIssuesMcpToolRequest(c.Server, projectName, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CallAeStudioIssueMcpToolWithBody(ctx context.Context, projectName string, issueNumber int, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallAeStudioIssueMcpToolRequestWithBody(c.Server, projectName, issueNumber, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CallAeStudioIssueMcpTool(ctx context.Context, projectName string, issueNumber int, body CallAeStudioIssueMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallAeStudioIssueMcpToolRequest(c.Server, projectName, issueNumber, body)
 	if err != nil {
 		return nil, err
 	}
@@ -533,6 +650,107 @@ func NewCompleteAeStudioDependenciesRequestWithBody(server string, contentType s
 	}
 
 	operationPath := fmt.Sprintf("/ae-studio/dependency-completions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCallAeStudioIssuesMcpToolRequest calls the generic CallAeStudioIssuesMcpTool builder with application/json body
+func NewCallAeStudioIssuesMcpToolRequest(server string, projectName string, body CallAeStudioIssuesMcpToolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCallAeStudioIssuesMcpToolRequestWithBody(server, projectName, "application/json", bodyReader)
+}
+
+// NewCallAeStudioIssuesMcpToolRequestWithBody generates requests for CallAeStudioIssuesMcpTool with any type of body
+func NewCallAeStudioIssuesMcpToolRequestWithBody(server string, projectName string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectName", projectName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/ae-studio/projects/%s/issues/mcp", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCallAeStudioIssueMcpToolRequest calls the generic CallAeStudioIssueMcpTool builder with application/json body
+func NewCallAeStudioIssueMcpToolRequest(server string, projectName string, issueNumber int, body CallAeStudioIssueMcpToolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCallAeStudioIssueMcpToolRequestWithBody(server, projectName, issueNumber, "application/json", bodyReader)
+}
+
+// NewCallAeStudioIssueMcpToolRequestWithBody generates requests for CallAeStudioIssueMcpTool with any type of body
+func NewCallAeStudioIssueMcpToolRequestWithBody(server string, projectName string, issueNumber int, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectName", projectName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "issueNumber", issueNumber, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/ae-studio/projects/%s/issues/%s/mcp", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -803,6 +1021,16 @@ type ClientWithResponsesInterface interface {
 
 	CompleteAeStudioDependenciesWithResponse(ctx context.Context, body CompleteAeStudioDependenciesJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteAeStudioDependenciesResponse, error)
 
+	// CallAeStudioIssuesMcpToolWithBodyWithResponse request with any body
+	CallAeStudioIssuesMcpToolWithBodyWithResponse(ctx context.Context, projectName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallAeStudioIssuesMcpToolResponse, error)
+
+	CallAeStudioIssuesMcpToolWithResponse(ctx context.Context, projectName string, body CallAeStudioIssuesMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*CallAeStudioIssuesMcpToolResponse, error)
+
+	// CallAeStudioIssueMcpToolWithBodyWithResponse request with any body
+	CallAeStudioIssueMcpToolWithBodyWithResponse(ctx context.Context, projectName string, issueNumber int, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallAeStudioIssueMcpToolResponse, error)
+
+	CallAeStudioIssueMcpToolWithResponse(ctx context.Context, projectName string, issueNumber int, body CallAeStudioIssueMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*CallAeStudioIssueMcpToolResponse, error)
+
 	// GetAeStudioProjectRepositoryWithResponse request
 	GetAeStudioProjectRepositoryWithResponse(ctx context.Context, projectName string, reqEditors ...RequestEditorFn) (*GetAeStudioProjectRepositoryResponse, error)
 
@@ -850,6 +1078,66 @@ func (r CompleteAeStudioDependenciesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CompleteAeStudioDependenciesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CallAeStudioIssuesMcpToolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *map[string]interface{}
+}
+
+// Status returns HTTPResponse.Status
+func (r CallAeStudioIssuesMcpToolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CallAeStudioIssuesMcpToolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CallAeStudioIssuesMcpToolResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CallAeStudioIssueMcpToolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *map[string]interface{}
+}
+
+// Status returns HTTPResponse.Status
+func (r CallAeStudioIssueMcpToolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CallAeStudioIssueMcpToolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CallAeStudioIssueMcpToolResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1031,6 +1319,40 @@ func (c *ClientWithResponses) CompleteAeStudioDependenciesWithResponse(ctx conte
 	return ParseCompleteAeStudioDependenciesResponse(rsp)
 }
 
+// CallAeStudioIssuesMcpToolWithBodyWithResponse request with arbitrary body returning *CallAeStudioIssuesMcpToolResponse
+func (c *ClientWithResponses) CallAeStudioIssuesMcpToolWithBodyWithResponse(ctx context.Context, projectName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallAeStudioIssuesMcpToolResponse, error) {
+	rsp, err := c.CallAeStudioIssuesMcpToolWithBody(ctx, projectName, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallAeStudioIssuesMcpToolResponse(rsp)
+}
+
+func (c *ClientWithResponses) CallAeStudioIssuesMcpToolWithResponse(ctx context.Context, projectName string, body CallAeStudioIssuesMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*CallAeStudioIssuesMcpToolResponse, error) {
+	rsp, err := c.CallAeStudioIssuesMcpTool(ctx, projectName, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallAeStudioIssuesMcpToolResponse(rsp)
+}
+
+// CallAeStudioIssueMcpToolWithBodyWithResponse request with arbitrary body returning *CallAeStudioIssueMcpToolResponse
+func (c *ClientWithResponses) CallAeStudioIssueMcpToolWithBodyWithResponse(ctx context.Context, projectName string, issueNumber int, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallAeStudioIssueMcpToolResponse, error) {
+	rsp, err := c.CallAeStudioIssueMcpToolWithBody(ctx, projectName, issueNumber, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallAeStudioIssueMcpToolResponse(rsp)
+}
+
+func (c *ClientWithResponses) CallAeStudioIssueMcpToolWithResponse(ctx context.Context, projectName string, issueNumber int, body CallAeStudioIssueMcpToolJSONRequestBody, reqEditors ...RequestEditorFn) (*CallAeStudioIssueMcpToolResponse, error) {
+	rsp, err := c.CallAeStudioIssueMcpTool(ctx, projectName, issueNumber, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallAeStudioIssueMcpToolResponse(rsp)
+}
+
 // GetAeStudioProjectRepositoryWithResponse request returning *GetAeStudioProjectRepositoryResponse
 func (c *ClientWithResponses) GetAeStudioProjectRepositoryWithResponse(ctx context.Context, projectName string, reqEditors ...RequestEditorFn) (*GetAeStudioProjectRepositoryResponse, error) {
 	rsp, err := c.GetAeStudioProjectRepository(ctx, projectName, reqEditors...)
@@ -1127,6 +1449,58 @@ func ParseCompleteAeStudioDependenciesResponse(rsp *http.Response) (*CompleteAeS
 			return nil, err
 		}
 		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCallAeStudioIssuesMcpToolResponse parses an HTTP response from a CallAeStudioIssuesMcpToolWithResponse call
+func ParseCallAeStudioIssuesMcpToolResponse(rsp *http.Response) (*CallAeStudioIssuesMcpToolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CallAeStudioIssuesMcpToolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCallAeStudioIssueMcpToolResponse parses an HTTP response from a CallAeStudioIssueMcpToolWithResponse call
+func ParseCallAeStudioIssueMcpToolResponse(rsp *http.Response) (*CallAeStudioIssueMcpToolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CallAeStudioIssueMcpToolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

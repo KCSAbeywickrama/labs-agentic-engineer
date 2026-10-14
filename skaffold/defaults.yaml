@@ -136,6 +136,14 @@ ae_studio:
     # so GitHub reaches a local k3d install's repo hooks. smee.io is a
     # third-party public relay: never true in production (absent = false).
     enabled: true
+  jev:
+    # aep-api classifies the Issues agent's reports with the platform's Jev
+    # key (import it first: `aectl platform secret import --path
+    # aep/jev-api-key --value-file <file>`). Set here, not with `helm --set` or
+    # `platform update --set`: `make dev-env` re-installs the release from this
+    # file and drops any value set by hand. url: "" is Jev's default endpoint.
+    enabled: false
+    url: ""
 
 thunder:
   # Kubernetes namespace where Thunder is deployed.

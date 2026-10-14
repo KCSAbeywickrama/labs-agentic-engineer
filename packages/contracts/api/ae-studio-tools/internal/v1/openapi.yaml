@@ -796,6 +796,87 @@ paths:
           $ref: '#/components/responses/GitHubAPIError'
         '503':
           $ref: '#/components/responses/Problem'
+  /repos/{owner}/{repo}/issues/{number}/title:
+    put:
+      operationId: set-issue-title
+      summary: Replace an issue's title
+      tags:
+      - Issues
+      parameters:
+      - $ref: '#/components/parameters/ImpersonateOrg'
+      - $ref: '#/components/parameters/Owner'
+      - $ref: '#/components/parameters/Repo'
+      - $ref: '#/components/parameters/Number'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueTitleRequest'
+      responses:
+        '204':
+          description: Replaced
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/GitHubAPIError'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /repos/{owner}/{repo}/issues/{number}/thread:
+    delete:
+      operationId: remove-issue-thread
+      summary: Remove a closed or reopened issue's chat thread in the design agent
+      description: |-
+        Forwarded to the design agent over the Turn socket. The issue's chat
+        threads created before `before` go; one started after it (a reopened
+        issue's fresh thread) stays. A thread whose turn is running is removed
+        when that turn ends. Idempotent: an issue with no thread is a 204.
+      tags:
+      - Turns
+      parameters:
+      - $ref: '#/components/parameters/ImpersonateOrg'
+      - $ref: '#/components/parameters/Owner'
+      - $ref: '#/components/parameters/Repo'
+      - $ref: '#/components/parameters/Number'
+      - name: project
+        in: query
+        required: true
+        description: The project the repository is (a DNS label)
+        schema:
+          type: string
+          pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+      - name: before
+        in: query
+        required: true
+        description: When the event that removes the thread happened (RFC 3339)
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '204':
+          description: Removed, deferred to the running turn's end, or there was
+            none
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: 'The project is not one of this repository''s (problem code:
+            project_unknown).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /repos/{owner}/{repo}/issues/{number}/milestone:
     put:
       operationId: set-issue-milestone
@@ -1348,8 +1429,16 @@ paths:
       summary: Ensure the studio's webhook on the repository
       description: |-
         The hook delivers to the studio's webhook URL, signed with its secret
-        (both the pod's, never the request's). When GitHub already holds a hook
-        for that URL, its events are replaced by these: one call is an ensure.
+        (both the pod's, never the request's). One call is an ensure, and it
+        always leaves the hook carrying the pod's whole config (URL, content
+        type, secret) with these events, active:
+        - hookId set (the hook the caller stored): that hook is reconfigured
+          in place, whatever URL it had; GitHub no longer holding it (404)
+          falls through to the create below.
+        - otherwise a hook is created, or, when GitHub already holds one for
+          the pod's URL, that hook is reconfigured.
+        The answer carries the hook's id (a new one after a re-create) and
+        the pod's configRev.
       tags:
       - Hooks
       parameters:
@@ -1379,6 +1468,33 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '502':
           $ref: '#/components/responses/GitHubAPIError'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /hooks/config:
+    get:
+      operationId: get-hook-config
+      summary: The revision of the hook config this studio installs
+      description: |-
+        configRev names the delivery URL and signing secret every hook
+        register-hook installs carries, without revealing either. It changes
+        when either changes (a moved relay channel, a new webhook secret), so
+        a caller that stored the configRev a hook was ensured with knows that
+        hook is stale without reading it from GitHub. No GitHub call.
+      tags:
+      - Hooks
+      parameters:
+      - $ref: '#/components/parameters/ImpersonateOrg'
+      responses:
+        '200':
+          description: The current config revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookConfig'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
   /repos/{owner}/{repo}/hooks/{hookId}:
@@ -2255,6 +2371,11 @@ components:
           type: array
           items:
             type: string
+        milestone:
+          type: integer
+          minimum: 1
+          description: The number of the milestone the issue is in; absent when
+            it is in none
     CreateIssueRequest:
       type: object
       additionalProperties: false
@@ -2350,6 +2471,15 @@ components:
       properties:
         body:
           type: string
+    IssueTitleRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - title
+      properties:
+        title:
+          type: string
+          minLength: 1
     IssueMilestoneRequest:
       type: object
       additionalProperties: false
@@ -2576,14 +2706,35 @@ components:
             - push
             - issue_comment
             - issues
+        hookId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The hook the caller stored for this repository, to be
+            reconfigured in place (re-created when GitHub no longer has it).
     Hook:
       type: object
       required:
       - id
+      - configRev
       properties:
         id:
           type: integer
           format: int64
+        configRev:
+          $ref: '#/components/schemas/HookConfigRev'
+    HookConfig:
+      type: object
+      required:
+      - configRev
+      properties:
+        configRev:
+          $ref: '#/components/schemas/HookConfigRev'
+    HookConfigRev:
+      type: string
+      description: 16 hex characters of HMAC-SHA256 keyed by the webhook
+        secret over the delivery URL; neither can be recovered from it.
+      pattern: '^[0-9a-f]{16}$'
     SkillsMirrorRequest:
       type: object
       additionalProperties: false
