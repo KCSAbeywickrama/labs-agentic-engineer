@@ -64,6 +64,9 @@ and five states over the difference:
 | `held` | behind, a hard provider not serving | left alone, named |
 | `unbuilt` | no succeeded build at any commit | left alone |
 
+> Amended 2026-10-15: *a hard provider* reads *a provider the component's workload connects to*, and
+> `HardConfigEdges` below is now `spec.ConnectionEdges`; see the amendment under Shape.
+
 **Promotable, not green.** This is the answer to "A needs B; A is green, B is red — deploy A?"
 
 ```text
@@ -75,6 +78,9 @@ pass: a consumer waiting on a provider that is itself held has to fall out too. 
 over the **whole design** — `spec.HardConfigEdges` already returns exactly that — which is what makes
 a provider with no serving release an unsatisfied edge instead of the assumed-satisfied one that
 published the web app.
+
+> Amended 2026-10-15: the edge set is `spec.ConnectionEdges`, every sibling connection of every
+> component type, and a cycle among them shares one wave; see the amendment under Shape.
 
 `held` and `unbuilt` are not deploy failures and are never waited on. A red build has already minted
 its fix issue; a component nobody has written yet has its development issue open. Filing a deployment
@@ -121,8 +127,10 @@ indistinguishable from success.
 >   consumer is `held`, not promoted.
 > - At the deploy deadline a pending component whose binding is waiting on a sibling's
 >   (OpenChoreo's `ConnectionsPending`, carried as `ComponentDeploy.WaitingOnProvider`) is not filed:
->   its provider's state has its own work or its own failure in the same read. When nothing else is
->   pending the pass ends on no failure, and the serving gate above decides the version.
+>   its provider's state has its own work or its own failure in the same read — only when that
+>   provider is in fact not met; a waiter whose providers are all met is filed, since then its own
+>   connection cannot resolve. When nothing else is pending the pass ends on no failure, the converge
+>   it owes its promotes is paid by the next pass, and the serving gate above decides the version.
 
 ## Shape
 

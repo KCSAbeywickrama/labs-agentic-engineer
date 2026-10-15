@@ -60,8 +60,9 @@ package spec
 // edges so a consumer is not published before the provider its connection
 // resolves to. A second spelling would let the writer and the scheduler
 // disagree about which component blocks which — so the predicate is the one
-// derive_wiring uses for the connection itself: a sibling dependency whose
-// target is in the design.
+// derive_wiring uses for the connection itself, a sibling dependency whose
+// target is in the design, less a self-reference: the derivation would emit a
+// connection for one, and it orders nothing.
 //
 // Components named as dependencies but absent from the design are skipped: an
 // edge to a component that does not exist cannot be waited for, and the

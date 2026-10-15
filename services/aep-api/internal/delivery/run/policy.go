@@ -501,7 +501,8 @@ type CycleDeployState struct {
 	Pending []string `json:"pending,omitempty"`
 	// WaitingOnProvider names the pending components whose binding is waiting on
 	// a sibling's (delivery.ComponentDeploy.WaitingOnProvider); a subset of
-	// Pending. The deadline leaves them out of the failure it reports: the
+	// Pending. The deadline leaves out of the failure it reports the ones that
+	// are blocked behind a provider that is not met (failedAtExpiry): the
 	// provider's own state has its own work or its own failure in the same read,
 	// and an issue filed against the consumer sends an agent after a deployment
 	// that is healthy and has simply not happened.
@@ -559,18 +560,47 @@ func classifyCycleDeploys(expected int, states []delivery.ComponentDeploy) Cycle
 	return out
 }
 
-// failedAtExpiry is what the deadline reports as the failure: every pending
-// component except the ones waiting on a provider's binding.
-func (s CycleDeployState) failedAtExpiry() []string {
-	waiting := make(map[string]struct{}, len(s.WaitingOnProvider))
+// failedAtExpiry splits the pending set at the deadline: what the deadline
+// reports as the failure, and what it excuses because the component is BLOCKED
+// behind a provider that is not met. providers is the plan's connection graph;
+// met answers whether a provider has a binding to resolve against right now
+// (Ready in this pass, or serving in the snapshot).
+//
+// A component is blocked when its binding is waiting on a provider
+// (ConnectionsPending) and some provider of it — followed through providers
+// that are themselves waiting — is unmet and not merely waiting in turn. A chain
+// a → b → c with c stuck excuses a and b and files c. Two components waiting on
+// each other excuse neither: nothing outside the pair holds them, and a cycle
+// OpenChoreo could resolve has had the whole deadline to do it. A waiting
+// component whose providers are all met is filed, because then it is its own
+// connection that cannot resolve.
+func (s CycleDeployState) failedAtExpiry(providers map[string][]string, met func(string) bool) (failed, blocked []string) {
+	waiting := make(map[string]bool, len(s.WaitingOnProvider))
 	for _, name := range s.WaitingOnProvider {
-		waiting[name] = struct{}{}
+		waiting[name] = true
 	}
-	var out []string
-	for _, name := range s.Pending {
-		if _, ok := waiting[name]; !ok {
-			out = append(out, name)
+	var blockedBy func(name string, seen map[string]bool) bool
+	blockedBy = func(name string, seen map[string]bool) bool {
+		if seen[name] {
+			return false
 		}
+		seen[name] = true
+		for _, p := range providers[name] {
+			if met(p) {
+				continue
+			}
+			if !waiting[p] || blockedBy(p, seen) {
+				return true
+			}
+		}
+		return false
 	}
-	return out
+	for _, name := range s.Pending {
+		if waiting[name] && blockedBy(name, map[string]bool{}) {
+			blocked = append(blocked, name)
+			continue
+		}
+		failed = append(failed, name)
+	}
+	return failed, blocked
 }

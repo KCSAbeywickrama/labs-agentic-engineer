@@ -140,9 +140,15 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	// deploy between builds-green and validation, so validation asserts against a
 	// version that is genuinely serving. A gate after validation would be gating
 	// the wrong thing.
-	if plan.Writes() {
-		promoting := delivery.TargetNames(flattenWaves(plan.Waves))
-		if res, err := l.awaitDeployable(ctx, promoting, version); err != nil || res != cycleGreen {
+	//
+	// An owed converge is a write too (see convergeOwed), so a pass that only
+	// pays one consults the gate as well, attributed to the set it will write.
+	if plan.Writes() || l.convergeOwed {
+		gated := delivery.TargetNames(flattenWaves(plan.Waves))
+		if !plan.Writes() {
+			gated = convergeSet(version, plan.Waited)
+		}
+		if res, err := l.awaitDeployable(ctx, gated, version); err != nil || res != cycleGreen {
 			return res, err
 		}
 	}
@@ -158,51 +164,74 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	defer stopDeadline()
 	deadline := workflow.NewTimer(deadlineCtx, deployReadyTimeout)
 
+	// ready is what this pass has already seen Ready, wave by wave: a provider
+	// promoted in an earlier wave is met for the deadline's purposes whatever
+	// the snapshot said about it.
+	ready := map[string]bool{}
 	for _, wave := range plan.Waves {
 		if res, err := l.promote(ctx, wave); err != nil || res != cycleGreen {
 			return res, err
 		}
-		res, err := l.awaitDeployments(ctx, delivery.TargetNames(wave), version, deadline)
+		names := delivery.TargetNames(wave)
+		res, blocked, err := l.awaitDeployments(ctx, names, version, deadline, plan.Providers, ready)
 		if err != nil || res != cycleGreen {
-			return passResult(res), err
+			return res, err
+		}
+		if blocked {
+			return l.deferConverge(ctx), nil
+		}
+		for _, name := range names {
+			ready[name] = true
 		}
 	}
 	// Everything this pass wrote, plus what was already converging: a component
 	// promoted by an EARLIER pass may still be rolling out, and the version does
 	// not serve until it does.
-	if res, err := l.awaitDeployments(ctx, plan.Waited, version, deadline); err != nil || res != cycleGreen {
-		return passResult(res), err
+	res, blocked, err := l.awaitDeployments(ctx, plan.Waited, version, deadline, plan.Providers, ready)
+	if err != nil || res != cycleGreen {
+		return res, err
+	}
+	if blocked {
+		return l.deferConverge(ctx), nil
 	}
 
-	if !plan.Writes() {
+	if !plan.Writes() && !l.convergeOwed {
 		// Nothing was promoted, so there is no new address for a soft fact to
 		// carry and nothing to converge. It also matters that this returns rather
-		// than writing: the deploy gate is only consulted when the pass promotes,
-		// and a converge is a write like any other — so a pass that skipped the
-		// gate must not go on to write a binding.
+		// than writing: the deploy gate is only consulted when the pass promotes
+		// or pays an owed converge, and a converge is a write like any other — so
+		// a pass that skipped the gate must not go on to write a binding.
 		return cycleGreen, nil
 	}
 	converge := convergeSet(version, plan.Waited)
 	if len(converge) == 0 {
+		l.convergeOwed = false
 		return cycleGreen, nil
 	}
 	if res, err := l.promote(ctx, delivery.ConvergeTargets(converge)); err != nil || res != cycleGreen {
 		return res, err
 	}
-	res, err := l.awaitDeployments(ctx, converge, version, deadline)
-	return passResult(res), err
+	res, blocked, err = l.awaitDeployments(ctx, converge, version, deadline, plan.Providers, ready)
+	if err != nil || res != cycleGreen {
+		return res, err
+	}
+	if blocked {
+		return l.deferConverge(ctx), nil
+	}
+	l.convergeOwed = false
+	return cycleGreen, nil
 }
 
-// passResult is what a wait's ending means for the PASS. A wait that expired
-// with every pending component waiting on its provider's binding ends the pass
-// — no later wave is promoted into the same wait — but fails nothing this pass
-// wrote, so the pass answers green and the boundary's serving gate (ADR-0026)
-// decides whether the version is delivered. Every other ending is its own.
-func passResult(res cycleResult) cycleResult {
-	if res == cycleDeployWaiting {
-		return cycleGreen
-	}
-	return res
+// deferConverge ends a pass whose wait expired with every pending component
+// blocked behind an unmet provider. No later wave is promoted into the same
+// expired wait, and the converge this pass owes its promotes is left to the next
+// pass (convergeOwed). The pass itself answers green: nothing it wrote failed,
+// and the boundary's serving gate (ADR-0026) decides whether the version is
+// delivered.
+func (l *loop) deferConverge(ctx workflow.Context) cycleResult {
+	l.convergeOwed = true
+	workflow.GetLogger(ctx).Info("deploy pass ended with components blocked behind an unmet provider; the converge is owed to the next pass")
+	return cycleGreen
 }
 
 // behindNames is every component the version state says is behind — the first
@@ -505,25 +534,37 @@ func (l *loop) setWaitingOnValues(ctx workflow.Context, deps []string) error {
 //
 // A poll that finds the project has no write target returns cycleNoWriteTarget,
 // which the boundary settles on without filing fix work.
-func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
-	version delivery.VersionState, deadline workflow.Future) (cycleResult, error) {
+//
+// blocked is the one ending the cycle result cannot carry: the deadline expired
+// with every pending component blocked behind a provider that is not met
+// (failedAtExpiry over providers, the plan's connection graph, and readyBefore,
+// what the pass has already seen Ready). Nothing is filed, and the result is
+// green — nothing this wait covered failed — but the pass must not promote
+// anything further into the same expired wait, which is the caller's decision.
+func (l *loop) awaitDeployments(ctx workflow.Context, components []string, version delivery.VersionState,
+	deadline workflow.Future, providers map[string][]string, readyBefore map[string]bool) (res cycleResult, blocked bool, err error) {
 	if len(components) == 0 {
-		return cycleGreen, nil
+		return cycleGreen, false, nil
+	}
+	waited := make(map[string]bool, len(components))
+	for _, name := range components {
+		waited[name] = true
 	}
 	expired := false
 
 	for {
 		state, err := l.pollDeployments(ctx, components)
 		if err != nil {
-			return noWriteTargetResult(ctx, "deployment poll", err)
+			res, err := noWriteTargetResult(ctx, "deployment poll", err)
+			return res, false, err
 		}
 		if len(state.Failed) > 0 {
 			l.failDeploy(state.Failed, version, nil)
 			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
-			return cycleDeployFailed, nil
+			return cycleDeployFailed, false, nil
 		}
 		if state.Green() {
-			return cycleGreen, nil
+			return cycleGreen, false, nil
 		}
 		if expired {
 			// Out of time. Reported as a failure of the components that have not
@@ -537,27 +578,49 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 			// no cause here because the deadline is not itself an error anyone can
 			// be filed against.
 			//
-			// A component whose binding is waiting on a SIBLING's is left out. It
-			// is held by its provider's state, which has its own work or its own
-			// failure in this same read, and an issue against it sends an agent to
-			// debug a deployment that is healthy and has simply not happened
-			// (allocation-app-1, 2026-10-12: the agent was filed; the very next
-			// pass promoted its api and it came up). When nothing else is pending
-			// the pass ends on cycleDeployWaiting, not on a failure.
-			failed := state.failedAtExpiry()
+			// A component whose binding is waiting on a SIBLING's that is not met
+			// is left out. It is held by its provider's state, which has its own
+			// work or its own failure in this same read, and an issue against it
+			// sends an agent to debug a deployment that is healthy and has simply
+			// not happened (allocation-app-1, 2026-10-12: the agent was filed; the
+			// very next pass promoted its api and it came up). A provider is met
+			// when this pass has seen it Ready, when this wait sees it Ready now,
+			// or when the snapshot says it serves; a waiter whose providers are all
+			// met is its own problem and is filed. Still-pending providers are not
+			// met: at the deadline "still rolling out" and "never will" are the
+			// same fact, which is the premise of having a deadline at all.
+			pending := make(map[string]bool, len(state.Pending))
+			for _, name := range state.Pending {
+				pending[name] = true
+			}
+			met := func(p string) bool {
+				if readyBefore[p] {
+					return true
+				}
+				if waited[p] {
+					return !pending[p]
+				}
+				st, known := version.Find(p)
+				return known && st.ServesConsumers()
+			}
+			failed, blockedOn := state.failedAtExpiry(providers, met)
 			if len(failed) == 0 {
-				workflow.GetLogger(ctx).Info("deploy wait expired with every pending component waiting on its provider; nothing filed",
-					"waiting", state.WaitingOnProvider)
-				return cycleDeployWaiting, nil
+				workflow.GetLogger(ctx).Info("deploy wait expired with every pending component blocked behind an unmet provider; nothing filed",
+					"blocked", blockedOn)
+				return cycleGreen, true, nil
+			}
+			if len(blockedOn) > 0 {
+				workflow.GetLogger(ctx).Info("deploy wait expired; components blocked behind an unmet provider are not filed",
+					"blocked", blockedOn, "filed", failed)
 			}
 			l.failDeploy(failed, version, nil)
 			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
-			return cycleDeployFailed, nil
+			return cycleDeployFailed, false, nil
 		}
 
 		cancelled, hitDeadline := l.awaitWake(ctx, deployPollInterval, deadline)
 		if cancelled {
-			return cycleCancelled, nil
+			return cycleCancelled, false, nil
 		}
 		expired = expired || hitDeadline
 	}

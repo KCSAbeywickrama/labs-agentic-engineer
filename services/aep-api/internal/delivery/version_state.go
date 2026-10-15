@@ -156,6 +156,16 @@ func (c ComponentState) ServesConsumers() bool {
 	return c.State == ComponentStateServing && !c.Undeploy
 }
 
+// Find is one component's state by name.
+func (v VersionState) Find(name string) (ComponentState, bool) {
+	for _, c := range v.Components {
+		if c.Component == name {
+			return c, true
+		}
+	}
+	return ComponentState{}, false
+}
+
 // ServingCount is how many of the version's components are serving, out of how
 // many the design declares.
 func (v VersionState) ServingCount() (serving, total int) {
@@ -236,6 +246,12 @@ type DeployPlan struct {
 	// the providers it is waiting on. Reported for the log and the run's status;
 	// nothing waits on it and nothing is filed against it.
 	Held []ComponentState `json:"held,omitempty"`
+	// Providers is the connection graph the plan was levelled over, consumer ->
+	// providers in the names the run loop addresses OpenChoreo by, restricted to
+	// components the version knows. The readiness wait reads it at the deadline
+	// to tell a consumer blocked behind an unmet provider from one whose own
+	// connection cannot resolve: only the first is excused from being filed.
+	Providers map[string][]string `json:"providers,omitempty"`
 }
 
 // Writes reports whether the plan promotes anything. A plan that writes nothing

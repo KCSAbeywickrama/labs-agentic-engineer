@@ -17,6 +17,7 @@
 package projects
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -34,8 +35,7 @@ import (
 // resolved. Promoting the whole set at once instead publishes the consumer
 // against a provider with no binding: OpenChoreo applies its pods without the
 // provider's address and holds its Ready until the provider exists, which for
-// a web app is a `/api` that answers 502 to anyone who visits during the wait,
-// and for the deploy deadline is a healthy component filed as a failure.
+// a web app is a `/api` that answers 502 to anyone who visits during the wait.
 //
 // PROMOTABLE is the rule that replaced "everything the cycle built". A
 // component is promoted when it is BEHIND and every provider is either
@@ -105,6 +105,10 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 		}
 	}
 
+	// The graph rides the plan: the readiness wait needs it at the deadline to
+	// tell a consumer blocked behind an unmet provider from one whose own
+	// connection cannot resolve.
+	plan.Providers = providers
 	promotable, held := promotableSet(behind, providers, byName)
 	plan.Held = held
 	if len(promotable) == 0 {
@@ -126,7 +130,11 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 			}
 		}
 	}
-	for _, wave := range wavesFromEdges(promotable, ordered) {
+	waves, err := wavesFromEdges(promotable, ordered)
+	if err != nil {
+		return delivery.DeployPlan{}, err
+	}
+	for _, wave := range waves {
 		targets := make([]delivery.DeployTarget, 0, len(wave))
 		for _, name := range wave {
 			targets = append(targets, delivery.DeployTarget{
@@ -171,8 +179,8 @@ func promotableSet(behind []string, providers map[string][]string,
 			for _, p := range providers[name] {
 				// ServesConsumers, not `State == serving`: a component somebody
 				// UNDEPLOYED on purpose owes the version nothing and so reads as
-				// serving, but it has no active release and therefore no address
-				// for this component's start-up config to carry.
+				// serving, but it has no active release and therefore no binding
+				// for this component's connection to resolve against.
 				if byName[p].ServesConsumers() {
 					continue
 				}
@@ -240,7 +248,7 @@ func waitedOn(state delivery.VersionState) []string {
 // Input order is preserved inside a wave so the plan is stable across attempts;
 // a deploy order that reshuffles between retries is needlessly hard to read in a
 // log.
-func wavesFromEdges(components []string, providers map[string][]string) [][]string {
+func wavesFromEdges(components []string, providers map[string][]string) ([][]string, error) {
 	group := stronglyConnected(components, providers)
 
 	// Level the GROUPS: a group's providers are the groups its members' providers
@@ -282,9 +290,18 @@ func wavesFromEdges(components []string, providers map[string][]string) [][]stri
 			}
 		}
 		if len(level) == 0 {
-			// Unreachable: the group graph is acyclic by construction. Stated so a
-			// future edge rule that broke that could not spin here.
-			break
+			// Unreachable: the group graph is acyclic by construction. Loud rather
+			// than a plan missing components — a silent partial plan is the one
+			// failure this stage must never produce — and permanent, because
+			// retrying the same graph levels the same way.
+			var stuck []string
+			for _, name := range components {
+				if !placed[group[name]] {
+					stuck = append(stuck, name)
+				}
+			}
+			return nil, fmt.Errorf("%w: deploy order could not be levelled among %v",
+				delivery.ErrDeployPermanent, stuck)
 		}
 		var wave []string
 		for _, name := range components {
@@ -300,7 +317,7 @@ func wavesFromEdges(components []string, providers map[string][]string) [][]stri
 		}
 		waves = append(waves, wave)
 	}
-	return waves
+	return waves, nil
 }
 
 // stronglyConnected labels each component with its strongly connected group
@@ -317,7 +334,7 @@ func stronglyConnected(components []string, providers map[string][]string) map[s
 	onStack := map[string]bool{}
 	var stack []string
 	group := make(map[string]int, len(components))
-	next, groups := 0, 0
+	next, label := 0, 0
 	var visit func(string)
 	visit = func(v string) {
 		index[v], low[v] = next, next
@@ -342,12 +359,12 @@ func stronglyConnected(components []string, providers map[string][]string) map[s
 			w := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			onStack[w] = false
-			group[w] = groups
+			group[w] = label
 			if w == v {
 				break
 			}
 		}
-		groups++
+		label++
 	}
 	for _, name := range components {
 		if _, seen := index[name]; !seen {

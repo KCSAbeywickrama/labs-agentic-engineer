@@ -156,6 +156,10 @@ The last row is why the waves are an intermediate rather than the end state (see
   `spec.HardConfigEdges` — and the composer and the deploy order follow it at once, because they read
   the same list.
 
+  > Amended 2026-10-15: there is no stamped-config shape to add. Every sibling dependency is a
+  > workload connection and `spec.ConnectionEdges` already orders by all of them (see the amendment
+  > under Decision).
+
 ## Cost accepted: in-flight runs do not survive the upgrade
 
 The stage gained an activity call BEFORE existing ones, which is not a replay-safe edit: a run already

@@ -683,14 +683,6 @@ func componentDeployFrom(name, env string, summary *openchoreo.ReleaseBindingSum
 	return out
 }
 
-// terminalDeployReason reports whether OpenChoreo's Ready condition names a
-// failure that waiting cannot fix.
-//
-// Deliberately a SHORT allow-list rather than "anything that isn't Ready".
-// Being wrong in this direction costs the deadline's patience on a genuinely
-// broken deployment; being wrong the other way condemns a healthy one, which is
-// the bug this replaced. A reason not listed here is treated as "still working
-// on it" and bounded by deployReadyTimeout.
 // readyReasonConnectionsPending is the ReleaseBinding Ready reason OpenChoreo
 // copies up from its ConnectionsResolved condition while a workload connection
 // has no provider binding or no resolved endpoint yet. The binding's resources
@@ -704,6 +696,14 @@ func waitingOnProviderReason(reason string) bool {
 	return strings.EqualFold(strings.TrimSpace(reason), readyReasonConnectionsPending)
 }
 
+// terminalDeployReason reports whether OpenChoreo's Ready condition names a
+// failure that waiting cannot fix.
+//
+// Deliberately a SHORT allow-list rather than "anything that isn't Ready".
+// Being wrong in this direction costs the deadline's patience on a genuinely
+// broken deployment; being wrong the other way condemns a healthy one, which is
+// the bug this replaced. A reason not listed here is treated as "still working
+// on it" and bounded by deployReadyTimeout.
 func terminalDeployReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "renderingfailed", "renderfailed", "invalidrelease", "releasenotfound":

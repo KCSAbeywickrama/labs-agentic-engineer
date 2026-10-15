@@ -67,11 +67,11 @@ func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, error) {
 		// 2026-10-12: the api's build finished 24 seconds after the pass planned
 		// around it). Waiting costs a red cycle its slowest sibling; the red
 		// build's fix issue is minted by the event plane either way.
-		if state.Settled >= state.Expected {
-			if len(state.Red) > 0 {
-				return cycleRed, nil
-			}
+		if state.Green() {
 			return cycleGreen, nil
+		}
+		if state.Settled >= state.Expected {
+			return cycleRed, nil
 		}
 
 		if cancelled, _ := l.awaitWake(ctx, buildPollInterval, nil); cancelled {

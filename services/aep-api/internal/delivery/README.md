@@ -175,9 +175,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the Workload that build posted and writing the binding that pins it, release pin plus trait env
   configs plus workload overrides in ONE object write — then waits for Ready. Components carry
   `autoDeploy: false`, so nothing else promotes a release. It promotes WAVE BY WAVE (providers before
-  the consumers whose start-up config carries their address), holds a component whose provider is not
-  serving, and finishes with one converge for the facts that flow the other way — see the invariants
-  below, ADR-0019 and ADR-0026.
+  the consumers whose workload connects to them), holds a component whose provider is not serving, and
+  finishes with one converge for the facts that flow the other way — see the invariants below,
+  ADR-0019 and ADR-0026.
 - The **run loop** (`run`): one Temporal workflow per SPECIES per milestone —
   `<kind>-<org>-<project>-<milestoneNumber>`, whose id is REUSED after a terminal run because a
   milestone sees sequential runs of one kind across its life. `dev` and `task` are the same cycle loop

@@ -226,7 +226,8 @@ func TestDeploymentWaves(t *testing.T) {
 	}, {
 		// THE OBJECTION, and the answer: A needs B, A is green, B is red. A is
 		// HELD — not promoted, not waited on, not a deploy failure — because a
-		// SPA published against an api with no address is a blank page.
+		// consumer published against a provider with no binding runs without its
+		// address and never resolves its connection.
 		name:     "a green consumer is held when its provider is unbuilt",
 		design:   designWith(wiringWebApp("web", "api"), wiringService("api")),
 		version:  versionOf(wiringBehind("web"), wiringUnbuilt("api")),
@@ -244,10 +245,10 @@ func TestDeploymentWaves(t *testing.T) {
 	}, {
 		// A provider somebody UNDEPLOYED is not a satisfied edge. It reads
 		// as serving — nothing is owed and nothing may promote over the decision
-		// — but it has no active release, so it has no address for the web app's
-		// start-up config to carry. Promoting the consumer anyway is the blank
-		// page, reached through the one state that says "serving" and means
-		// "nothing is running".
+		// — but it has no active release, so there is no binding for the web
+		// app's connection to resolve against. Promoting the consumer anyway is
+		// the unresolvable connection, reached through the one state that says
+		// "serving" and means "nothing is running".
 		name:     "an undeployed provider does not satisfy its consumer",
 		design:   designWith(wiringWebApp("web", "api"), wiringService("api")),
 		version:  versionOf(wiringWithdrawn("api"), wiringBehind("web")),
@@ -391,10 +392,13 @@ func webAppDependingOn(name, dep string) string {
 // it depends on is missing.
 func TestWavesFromEdges_ACycleSharesOneWave(t *testing.T) {
 	t.Parallel()
-	got := wavesFromEdges([]string{"a", "b", "loner"}, map[string][]string{
+	got, err := wavesFromEdges([]string{"a", "b", "loner"}, map[string][]string{
 		"a": {"b"},
 		"b": {"a"},
 	})
+	if err != nil {
+		t.Fatalf("wavesFromEdges: %v", err)
+	}
 	want := [][]string{{"a", "b", "loner"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("waves = %v, want %v — a cycle shares one wave and holds nobody else back", got, want)
@@ -406,11 +410,14 @@ func TestWavesFromEdges_ACycleSharesOneWave(t *testing.T) {
 // the raw edges.
 func TestWavesFromEdges_AConsumerOfACycleFollowsIt(t *testing.T) {
 	t.Parallel()
-	got := wavesFromEdges([]string{"web", "orders", "payments", "db-proxy"}, map[string][]string{
+	got, err := wavesFromEdges([]string{"web", "orders", "payments", "db-proxy"}, map[string][]string{
 		"web":      {"orders"},
 		"orders":   {"payments", "db-proxy"},
 		"payments": {"orders"},
 	})
+	if err != nil {
+		t.Fatalf("wavesFromEdges: %v", err)
+	}
 	want := [][]string{{"db-proxy"}, {"orders", "payments"}, {"web"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("waves = %v, want %v", got, want)
@@ -421,9 +428,30 @@ func TestWavesFromEdges_AConsumerOfACycleFollowsIt(t *testing.T) {
 // provider is serving already or its consumer would have been held.
 func TestWavesFromEdges_IgnoresProvidersOutsideTheSet(t *testing.T) {
 	t.Parallel()
-	got := wavesFromEdges([]string{"web"}, map[string][]string{"web": {"api"}})
+	got, err := wavesFromEdges([]string{"web"}, map[string][]string{"web": {"api"}})
+	if err != nil {
+		t.Fatalf("wavesFromEdges: %v", err)
+	}
 	want := [][]string{{"web"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("waves = %v, want %v", got, want)
+	}
+}
+
+// The connection graph the plan was levelled over rides the plan, in the names
+// the run loop addresses OpenChoreo by. The readiness wait needs it at the
+// deadline to tell a consumer blocked behind an unmet provider from one whose
+// own connection cannot resolve.
+func TestDeploymentWaves_CarriesTheProvidersForTheDeadline(t *testing.T) {
+	t.Parallel()
+	plan, err := deploymentWaves(
+		designWith(wiringAgent("skill-agent", "allocation-api"), wiringService("allocation-api")),
+		versionOf(wiringBehind("skill-agent"), wiringUnbuilt("allocation-api")))
+	if err != nil {
+		t.Fatalf("deploymentWaves: %v", err)
+	}
+	want := map[string][]string{"skill-agent": {"allocation-api"}}
+	if !reflect.DeepEqual(plan.Providers, want) {
+		t.Errorf("Providers = %v, want %v — carried even when the consumer is held", plan.Providers, want)
 	}
 }
