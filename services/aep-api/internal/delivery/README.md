@@ -527,19 +527,15 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the end, which passes an EMPTY commit so it re-asserts wiring without re-cutting a release. A cycle
   among connections shares one wave: OpenChoreo publishes a component's own endpoint URLs before it
   checks its outbound connections, so two components that connect to each other converge once both
-  have a binding. The rule used to cover a web app's sibling services alone, on the premise that a
-  service-to-service call needed no ordering; an agent promoted ahead of its api sat
-  `ConnectionsPending` for the whole deploy deadline and was filed as a deployment failure. ADR-0019,
-  as amended.
+  have a binding. ADR-0019, as amended.
 - **The deploy deadline files what did not come up on its own account.** At expiry a pending
   component whose binding is waiting on a sibling's (`ComponentDeploy.WaitingOnProvider`, read off
   OpenChoreo's `ConnectionsPending`) is not filed: its provider is in the same read with its own work
   or its own failure, and an issue against the consumer sends an agent after a deployment that is
   healthy and has simply not happened. When nothing else is pending the pass ends on no failure and
   the serving gate above decides the version. For the same reason the build stage answers only once
-  EVERY build of the merge has a verdict: returning on the first red handed the reconcile a sibling
-  still building, which classifies as `unbuilt`, and its consumers were promoted against a provider
-  seconds from existing.
+  EVERY build of the merge has a verdict, so the reconcile never plans around a sibling still
+  building, which would classify as `unbuilt`.
 - **The deploy stage GATES on configuration, and the two blockers behave differently** (ADR-0023).
   Before a wave is ordered or promoted, `awaitDeployable` asks the provisioning service whether every
   external dependency holds real values and every platform resource is provisioned. An unconfigured

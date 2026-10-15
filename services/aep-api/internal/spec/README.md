@@ -234,8 +234,7 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
   connection from — and OpenChoreo keeps the consumer's binding `ConnectionsPending` until the
   provider has one, whatever the consumer's type. `projects` orders the deploy waves around it and
   holds a consumer whose provider has no serving release; a cycle shares one wave. Everything else is
-  soft (it flows consumer→provider: an OIDC callback) and orders nothing. ADR-0019, as amended: the
-  rule used to cover a web app's sibling *services* alone.
+  soft (it flows consumer→provider: an OIDC callback) and orders nothing. ADR-0019, as amended.
 - **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
   through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by
   `internal/app/crtcatalog` — the spec domain names the dependencies domain nowhere.
