@@ -313,7 +313,7 @@ func classifyComponentState(projectID, component string, runs []BuildRunInfo,
 		// over the same decision.
 		//
 		// The marker rides along because it does NOT make this component a
-		// satisfied hard provider — it has no active release, so it has no
+		// satisfied provider — it has no active release, so it has no
 		// address (ComponentState.ServesConsumers).
 		st.State, st.Undeploy = delivery.ComponentStateServing, true
 		return st
@@ -499,6 +499,13 @@ type CycleDeployState struct {
 	// perfectly. Counting was enough while the only question was "are we done
 	// yet"; the deadline made "which ones aren't" a question too.
 	Pending []string `json:"pending,omitempty"`
+	// WaitingOnProvider names the pending components whose binding is waiting on
+	// a sibling's (delivery.ComponentDeploy.WaitingOnProvider); a subset of
+	// Pending. The deadline leaves them out of the failure it reports: the
+	// provider's own state has its own work or its own failure in the same read,
+	// and an issue filed against the consumer sends an agent after a deployment
+	// that is healthy and has simply not happened.
+	WaitingOnProvider []string `json:"waitingOnProvider,omitempty"`
 	// Reasons carries the per-component cause for the issue body a failed deploy
 	// mints — OpenChoreo's own condition reason for a FAILED component, and for a
 	// PENDING one whatever is holding it (an unregistered sign-in callback, an
@@ -543,7 +550,26 @@ func classifyCycleDeploys(expected int, states []delivery.ComponentDeploy) Cycle
 			out.Ready++
 		default:
 			out.Pending = append(out.Pending, st.Component)
+			if st.WaitingOnProvider {
+				out.WaitingOnProvider = append(out.WaitingOnProvider, st.Component)
+			}
 			note(st.Component, st.Reason)
+		}
+	}
+	return out
+}
+
+// failedAtExpiry is what the deadline reports as the failure: every pending
+// component except the ones waiting on a provider's binding.
+func (s CycleDeployState) failedAtExpiry() []string {
+	waiting := make(map[string]struct{}, len(s.WaitingOnProvider))
+	for _, name := range s.WaitingOnProvider {
+		waiting[name] = struct{}{}
+	}
+	var out []string
+	for _, name := range s.Pending {
+		if _, ok := waiting[name]; !ok {
+			out = append(out, name)
 		}
 	}
 	return out

@@ -17,6 +17,7 @@
 package run
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -239,6 +240,42 @@ func TestClassifyCycleDeploys_SeparatesFailedFromPending(t *testing.T) {
 	}
 	if len(got.Pending) != 1 || got.Pending[0] != "rolling" {
 		t.Errorf("Pending = %v", got.Pending)
+	}
+}
+
+// A pending component waiting on a SIBLING's binding is named as such, and the
+// deadline leaves it out of what it files: its provider's state has its own work
+// or its own failure in the same read, and an issue against the consumer sends an
+// agent after a deployment that is healthy and has simply not happened.
+func TestClassifyCycleDeploys_NamesTheComponentsWaitingOnAProvider(t *testing.T) {
+	t.Parallel()
+	got := classifyCycleDeploys(3, []delivery.ComponentDeploy{
+		{Component: "api"},
+		{Component: "agent", WaitingOnProvider: true, Reason: "ConnectionsPending"},
+		{Component: "web", Ready: true},
+	})
+	if want := []string{"api", "agent"}; !reflect.DeepEqual(got.Pending, want) {
+		t.Errorf("Pending = %v, want %v — waiting on a provider is still pending", got.Pending, want)
+	}
+	if want := []string{"agent"}; !reflect.DeepEqual(got.WaitingOnProvider, want) {
+		t.Errorf("WaitingOnProvider = %v, want %v", got.WaitingOnProvider, want)
+	}
+	if want := []string{"api"}; !reflect.DeepEqual(got.failedAtExpiry(), want) {
+		t.Errorf("failedAtExpiry() = %v, want %v — only the component waiting on nothing but itself is filed", got.failedAtExpiry(), want)
+	}
+	if got.Green() {
+		t.Error("a component waiting on its provider is not serving; the cycle must not read as green")
+	}
+}
+
+// Nothing to file when everything still pending is waiting on a provider.
+func TestClassifyCycleDeploys_NobodyIsFiledWhenEveryoneWaitsOnAProvider(t *testing.T) {
+	t.Parallel()
+	got := classifyCycleDeploys(1, []delivery.ComponentDeploy{
+		{Component: "agent", WaitingOnProvider: true, Reason: "ConnectionsPending"},
+	})
+	if failed := got.failedAtExpiry(); len(failed) != 0 {
+		t.Errorf("failedAtExpiry() = %v, want nothing", failed)
 	}
 }
 

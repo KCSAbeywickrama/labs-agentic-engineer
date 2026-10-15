@@ -655,6 +655,7 @@ func componentDeployFrom(name, env string, summary *openchoreo.ReleaseBindingSum
 		return out // no binding admitted yet — pending
 	}
 	out.Reason = summary.ReadyReason
+	out.WaitingOnProvider = waitingOnProviderReason(summary.ReadyReason)
 	// The PIN, carried on every read and not only on a write. It is what lets
 	// the supervisor tell a component serving its newest build from one serving
 	// an older release perfectly happily — Ready says only that whatever is
@@ -690,6 +691,19 @@ func componentDeployFrom(name, env string, summary *openchoreo.ReleaseBindingSum
 // broken deployment; being wrong the other way condemns a healthy one, which is
 // the bug this replaced. A reason not listed here is treated as "still working
 // on it" and bounded by deployReadyTimeout.
+// readyReasonConnectionsPending is the ReleaseBinding Ready reason OpenChoreo
+// copies up from its ConnectionsResolved condition while a workload connection
+// has no provider binding or no resolved endpoint yet. The binding's resources
+// are applied regardless — the pods run without the provider's address — and
+// Ready stays False until the provider's binding exists.
+const readyReasonConnectionsPending = "ConnectionsPending"
+
+// waitingOnProviderReason reports whether a Ready reason says the component is
+// waiting on a sibling's binding rather than on anything of its own.
+func waitingOnProviderReason(reason string) bool {
+	return strings.EqualFold(strings.TrimSpace(reason), readyReasonConnectionsPending)
+}
+
 func terminalDeployReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "renderingfailed", "renderfailed", "invalidrelease", "releasenotfound":

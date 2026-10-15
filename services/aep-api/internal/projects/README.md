@@ -168,18 +168,18 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   yet — writing one with no release pinned produces an object OpenChoreo cannot render. The deploy stage's
   own last pass is a converge for the same reason: it finishes wiring that only became knowable once
   everything was up, and re-promoting to do it would re-cut a release OpenChoreo then refuses.
-- **The deploy PLAN is over the version's state, ordered by the design's hard wiring edges**
-  (`wiring_graph.go` over `spec.HardConfigEdges`, ADR-0026). `deploymentWaves` takes what each
-  component should be serving against what it is, promotes only the behind ones whose hard providers
-  are serving or promoted ahead of them, and returns the rest as HELD with the providers each waits
-  on. The edges are read over the whole design: a provider with no serving release is a real
-  unsatisfied edge, not an assumed-satisfied one. The fixpoint is not one pass — a consumer waiting on
-  a provider that is itself held has to fall out too, or it ships against a config its provider could
-  not fill.
-  A provider whose address the platform stamps into a consumer's start-up config deploys first, so the
-  consumer is never published with a config nothing could fill. What flows back from consumer to provider
-  (CORS origins, an OIDC callback) orders nothing and is written by the converge. A cycle among hard edges
-  is `ErrDeployPermanent` — nobody can go first — see
+- **The deploy PLAN is over the version's state, ordered by the design's connections**
+  (`wiring_graph.go` over `spec.ConnectionEdges`, ADR-0026). `deploymentWaves` takes what each
+  component should be serving against what it is, promotes only the behind ones whose providers are
+  serving or promoted ahead of them, and returns the rest as HELD with the providers each waits on.
+  The edges are read over the whole design: a provider with no serving release is a real unsatisfied
+  edge, not an assumed-satisfied one. The fixpoint is not one pass — a consumer waiting on a provider
+  that is itself held has to fall out too, or OpenChoreo holds its binding on a connection nothing in
+  the pass can resolve.
+  A provider a consumer's workload connects to deploys first, so the consumer's connection resolves the
+  first time its binding renders. What flows back from consumer to provider (CORS origins, an OIDC
+  callback) orders nothing and is written by the converge. A cycle among connections shares one wave —
+  OpenChoreo publishes a component's endpoint URLs before it checks its outbound connections — see
   [ADR-0019](../../../../docs/decisions/ADR-0019-deploy-order-follows-the-hard-wiring-edges.md).
 - **A create needs the org's AE Studio serving before the OC project exists** ([ADR-0045](../../../../docs/decisions/ADR-0045-design-work-runs-in-the-organizations-ae-studio.md),
   `SetAEStudioReady`, served by the `aestudiotools` adapter's endpoint resolve): absent answers 409

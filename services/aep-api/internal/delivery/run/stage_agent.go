@@ -84,8 +84,14 @@ const (
 	// Running within the startup grace, so the watcher closed the cycle
 	// startup_failed (and suspended its Job). Not cycleAgentDead: nothing ran,
 	// one dispatch was made, and the remedy is room in the cluster, not the
-	// agent. Appended last so the values before it keep their numbers.
+	// agent. Appended after the values before it so they keep their numbers.
 	cycleAgentStartFailed
+	// cycleDeployWaiting — a deploy wait expired with every pending component
+	// waiting on its provider's binding. Stage-internal: reconcileVersion ends
+	// the pass on it and answers cycleGreen, because nothing this pass wrote
+	// failed and the boundary's serving gate decides the version (ADR-0026). It
+	// never reaches the boundary.
+	cycleDeployWaiting
 )
 
 // landing is how one dispatch attempt ended.

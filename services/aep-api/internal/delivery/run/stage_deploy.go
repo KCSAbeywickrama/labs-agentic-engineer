@@ -35,7 +35,7 @@ import (
 //
 // It takes the version's STATE — every component in the design, classified as
 // serving, behind, converging, held or unbuilt — and writes only the behind ones
-// whose hard providers are met. What it replaced promoted the components the
+// whose providers are met. What it replaced promoted the components the
 // cycle's merge happened to touch, which made "what is serving" a function of
 // which files a fix edited: a component whose build went green in a cycle a
 // sibling failed was promoted by nothing, ever, because its files had stopped
@@ -50,14 +50,16 @@ import (
 // providers are serving or promoted ahead of them in the same pass.
 //
 // WAVE BY WAVE, then one CONVERGE — because the wiring between components splits
-// into two kinds that want opposite treatment (spec.HardConfigEdges).
+// into two kinds that want opposite treatment (spec.ConnectionEdges).
 //
-// A HARD edge is an address the platform must have before the consumer can
-// serve a useful first byte: a web app's nginx reverse-proxies `/api` to a
-// sibling Service URL injected as pod env. That address exists only once the
-// provider has a rendered binding, so a SPA promoted alongside its API answers
-// `/api` with 502 until the Service exists. Hard edges therefore ORDER the
-// deploy: each wave waits for the last to serve.
+// A CONNECTION edge is a sibling the consumer's workload connects to. OpenChoreo
+// resolves the connection only once the provider has a binding with an endpoint;
+// until then it applies the consumer's pods without the provider's address and
+// holds the consumer's Ready as ConnectionsPending — a web app promoted
+// alongside its api answers `/api` with 502, an agent cannot reach its api at
+// all. Connections therefore ORDER the deploy: each wave waits for the last to
+// serve, and a consumer whose provider has no serving release is held. Two
+// components that connect to each other share a wave and converge.
 //
 // A SOFT edge runs the other way — a provider learning about its consumer. An
 // OIDC resource wants the SPA's callback URL registered. That is not needed
@@ -86,8 +88,9 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 
 	plan, err := l.planDeployWaves(ctx, version)
 	if err != nil {
-		// An unsatisfiable ORDER is a deployment failure like any other, and has to
-		// arrive as one. Returned raw it would fail the workflow outright: the
+		// A PERMANENT plan failure (a component gone from the design, OpenChoreo
+		// without it) is a deployment failure like any other, and has to arrive
+		// as one. Returned raw it would fail the workflow outright: the
 		// boundary returns on a cycle error before it can mint the fix work or
 		// settle the row, leaving a non-terminal run that blocks every later build
 		// on the project — the same wedge this stage exists to stop producing.
@@ -103,8 +106,8 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 		// all converging can reach a permanent plan failure with an empty behind
 		// set — and a failure attributed to nobody mints no issue, which settles
 		// the run on the deploy budget with no named component and nothing to work.
-		// That is exactly the wedge the paragraph above describes. An unsatisfiable
-		// order is nobody's individual fault either way (see reasonForAll).
+		// That is exactly the wedge the paragraph above describes. A failure of the
+		// plan is nobody's individual fault either way (see reasonForAll).
 		failed := behindNames(version)
 		if len(failed) == 0 {
 			failed = notServingNames(version)
@@ -161,14 +164,14 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 		}
 		res, err := l.awaitDeployments(ctx, delivery.TargetNames(wave), version, deadline)
 		if err != nil || res != cycleGreen {
-			return res, err
+			return passResult(res), err
 		}
 	}
 	// Everything this pass wrote, plus what was already converging: a component
 	// promoted by an EARLIER pass may still be rolling out, and the version does
 	// not serve until it does.
 	if res, err := l.awaitDeployments(ctx, plan.Waited, version, deadline); err != nil || res != cycleGreen {
-		return res, err
+		return passResult(res), err
 	}
 
 	if !plan.Writes() {
@@ -186,7 +189,20 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	if res, err := l.promote(ctx, delivery.ConvergeTargets(converge)); err != nil || res != cycleGreen {
 		return res, err
 	}
-	return l.awaitDeployments(ctx, converge, version, deadline)
+	res, err := l.awaitDeployments(ctx, converge, version, deadline)
+	return passResult(res), err
+}
+
+// passResult is what a wait's ending means for the PASS. A wait that expired
+// with every pending component waiting on its provider's binding ends the pass
+// — no later wave is promoted into the same wait — but fails nothing this pass
+// wrote, so the pass answers green and the boundary's serving gate (ADR-0026)
+// decides whether the version is delivered. Every other ending is its own.
+func passResult(res cycleResult) cycleResult {
+	if res == cycleDeployWaiting {
+		return cycleGreen
+	}
+	return res
 }
 
 // behindNames is every component the version state says is behind — the first
@@ -520,7 +536,21 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 			// the only place that fact can still reach the issue — failDeploy takes
 			// no cause here because the deadline is not itself an error anyone can
 			// be filed against.
-			l.failDeploy(state.Pending, version, nil)
+			//
+			// A component whose binding is waiting on a SIBLING's is left out. It
+			// is held by its provider's state, which has its own work or its own
+			// failure in this same read, and an issue against it sends an agent to
+			// debug a deployment that is healthy and has simply not happened
+			// (allocation-app-1, 2026-10-12: the agent was filed; the very next
+			// pass promoted its api and it came up). When nothing else is pending
+			// the pass ends on cycleDeployWaiting, not on a failure.
+			failed := state.failedAtExpiry()
+			if len(failed) == 0 {
+				workflow.GetLogger(ctx).Info("deploy wait expired with every pending component waiting on its provider; nothing filed",
+					"waiting", state.WaitingOnProvider)
+				return cycleDeployWaiting, nil
+			}
+			l.failDeploy(failed, version, nil)
 			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
 			return cycleDeployFailed, nil
 		}
@@ -604,9 +634,9 @@ func isPermanentDeploy(err error) bool {
 
 // reasonForAll attributes one stage-wide failure to every component in it.
 //
-// An unsatisfiable order is nobody's individual fault — the components are stuck
-// on each other — so each fix issue carries the same cause, which names the whole
-// pass rather than the component it happens to be filed against.
+// A failure of the plan is nobody's individual fault, so each fix issue carries
+// the same cause, which names the whole pass rather than the component it
+// happens to be filed against.
 func reasonForAll(components []string, err error) map[string]string {
 	out := make(map[string]string, len(components))
 	for _, name := range components {

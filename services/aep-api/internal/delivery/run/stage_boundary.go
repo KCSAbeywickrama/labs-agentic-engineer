@@ -610,7 +610,7 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context, ends bookends) (settled b
 // other components are built, and promoting them is what keeps "what is serving"
 // a function of what has been built rather than of which files a fix touched.
 // What makes that safe is the promotable rule, not this call site: the reconcile
-// writes only components whose hard providers are serving or promoted ahead of
+// writes only components whose providers are serving or promoted ahead of
 // them.
 //
 // A cycle can therefore be red AND have a deploy failure. Both mint their work —

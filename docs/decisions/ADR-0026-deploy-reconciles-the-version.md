@@ -110,16 +110,30 @@ replaces settled such a version succeeded and filed a validation task against so
 running. A gate that should never fire is worth having when the thing it catches is
 indistinguishable from success.
 
+> **Amended 2026-10-15** (allocation-app-1: an agent filed as a deployment failure while its api was
+> 24 seconds from being built).
+>
+> - `awaitBuilds` answers only once EVERY build of the fan-out has a verdict. Returning on the first
+>   red handed the reconcile a sibling still building, which classifies as `unbuilt` — the same as
+>   never written — so its consumers were promoted against a provider with no binding.
+> - The ordering edges are the workload connections, every component type alike
+>   ([ADR-0019](ADR-0019-deploy-order-follows-the-hard-wiring-edges.md) as amended), so such a
+>   consumer is `held`, not promoted.
+> - At the deploy deadline a pending component whose binding is waiting on a sibling's
+>   (OpenChoreo's `ConnectionsPending`, carried as `ComponentDeploy.WaitingOnProvider`) is not filed:
+>   its provider's state has its own work or its own failure in the same read. When nothing else is
+>   pending the pass ends on no failure, and the serving gate above decides the version.
+
 ## Shape
 
 ```text
 agent stage → merge → awaitBuilds(this SHA, PR diff)     unchanged: the CYCLE verdict
-                        any red → build verdict red      (fix issue minted, as before)
+                        every build terminal; any red → build verdict red
                     ↓
                     ReadVersionState                     every design component, classified
                     ↓
                     reconcileVersion                     runs on EITHER build verdict
-                      plan   := behind ∩ promotable, levelled by hard edges
+                      plan   := behind ∩ promotable, levelled by connection edges
                       write  := wave by wave, each at its OWN commit
                       wait   := promoted ∪ converging, ONE deadline from the first write
                       converge soft facts over waited ∪ already-serving, no promotion
