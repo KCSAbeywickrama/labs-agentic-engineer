@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { OpenApiView } from "./OpenApiView.js";
 
@@ -109,5 +109,41 @@ describe("OpenApiView — protection on the operation row", () => {
     render(<OpenApiView spec={SPEC} roles={{ "reports:read": ["Approver"] }} />);
     expect(screen.getByText("claims:read")).toBeInTheDocument();
     expect(screen.queryByText(/Approver/)).not.toBeInTheDocument();
+  });
+});
+
+// Long enough that a narrow pane cuts it in the row.
+const LONG_PATH = "/claims/{claimId}/receipts/{receiptId}";
+const SUMMARY = "A claim's receipt";
+
+function oneOperation(path: string, op: Record<string, unknown>): string {
+  return JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "Expense API", version: "1.0.0" },
+    paths: { [path]: { get: op } },
+  });
+}
+
+// The row cuts the path and summary to fit one line, so both stay reachable
+// in full: on hover, and in the body once expanded.
+describe("OpenApiView — the path and summary the row cuts", () => {
+  it("carries both in full on hover", () => {
+    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: SUMMARY })} />);
+    expect(screen.getByTitle(LONG_PATH)).toBeInTheDocument();
+    expect(screen.getByTitle(SUMMARY)).toBeInTheDocument();
+  });
+
+  it("shows both in full in the expanded body", () => {
+    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: SUMMARY })} />);
+    fireEvent.click(screen.getByRole("button", { name: /receipts/ }));
+    const body = within(screen.getByRole("region"));
+    expect(body.getByText(LONG_PATH)).toBeInTheDocument();
+    expect(body.getByText(SUMMARY)).toBeInTheDocument();
+  });
+
+  it("does not repeat the path as the summary when the spec gives none", () => {
+    render(<OpenApiView spec={oneOperation("/health", {})} />);
+    fireEvent.click(screen.getByRole("button", { name: /health/ }));
+    expect(within(screen.getByRole("region")).getAllByText("/health")).toHaveLength(1);
   });
 });
