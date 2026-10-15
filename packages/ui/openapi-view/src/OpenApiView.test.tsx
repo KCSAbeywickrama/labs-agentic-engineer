@@ -113,12 +113,13 @@ describe("OpenApiView — protection on the operation row", () => {
 });
 
 // Long enough that a narrow pane cuts it in the row.
-const LONG_PATH = "/opportunities/{opportunityId}/line-items";
+const LONG_PATH = "/claims/{claimId}/receipts/{receiptId}";
+const SUMMARY = "A claim's receipt";
 
 function oneOperation(path: string, op: Record<string, unknown>): string {
   return JSON.stringify({
     openapi: "3.0.3",
-    info: { title: "Allocation API", version: "1.0.0" },
+    info: { title: "Expense API", version: "1.0.0" },
     paths: { [path]: { get: op } },
   });
 }
@@ -127,17 +128,17 @@ function oneOperation(path: string, op: Record<string, unknown>): string {
 // in full: on hover, and in the body once expanded.
 describe("OpenApiView — the path and summary the row cuts", () => {
   it("carries both in full on hover", () => {
-    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: "An opportunity's line items" })} />);
+    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: SUMMARY })} />);
     expect(screen.getByTitle(LONG_PATH)).toBeInTheDocument();
-    expect(screen.getByTitle("An opportunity's line items")).toBeInTheDocument();
+    expect(screen.getByTitle(SUMMARY)).toBeInTheDocument();
   });
 
   it("shows both in full in the expanded body", () => {
-    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: "An opportunity's line items" })} />);
-    fireEvent.click(screen.getByRole("button", { name: /line-items/ }));
+    render(<OpenApiView spec={oneOperation(LONG_PATH, { summary: SUMMARY })} />);
+    fireEvent.click(screen.getByRole("button", { name: /receipts/ }));
     const body = within(screen.getByRole("region"));
     expect(body.getByText(LONG_PATH)).toBeInTheDocument();
-    expect(body.getByText("An opportunity's line items")).toBeInTheDocument();
+    expect(body.getByText(SUMMARY)).toBeInTheDocument();
   });
 
   it("does not repeat the path as the summary when the spec gives none", () => {
