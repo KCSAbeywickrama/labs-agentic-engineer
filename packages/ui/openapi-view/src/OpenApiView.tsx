@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -87,6 +87,11 @@ function statusColor(code: string): ChipColor {
 
 // Shared monospace styling for paths / field names.
 const mono = { fontFamily: "monospace", fontSize: "0.8125rem" } as const;
+
+// MUI's summary content slot keeps `min-width: auto`, so a row wider than the
+// pane overflows it, and ButtonBase's `justify-content: center` then splits the
+// overflow across both edges, clipping the row's first item on the left.
+const summaryContentShrinks = { "& .MuiAccordionSummary-content": { minWidth: 0 } } as const;
 
 // Tiny uppercase red "required" marker (matches the prototype's .param-req) —
 // deliberately not a Chip, so it reads as a subtle annotation next to the name.
@@ -222,6 +227,33 @@ function MethodBadge({ method }: { method: Method }) {
     >
       {method}
     </Box>
+  );
+}
+
+// The row's path, cut from the START: sibling paths share a prefix and differ
+// at the tail, so the tail is what must stay visible. `rtl` moves the overflow
+// and ellipsis to the left; the ltr <bdi> keeps "/" and "{}" in source order.
+function RowPath({ path }: { path: string }) {
+  return (
+    <Typography component="code" title={path} noWrap sx={{ ...mono, minWidth: 0, direction: "rtl" }}>
+      <bdi dir="ltr">{path}</bdi>
+    </Typography>
+  );
+}
+
+// The full path, wrapping before each "/" so every continuation line reads as
+// a segment. <wbr> adds no characters, so a copied path is exact; `anywhere`
+// breaks a single segment that is still too long for the line.
+function WrappedPath({ path }: { path: string }) {
+  return (
+    <Typography component="code" sx={{ ...mono, display: "block", overflowWrap: "anywhere" }}>
+      {path.split(/(?=\/)/).map((segment, i) => (
+        <Fragment key={i}>
+          {i > 0 && <wbr />}
+          {segment}
+        </Fragment>
+      ))}
+    </Typography>
   );
 }
 
@@ -384,7 +416,7 @@ function ResponseRow({ code, description, schema, schemaName, example }: Respons
   const hasContent = !!(schema || example !== undefined);
   return (
     <Accordion disableGutters elevation={0} sx={{ "&:before": { display: "none" } }}>
-      <AccordionSummary expandIcon={<ChevronDown size={16} />}>
+      <AccordionSummary expandIcon={<ChevronDown size={16} />} sx={summaryContentShrinks}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, flex: 1 }}>
           <Chip label={code} size="small" color={statusColor(code)} />
           <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
@@ -420,28 +452,29 @@ function OperationRow({ op, roles }: { op: Operation; roles: ScopeRoles | undefi
   const grants = grantLine(op.protection, roles);
   return (
     <Accordion disableGutters sx={{ "&:before": { display: "none" } }}>
-      <AccordionSummary expandIcon={<ChevronDown size={18} />}>
+      <AccordionSummary expandIcon={<ChevronDown size={18} />} sx={summaryContentShrinks}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0, flex: 1 }}>
           <MethodBadge method={op.method} />
-          <Typography component="code" sx={mono}>
-            {op.path}
-          </Typography>
+          <RowPath path={op.path} />
+          {/* Gives way first (flex-basis 0) but keeps a few words; the full
+              summary is in `title` and under the path in the body. */}
           <Typography
             variant="body2"
             color="text.secondary"
-            sx={{ flex: 1, minWidth: 0 }}
+            title={op.name}
+            sx={{ flex: 1, minWidth: 100 }}
             noWrap
           >
             {op.name}
           </Typography>
           <ProtectionTag protection={op.protection} />
           {grants && (
-            // `title` carries the full line, since the row truncates it.
+            // Shrinks alongside the path; `title` carries the full line.
             <Typography
               variant="caption"
               color="text.secondary"
               title={grants}
-              sx={{ maxWidth: 260, flexShrink: 0 }}
+              sx={{ maxWidth: 260, minWidth: 0 }}
               noWrap
             >
               {grants}
@@ -450,6 +483,15 @@ function OperationRow({ op, roles }: { op: Operation; roles: ScopeRoles | undefi
         </Box>
       </AccordionSummary>
       <AccordionDetails>
+        <Box sx={{ mb: 2 }}>
+          <WrappedPath path={op.path} />
+          {/* Without a summary or operationId the row's label is the path itself. */}
+          {op.name !== op.path && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {op.name}
+            </Typography>
+          )}
+        </Box>
         {op.summary && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {op.summary}
@@ -518,7 +560,7 @@ function SchemasSection({ schemas }: { schemas: Record<string, Schema> }) {
           const schema = schemas[name]!;
           return (
             <Accordion key={name} disableGutters sx={{ "&:before": { display: "none" } }}>
-              <AccordionSummary expandIcon={<ChevronDown size={18} />}>
+              <AccordionSummary expandIcon={<ChevronDown size={18} />} sx={summaryContentShrinks}>
                 <Box
                   sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0, flex: 1 }}
                 >
