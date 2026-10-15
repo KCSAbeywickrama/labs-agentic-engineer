@@ -22,6 +22,7 @@
     "@aep/contracts": "workspace:*",
     "@aep/progress-view": "workspace:*",
     "@aep/ui-acceptance-view": "workspace:*",
+    "@aep/ui-agent-view": "workspace:*",
     "@aep/ui-cell-diagram-view": "workspace:*",
     "@aep/ui-design-view": "workspace:*",
     "@aep/ui-openapi-view": "workspace:*",

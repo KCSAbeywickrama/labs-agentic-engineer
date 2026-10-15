@@ -17,6 +17,7 @@
  */
 
 import type { ReviewComment } from "@aep/agent-stream";
+import { AgentView } from "@aep/ui-agent-view";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { PrototypeEntry } from "../../prototype/components/PrototypeEntry";
 import type { DesignItem } from "../model/designFiles";
@@ -33,8 +34,8 @@ import { RolesView, SecurityView } from "./viewers/RecordViews";
 // One of the design's files, open: its title line (Checked and 💬) over the
 // console's own renderer for that kind of file, unchanged (D13): the cell
 // diagram, DesignView and OpenApiView, roles then how they are enforced, the
-// documents as written, the prototype's entry to its full-screen review, and
-// the acceptance tests as a plain list.
+// documents as written, an agent in AgentView's tabs, the prototype's entry to
+// its full-screen review, and the acceptance tests as a plain list.
 
 function SubHead({ children }: { children: string }) {
   return (
@@ -75,6 +76,8 @@ function Body({
       );
     case "contract":
       return <ContractArtifact source={body.source} />;
+    case "agent":
+      return <AgentView spec={body.afm} renderMarkdown={(markdown) => <DocumentView markdown={markdown} />} />;
     case "prototype": {
       const prototype = card.prototypes.get(body.component);
       return prototype ? <PrototypeEntry prototype={prototype} primary={primary} onReview={() => onReview(body.component)} /> : null;

@@ -210,6 +210,39 @@ describe("the rail", () => {
   });
 });
 
+describe("an agent's file", () => {
+  it("reads in Instructions, Tools and Configuration tabs, not as its raw frontmatter", async () => {
+    const dir = "specs/design/components/claims-assistant/";
+    seed({
+      ...FILES,
+      [`${dir}design.json`]: JSON.stringify({ name: "claims-assistant", type: "ai-agent", stories: ["F1.1"] }),
+      [`${dir}agent.afm.md`]: [
+        "---",
+        'spec_version: "0.4.0"',
+        'name: "claims-assistant"',
+        "model:",
+        '  provider: "anthropic"',
+        "x-aep:",
+        "  tools:",
+        "    openapi:",
+        '      - component: "expense-api"',
+        "        allow: [listClaims]",
+        "---",
+        "",
+        "# Role",
+        "Answers questions about a claim.",
+        "",
+      ].join("\n"),
+    });
+    renderCard("?art=agent-claims-assistant");
+    expect(await screen.findByRole("tab", { name: "Instructions" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Tools/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Configuration" })).toBeInTheDocument();
+    expect(screen.getByText("Answers questions about a claim.")).toBeInTheDocument();
+    expect(screen.queryByText(/spec_version/)).toBeNull();
+  });
+});
+
 describe("Checked and comments on a file's title line", () => {
   it("ticks Checked at the file's hash, and shows it unticked once the file changes", async () => {
     renderCard("?art=decisions");

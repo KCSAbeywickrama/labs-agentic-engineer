@@ -58,6 +58,9 @@ importers:
       '@aep/ui-acceptance-view':
         specifier: workspace:*
         version: link:../../packages/ui/acceptance-view
+      '@aep/ui-agent-view':
+        specifier: workspace:*
+        version: link:../../packages/ui/agent-view
       '@aep/ui-cell-diagram-view':
         specifier: workspace:*
         version: link:../../packages/ui/cell-diagram-view
