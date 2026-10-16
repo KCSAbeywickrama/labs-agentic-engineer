@@ -46,8 +46,9 @@ in-cluster — there is no host-container path any more. `make dev-update`
 rebuilds and rolls just the images whose sources changed.
 
 After a host restart the cluster comes back by itself, but `host.k3d.internal`
-does not, and in-cluster hostname resolution fails in ways that surface as
-unrelated 401s. Diagnose and repair with
+does not: in-cluster hostname resolution fails in ways that surface as
+unrelated 401s, and the next fresh image pull fails on the node. Diagnose and
+repair with
 `deployments/scripts/restore-host-k3d-internal.sh check|apply`; the
 `deployments/` README's "After a host restart" section explains why, and covers
 the OpenBao secrets that are also lost on restart.

@@ -334,6 +334,25 @@ if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
     # recreates the load balancer anyway.
     CLUSTER_CONFIG="$(mktemp)"
     curl -fsSL "${RAW}/install/k3d/single-cluster/config.yaml" -o "$CLUSTER_CONFIG"
+    # The guide's registries block mirrors host.k3d.internal:10082 to itself;
+    # its purpose there is to mark the registry as plain HTTP. Its side effect
+    # is that containerd resolves host.k3d.internal on every image pull, from a
+    # /etc/hosts line k3d injects at create and Docker drops at the node's next
+    # restart (restore-host-k3d-internal.sh has the whole story). The load
+    # balancer's container name is Docker's own DNS, rebuilt on every start,
+    # and it already forwards 10082 to the node — so the mirror points there
+    # and image pulls never depend on the injected name. Exactly one such
+    # endpoint line is expected: a different shape means the upstream config
+    # moved and this step must be looked at, not silently skipped.
+    REGISTRY_MIRROR="http://k3d-${CLUSTER_NAME}-serverlb:10082"
+    if [ "$(grep -c '^ *- http://host\.k3d\.internal:10082$' "$CLUSTER_CONFIG" || true)" != "1" ]; then
+        echo "❌ ${RAW}/install/k3d/single-cluster/config.yaml does not carry the one" >&2
+        echo "   'host.k3d.internal:10082' mirror endpoint this step rewrites." >&2
+        exit 1
+    fi
+    sed "s#^\( *- \)http://host\.k3d\.internal:10082\$#\1${REGISTRY_MIRROR}#" "$CLUSTER_CONFIG" \
+        > "${CLUSTER_CONFIG}.new" && mv "${CLUSTER_CONFIG}.new" "$CLUSTER_CONFIG"
+    echo "   + registry mirror → ${REGISTRY_MIRROR} (image pulls skip host.k3d.internal)"
     if [ "$WITH_TLS" = "1" ]; then
         python3 - "$CLUSTER_CONFIG" <<'PY'
 import sys, yaml
