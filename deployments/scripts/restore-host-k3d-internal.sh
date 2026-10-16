@@ -42,8 +42,8 @@
 # each node's /etc/hosts and the `coredns` ConfigMap's NodeHosts key. Neither
 # owner knows about k3d's line. Docker rebuilds a container's /etc/hosts on
 # every start, and k3s-supervisor regenerates NodeHosts from node addresses
-# every time the node container restarts. `k3d cluster start` does not put
-# them back; only creating a cluster does, and a colima stop/start, a host
+# every time the node container restarts. k3d puts them back only when it
+# drives the start itself (`k3d cluster start`); a colima stop/start, a host
 # sleep or a Docker restart brings the node back under Docker's
 # `unless-stopped` policy, which k3d never sees. A cluster that has been
 # through one keeps every rewrite and loses the one name they all point at.
@@ -95,7 +95,7 @@ LB_ENDPOINT="http://k3d-${CLUSTER_NAME}-serverlb:10082"
 NODE_REGISTRIES="/etc/rancher/k3s/registries.yaml"
 # Where k3s renders registries.yaml for containerd at each start. Read, to tell
 # which route pulls take right now; never written (k3s owns it).
-NODE_HOSTS_TOML="/var/lib/rancher/k3s/agent/etc/containerd/certs.d/${REGISTRY_HOST}/hosts.toml"
+CONTAINERD_HOSTS_TOML="/var/lib/rancher/k3s/agent/etc/containerd/certs.d/${REGISTRY_HOST}/hosts.toml"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }
 fail() { echo "❌ $1" >&2; [ $# -gt 1 ] && echo "   $2" >&2; exit 1; }
@@ -141,7 +141,7 @@ node_mirror() {
 # the injected name. A missing hosts.toml is read as "yes": the conservative
 # answer, and the one older k3s layouts deserve.
 node_pulls_need_name() {
-    ! docker exec "$1" grep -qF -- "${LB_ENDPOINT}" "$NODE_HOSTS_TOML" 2>/dev/null
+    ! docker exec "$1" grep -qF -- "${LB_ENDPOINT}" "$CONTAINERD_HOSTS_TOML" 2>/dev/null
 }
 node_hosts_has_name() {
     docker exec "$1" grep -qE \
@@ -217,15 +217,25 @@ else
     echo "✅ host.k3d.internal answers ${HOST_GW} in CoreDNS"
 fi
 
+rc=0
 for node in $NODES; do
     case "$(node_mirror "$node")" in
         lb) echo "⏭️  ${node}: registry mirror already ${LB_ENDPOINT}" ;;
         self)
             docker exec "$node" sed -i \
                 "s#^\( *- \)http://${REGISTRY_HOST//./\\.}\$#\1${LB_ENDPOINT}#" "$NODE_REGISTRIES"
-            echo "✅ ${node}: registry mirror → ${LB_ENDPOINT} (containerd takes it up when k3s next starts)"
+            # The detector matches a substring and the sed a whole line, so the
+            # file is read back rather than the edit trusted.
+            if [ "$(node_mirror "$node")" = lb ]; then
+                echo "✅ ${node}: registry mirror → ${LB_ENDPOINT} (containerd takes it up when k3s next starts)"
+            else
+                echo "❌ ${node}: ${NODE_REGISTRIES} still routes ${REGISTRY_HOST} to itself; its endpoint" >&2
+                echo "   line is not the plain '- http://${REGISTRY_HOST}' this script rewrites. Edit it by hand." >&2
+                rc=1
+            fi
             ;;
-        *)  echo "⚠️  ${node}: ${NODE_REGISTRIES} has a shape this script does not know; left alone" >&2 ;;
+        *)  echo "⚠️  ${node}: ${NODE_REGISTRIES} has a shape this script does not know; left alone" >&2
+            rc=1 ;;
     esac
     if node_pulls_need_name "$node" && ! node_hosts_has_name "$node"; then
         docker exec "$node" sh -c "echo '${HOST_GW} host.k3d.internal' >> /etc/hosts"
@@ -240,3 +250,4 @@ echo "     kubectl -n kube-system run dnscheck --rm -i --restart=Never \\"
 echo "       --image=busybox:1.36 --command -- nslookup thunder.openchoreo.${AE_DOMAIN:-localhost}."
 echo "   Verify a node's route to the registry (expects {}):"
 echo "     docker exec ${NODES%%$'\n'*} wget -q -O- ${LB_ENDPOINT}/v2/"
+exit $rc

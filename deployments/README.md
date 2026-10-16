@@ -349,8 +349,10 @@ answers with that name, and the images OpenChoreo builds are addressed as
 pull. k3d defines it at cluster CREATE, in two places neither owner knows
 about: a line in each node's `/etc/hosts`, which Docker rebuilds on every
 container start, and the `coredns` ConfigMap's `NodeHosts` key, which
-`k3s-supervisor` regenerates from node addresses on every node start.
-`k3d cluster start` does not re-inject either; only a create does.
+`k3s-supervisor` regenerates from node addresses on every node start. k3d
+re-injects both only when it drives the start itself; a colima stop/start, a
+host sleep or a Docker restart brings the node back under Docker's
+`unless-stopped` policy, which k3d never sees.
 
 Nothing reports this directly. Pods get NXDOMAIN for hostnames that resolve
 fine from the host, and it surfaces far away: `openchoreo-api` cannot fetch

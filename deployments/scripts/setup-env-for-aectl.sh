@@ -348,6 +348,7 @@ if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
     if [ "$(grep -c '^ *- http://host\.k3d\.internal:10082$' "$CLUSTER_CONFIG" || true)" != "1" ]; then
         echo "❌ ${RAW}/install/k3d/single-cluster/config.yaml does not carry the one" >&2
         echo "   'host.k3d.internal:10082' mirror endpoint this step rewrites." >&2
+        rm -f "$CLUSTER_CONFIG"
         exit 1
     fi
     sed "s#^\( *- \)http://host\.k3d\.internal:10082\$#\1${REGISTRY_MIRROR}#" "$CLUSTER_CONFIG" \
