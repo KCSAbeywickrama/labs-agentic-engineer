@@ -9,5 +9,6 @@ production code ([code-rules.md](code-rules.md)).
 - Test an HTTP service through an `http:Client` against the running service — assert its public contract, not internals.
 - Override `configurable` values for tests in `tests/Config.toml` (not the package's `Config.toml`, and never read either — see [project-structure.md](project-structure.md)).
 - To mock a client or connector, wrap its construction in a small init function so `@test:Mock` can replace it.
+- A GraphQL client gets one binding test against a `graphql:Service` stub; its shape is in [graphql.md](graphql.md).
 - Use `dependsOn` only when test ordering is the behavior under test — not to sequence otherwise-independent tests.
 - Run them with `bal test`; a test run compiles the package, so fix compilation errors the same way a `bal build` failure is fixed.

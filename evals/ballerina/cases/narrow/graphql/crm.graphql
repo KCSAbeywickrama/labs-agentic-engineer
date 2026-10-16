@@ -1,0 +1,25 @@
+"""
+Customer records of the organisation. Read only.
+"""
+type Query {
+  """One page of customers ordered by name, optionally filtered by status."""
+  customers(filter: CustomerFilter, limit: Int!, offset: Int!): [Customer!]!
+  """One customer by id, or null when there is none."""
+  customer(id: ID!): Customer
+}
+
+input CustomerFilter {
+  status: CustomerStatus
+}
+
+enum CustomerStatus {
+  ACTIVE
+  PROSPECT
+}
+
+type Customer {
+  id: ID!
+  name: String!
+  status: CustomerStatus!
+  region: String
+}
