@@ -3,9 +3,10 @@
 Writing a client for a dependency whose contract is a GraphQL document
 (`resource.contract.type: graphql`). Write the client by hand: each operation is a
 document string, and `ballerina/graphql`'s `graphql:Client` binds the response to a
-record you declare. Do not reach for `bal graphql` client generation: its output does
-not compile on the current distribution. The code follows [code-rules.md](code-rules.md);
-the module lands where [project-structure.md](project-structure.md) says.
+record you declare. Do not reach for `bal graphql` client generation: on 2201.13.1
+(tool 0.14.0) its output does not compile. The code follows
+[code-rules.md](code-rules.md); the module lands where
+[project-structure.md](project-structure.md) says.
 
 ## The target record is the response envelope, not the payload
 
@@ -13,13 +14,18 @@ A GraphQL server answers one JSON object: `{"data": …, "errors": […]?, "exte
 `query()`, `mutate()` and `subscribe()` bind that WHOLE object to the target type (the
 module's spec, §2.5.3: a subtype of `graphql:GenericResponseWithErrors|record {}`). The
 fields the document selects sit inside `data`. A record shaped like the payload,
-`record {| Customer[] customers; |}`, never binds: `data` cannot be added to a closed
-record and `customers` is missing at the top level, so every call fails with a
+`record {| Customer[] customers; |}`, never binds. The closed record has no `data` field
+and the response has no top-level `customers`, so every call fails with a
 `graphql:PayloadBindingError` and the service answers 500. The build cannot see this:
 the wrong shape compiles.
 
 ```ballerina
 import ballerina/graphql;
+
+configurable string crmUrl = ?;
+configurable string crmTokenUrl = ?;
+configurable string crmClientId = ?;
+configurable string crmClientSecret = ?;
 
 type Customer record {| string id; string name; string status; string? region; |};
 
@@ -30,13 +36,20 @@ type CustomersResponse record {|
     record {| Customer[] customers; |} data;
 |};
 
-final graphql:Client crm = check new (crmUrl, auth = {tokenUrl, clientId, clientSecret});
+const string LIST_DOC = string `query ($limit: Int!, $offset: Int!) {
+    customers(limit: $limit, offset: $offset) { id name status region }
+}`;
+
+// Construction in its own function: an OAuth2-configured client fetches its first
+// token while it is constructed, and this is what a test mocks.
+function newCrm() returns graphql:Client|error {
+    return new (crmUrl, auth = {tokenUrl: crmTokenUrl, clientId: crmClientId, clientSecret: crmClientSecret});
+}
+
+final graphql:Client crm = check newCrm();
 
 function listCustomers(int 'limit, int offset) returns Customer[]|error {
-    string doc = string `query ($limit: Int!, $offset: Int!) {
-        customers(limit: $limit, offset: $offset) { id name status region }
-    }`;
-    CustomersResponse res = check crm->query(doc, {'limit: 'limit, offset: offset});
+    CustomersResponse res = check crm->query(LIST_DOC, {'limit: 'limit, offset: offset});
     if res.errors is graphql:ErrorDetail[] {
         return error("crm-service answered errors", errors = res.errors);
     }
@@ -49,22 +62,24 @@ function listCustomers(int 'limit, int offset) returns Customer[]|error {
 - Variables go in the `map<anydata>` argument, never spliced into the document string.
 - `execute()` and `executeWithType()` are deprecated; do not write them, and do not
   "fix" a deprecation warning by switching between them. `execute()` binds the same
-  envelope as `query()`; `executeWithType()` bound the payload alone, which is the shape
-  to unlearn.
+  envelope as `query()`; `executeWithType()` binds the payload alone, the shape to
+  unlearn for `query()`.
 - A response with `errors` and partial `data` binds when the record includes
   `*graphql:GenericResponseWithErrors`; check `res.errors` before reading `data`.
   A `graphql:PayloadBindingError` from the call means the response did not fit the
   record (a null `data`, a server error without data, a wrong shape); its `detail()`
   keeps the server's `errors` and partial `data`. Map both to the upstream-failure
-  response the contract declares (502), as code-rules.md's client-error branching does
-  for HTTP.
+  response the contract declares (502), branching on the error type as
+  code-rules.md does for `http:Client` errors.
 
 ## Prove the shape once
 
 When the package has tests ([tests.md](tests.md)), one binding test per client turns
 the runtime 500 into a failing `bal test`: a `graphql:Service` stub on a test listener
-answers the canned document, the client is pointed at it, and the bound `data` is
-asserted. The stub's resource functions take the same arguments the document passes.
+answers the canned document, the client's constructor is mocked to point at it, and
+the bound `data` is asserted through the production function. The stub's resource
+functions take the same arguments the document passes. The configurables get values
+in `tests/Config.toml`.
 
 ```ballerina
 // tests/crm_client_test.bal
@@ -76,14 +91,14 @@ service /graphql on stub {
     }
 }
 
+@test:Mock {functionName: "newCrm"}
+function stubCrm() returns graphql:Client|error {
+    return new ("http://localhost:9911/graphql");
+}
+
 @test:Config {}
 function customersBind() returns error? {
-    graphql:Client c = check new ("http://localhost:9911/graphql");
-    CustomersResponse res = check c->query(LIST_DOC, {'limit: 10, offset: 0});
-    test:assertEquals(res.data.customers[0].name, "Acme");
+    Customer[] got = check listCustomers(10, 0);
+    test:assertEquals(got[0].name, "Acme");
 }
 ```
-
-Point the production client at the stub through the init function that builds it
-(so `@test:Mock` or the test `Config.toml` can swap the URL), or test the document
-and the record directly as above.

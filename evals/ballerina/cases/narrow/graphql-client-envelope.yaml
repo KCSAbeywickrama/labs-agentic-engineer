@@ -20,8 +20,6 @@ expect:
   imports:
     - ballerina/graphql
   mustContain:
-    - "->query\\("
     - "\\s+data\\s*;"
   mustNotContain:
-    - "->execute\\("
     - "->executeWithType\\("

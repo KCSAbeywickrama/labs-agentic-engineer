@@ -35,8 +35,8 @@ an OpenAPI document** — one this component implements, or one it calls. It car
 
 **Load [graphql.md](references/graphql.md) before writing a client for a GraphQL
 document** — a dependency whose contract type is `graphql`. The client is written by
-hand: the reference carries the target-record shape `graphql:Client` binds (the response
-envelope, with the payload under `data`) and the test that proves it.
+hand: the reference carries the target-record shape `graphql:Client` binds and the test
+that proves it.
 
 ### bal library
 
