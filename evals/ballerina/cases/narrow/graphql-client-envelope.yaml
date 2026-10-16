@@ -1,0 +1,27 @@
+prompt: |
+  In this Ballerina package, write `crm_client.bal` — a client for the CRM service
+  whose GraphQL schema is `schema.graphql` in this directory. The service URL is a
+  configurable `crmUrl`.
+
+  Expose two functions:
+  - `listCustomers(int 'limit, int offset) returns Customer[]|error` — the
+    `customers` query, one page,
+  - `getCustomer(string id) returns Customer?|error` — the `customer` query, nil
+    when there is none.
+
+  `Customer` is a closed record with `id`, `name`, `status` and the nullable
+  `region`. Then run `bal build` until it is clean. Do not write tests.
+
+fixtures:
+  schema.graphql: graphql/crm.graphql
+
+expect:
+  builds: true
+  imports:
+    - ballerina/graphql
+  mustContain:
+    - "->query\\("
+    - "\\s+data\\s*;"
+  mustNotContain:
+    - "->execute\\("
+    - "->executeWithType\\("
