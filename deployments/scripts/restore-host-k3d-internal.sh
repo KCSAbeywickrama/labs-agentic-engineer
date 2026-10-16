@@ -120,21 +120,51 @@ current="$(kubectl -n kube-system get cm coredns-custom \
     -o jsonpath="{.data.${CM_KEY//./\\.}}" 2>/dev/null || true)"
 
 # k3d labels every container with its cluster and role. The load balancer is
-# not a node: it runs no containerd and pulls nothing.
-NODES="$(docker ps --filter "label=k3d.cluster=${CLUSTER_NAME}" \
-    --format '{{.Names}} {{.Label "k3d.role"}}' \
-    | awk '$2 == "server" || $2 == "agent" { print $1 }')"
+# not a node: it runs no containerd and pulls nothing. A stopped node can be
+# neither inspected nor migrated, and is reported rather than skipped: it
+# would come back on whatever mirror it has.
+ALL_NODES="$(docker ps -a --filter "label=k3d.cluster=${CLUSTER_NAME}" \
+    --format '{{.Names}} {{.Label "k3d.role"}} {{.State}}' \
+    | awk '$2 == "server" || $2 == "agent"')"
+NODES="$(awk '$3 == "running" { print $1 }' <<<"$ALL_NODES")"
+STOPPED_NODES="$(awk '$3 != "running" { print $1 }' <<<"$ALL_NODES")"
 [ -n "$NODES" ] \
     || fail "No running node container for cluster ${CLUSTER_NAME}." \
             "Is the cluster up? \`k3d cluster list\`."
 
+# registries.yaml may carry several mirror keys. Both readers below look only
+# under the registry host's own key, so another key can neither hide a pending
+# migration nor be rewritten. Quotes are ignored: k3d writes the key bare, the
+# upstream config quotes it, and a hand edit may do either.
+#
+# stdin: registries.yaml. Prints that key's endpoint lines, trimmed.
+registry_endpoints() {
+    awk -v key="  ${REGISTRY_HOST}:" '
+        { bare = $0; gsub(/"/, "", bare) }
+        bare == key { inblock = 1; next }
+        inblock && (bare ~ /^[^ ]/ || bare ~ /^ [^ ]/ || bare ~ /^  [^ ]/) { inblock = 0 }
+        inblock && bare ~ /^ *- / { sub(/^ */, "", bare); print bare }'
+}
+# stdin: registries.yaml. Prints it with that key's self-referential endpoint
+# replaced by the load balancer; every other line passes through unchanged.
+registry_rewritten() {
+    awk -v key="  ${REGISTRY_HOST}:" -v self="- http://${REGISTRY_HOST}" -v lb="- ${LB_ENDPOINT}" '
+        { bare = $0; gsub(/"/, "", bare) }
+        bare == key { inblock = 1; print; next }
+        inblock && (bare ~ /^[^ ]/ || bare ~ /^ [^ ]/ || bare ~ /^  [^ ]/) { inblock = 0 }
+        inblock {
+            match(bare, /^ */)
+            if (substr(bare, RLENGTH + 1) == self) { print substr($0, 1, RLENGTH) lb; next }
+        }
+        { print }'
+}
 # Where registries.yaml sends the registry host: "lb", "self", or "" for a
 # shape this script does not know and will not touch.
 node_mirror() {
-    local f
-    f="$(docker exec "$1" cat "$NODE_REGISTRIES" 2>/dev/null || true)"
-    if grep -qF -- "- ${LB_ENDPOINT}" <<<"$f"; then echo lb
-    elif grep -qF -- "- http://${REGISTRY_HOST}" <<<"$f"; then echo self
+    local eps
+    eps="$(docker exec "$1" cat "$NODE_REGISTRIES" 2>/dev/null | registry_endpoints || true)"
+    if grep -qxF -- "- ${LB_ENDPOINT}" <<<"$eps"; then echo lb
+    elif grep -qxF -- "- http://${REGISTRY_HOST}" <<<"$eps"; then echo self
     fi
 }
 # Whether containerd, as k3s last rendered it, still reaches the registry by
@@ -200,6 +230,11 @@ if [ "$MODE" = "check" ]; then
             rc=1
         fi
     done
+    for node in $STOPPED_NODES; do
+        echo "   ${node}:"
+        echo "     not running:      ⚠️  neither inspected nor migrated; run again once it is up"
+        rc=1
+    done
     exit $rc
 fi
 
@@ -222,10 +257,11 @@ for node in $NODES; do
     case "$(node_mirror "$node")" in
         lb) echo "⏭️  ${node}: registry mirror already ${LB_ENDPOINT}" ;;
         self)
-            docker exec "$node" sed -i \
-                "s#^\( *- \)http://${REGISTRY_HOST//./\\.}\$#\1${LB_ENDPOINT}#" "$NODE_REGISTRIES"
-            # The detector matches a substring and the sed a whole line, so the
-            # file is read back rather than the edit trusted.
+            # Read whole, rewrite on this side, write whole: the node needs
+            # nothing beyond cat, and the file is never half-written.
+            rewritten="$(docker exec "$node" cat "$NODE_REGISTRIES" | registry_rewritten)"
+            printf '%s\n' "$rewritten" | docker exec -i "$node" sh -c "cat > '${NODE_REGISTRIES}'"
+            # Read back rather than trust the edit.
             if [ "$(node_mirror "$node")" = lb ]; then
                 echo "✅ ${node}: registry mirror → ${LB_ENDPOINT} (containerd takes it up when k3s next starts)"
             else
@@ -242,6 +278,10 @@ for node in $NODES; do
         echo "✅ ${node}: '${HOST_GW} host.k3d.internal' back in /etc/hosts — image pulls resolve again."
         echo "   Delete any pod in ImagePullBackOff so its Deployment re-pulls at once."
     fi
+done
+for node in $STOPPED_NODES; do
+    echo "⚠️  ${node}: not running — neither inspected nor migrated; run again once it is up" >&2
+    rc=1
 done
 
 echo ""

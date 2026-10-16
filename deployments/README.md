@@ -345,8 +345,10 @@ back with it.
 
 **`host.k3d.internal` loses its address.** Every CoreDNS rewrite on the cluster
 answers with that name, and the images OpenChoreo builds are addressed as
-`host.k3d.internal:10082`, so containerd on the node resolves it on every image
-pull. k3d defines it at cluster CREATE, in two places neither owner knows
+`host.k3d.internal:10082`, so on a node whose registry mirror still points at
+itself (every cluster created before the mirror fix below, until migrated)
+containerd resolves it on every image pull as well. k3d defines it at cluster
+CREATE, in two places neither owner knows
 about: a line in each node's `/etc/hosts`, which Docker rebuilds on every
 container start, and the `coredns` ConfigMap's `NodeHosts` key, which
 `k3s-supervisor` regenerates from node addresses on every node start. k3d
@@ -358,10 +360,11 @@ Nothing reports this directly. Pods get NXDOMAIN for hostnames that resolve
 fine from the host, and it surfaces far away: `openchoreo-api` cannot fetch
 Thunder's JWKS, so every token is `INVALID_TOKEN` and callers see bare 401s;
 `setup-environment-aigateway.sh` reads an empty list out of a 500 and reports
-`Environment 'development' is not registered in Agent Manager`. Running pods
-keep their cached images, so the node side waits for the next component the
-platform builds and fails its pull with `lookup host.k3d.internal: no such
-host`, which the deploy stage takes for a broken image.
+`Environment 'development' is not registered in Agent Manager`. On an
+unmigrated node, running pods keep their cached images, so the node side waits
+for the next component the platform builds and fails its pull with `lookup
+host.k3d.internal: no such host`, which the deploy stage takes for a broken
+image.
 
 ```bash
 bash deployments/scripts/restore-host-k3d-internal.sh check   # diagnose

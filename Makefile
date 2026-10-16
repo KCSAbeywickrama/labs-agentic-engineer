@@ -423,9 +423,10 @@ obs-status:
 #
 # deployments/scripts/restore-host-k3d-internal.sh runs first: a colima or host
 # restart drops host.k3d.internal from CoreDNS and from the node, every
-# *.localhost rewrite then resolves to nothing, the next image pull fails, and
-# the rollout below comes up on a platform whose tokens all read
-# INVALID_TOKEN. Idempotent (a check when the name is pinned).
+# *.localhost rewrite then resolves to nothing, the next image pull fails on a
+# node whose registry mirror is not yet migrated, and the rollout below comes
+# up on a platform whose tokens all read INVALID_TOKEN. Idempotent (a check
+# when the name is pinned).
 #
 # deployments/scripts/openbao-aep-api-auth.sh runs before the upgrade: the
 # local OpenBao is in memory, so a restart forgets aep-api's write-only policy
