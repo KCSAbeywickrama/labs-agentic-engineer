@@ -344,18 +344,27 @@ cluster comes back when the container runtime does. Two things do not come
 back with it.
 
 **`host.k3d.internal` loses its address.** Every CoreDNS rewrite on the cluster
-answers with that name, and OpenChoreo's build chain addresses the local
-registry as `host.k3d.internal:10082`. k3d defines it at cluster CREATE, in the
-`coredns` ConfigMap's `NodeHosts` key — which `k3s-supervisor` owns and
-regenerates from node addresses on every node start, dropping k3d's line.
-`k3d cluster start` does not re-inject it; only a create does.
+answers with that name, and the images OpenChoreo builds are addressed as
+`host.k3d.internal:10082`, so on a node whose registry mirror still points at
+itself (every cluster created before the mirror fix below, until migrated)
+containerd resolves it on every image pull as well. k3d defines it at cluster
+CREATE, in two places neither owner knows
+about: a line in each node's `/etc/hosts`, which Docker rebuilds on every
+container start, and the `coredns` ConfigMap's `NodeHosts` key, which
+`k3s-supervisor` regenerates from node addresses on every node start. k3d
+re-injects both only when it drives the start itself; a colima stop/start, a
+host sleep or a Docker restart brings the node back under Docker's
+`unless-stopped` policy, which k3d never sees.
 
 Nothing reports this directly. Pods get NXDOMAIN for hostnames that resolve
 fine from the host, and it surfaces far away: `openchoreo-api` cannot fetch
 Thunder's JWKS, so every token is `INVALID_TOKEN` and callers see bare 401s;
-builds fail on an unreachable registry; `setup-environment-aigateway.sh` reads
-an empty list out of a 500 and reports `Environment 'development' is not
-registered in Agent Manager`.
+`setup-environment-aigateway.sh` reads an empty list out of a 500 and reports
+`Environment 'development' is not registered in Agent Manager`. On an
+unmigrated node, running pods keep their cached images, so the node side waits
+for the next component the platform builds and fails its pull with `lookup
+host.k3d.internal: no such host`, which the deploy stage takes for a broken
+image.
 
 ```bash
 bash deployments/scripts/restore-host-k3d-internal.sh check   # diagnose
@@ -363,8 +372,17 @@ bash deployments/scripts/restore-host-k3d-internal.sh         # repair
 ```
 
 It writes the name into `coredns-custom`, which no controller reconciles, so
-one run survives later restarts too. `make dev-env` (its CoreDNS step) and
-`make dev-update` (first thing) run it as well, so either repairs the name.
+one run survives later restarts too. For image pulls it points each node's
+registry mirror (`/etc/rancher/k3s/registries.yaml`) at the k3d load balancer
+by its container name, `k3d-openchoreo-serverlb`: Docker's own DNS, rebuilt on
+every start, so pulls stop depending on the injected name. k3s renders that
+file for containerd when it starts, so the new route takes over at the next
+node restart; if a restart has already dropped the `/etc/hosts` line, the
+script puts it back for this node lifetime so pulls work now. A cluster
+created by current `make dev-env` gets the load-balancer mirror in its k3d
+config and has nothing to migrate. `make dev-env` (its CoreDNS step) and
+`make dev-update` (first thing) run the script as well, so either repairs the
+name.
 
 Every script writes its own `coredns-custom` key by merge patch. An earlier
 `setup-env-for-aectl.sh` wrote its key with `kubectl apply` while
@@ -590,12 +608,11 @@ Never `bao kv get` a multi-field document without `-field=<name>` piped to
    kubectl -n openbao exec openbao-0 -- bao read auth/kubernetes/role/aep-api
    ```
 6. **`host.k3d.internal`.** A colima or Docker restart that did not go through
-   `k3d cluster start` can also drop `host.k3d.internal` from the node's
-   `/etc/hosts` (and from CoreDNS `NodeHosts`). Check from inside a pod
-   (`kubectl -n wso2-aep exec deploy/aep-api -- nslookup host.k3d.internal`);
-   if it fails, add `<k3d network gateway, e.g. 172.18.0.1> host.k3d.internal`
-   to both and restart CoreDNS. Do not stop and start the cluster to fix it:
-   that wipes OpenBao again.
+   `k3d cluster start` also drops `host.k3d.internal` from the node's
+   `/etc/hosts` and from CoreDNS `NodeHosts`. Run
+   `bash deployments/scripts/restore-host-k3d-internal.sh check`; on a finding,
+   run it without `check` ([After a host restart](#after-a-host-restart)). Do
+   not stop and start the cluster to fix it: that wipes OpenBao again.
 7. **Sync.** Run `aectl platform sync-clients`: it force-syncs the platform
    ExternalSecrets, then sets the Postgres role and the Thunder clients from
    them.
