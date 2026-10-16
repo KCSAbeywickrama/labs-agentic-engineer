@@ -16,8 +16,8 @@ module's spec, §2.5.3: a subtype of `graphql:GenericResponseWithErrors|record {
 fields the document selects sit inside `data`. A record shaped like the payload,
 `record {| Customer[] customers; |}`, never binds. The closed record has no `data` field
 and the response has no top-level `customers`, so every call fails with a
-`graphql:PayloadBindingError` and the service answers 500. The build cannot see this:
-the wrong shape compiles.
+`graphql:PayloadBindingError`; propagated unmapped, that is a 500 from the service.
+The build cannot see this: the wrong shape compiles.
 
 ```ballerina
 import ballerina/graphql;
@@ -83,6 +83,9 @@ in `tests/Config.toml`.
 
 ```ballerina
 // tests/crm_client_test.bal
+import ballerina/graphql;
+import ballerina/test;
+
 listener graphql:Listener stub = new (9911);
 
 service /graphql on stub {

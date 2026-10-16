@@ -20,6 +20,6 @@ expect:
   imports:
     - ballerina/graphql
   mustContain:
-    - "\\s+data\\s*;"
+    - "record \\{\\|?[\\s\\S]{0,400}?\\bdata\\s*;"
   mustNotContain:
     - "->executeWithType\\("
