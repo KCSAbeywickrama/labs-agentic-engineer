@@ -184,6 +184,26 @@ func TestDeploymentWaves(t *testing.T) {
 		want:       [][]string{{"orders", "payments"}, {"web"}},
 		wantWaited: []string{"orders", "payments", "web"},
 	}, {
+		// The pair that deadlocked: A and B connect to each other, B failed to
+		// render and has been fixed. B is behind at the fix; A is converging on
+		// B's missing endpoints and can never serve without it. A converging
+		// provider inside B's own cycle does not hold B: B is promoted, A is
+		// waited on, and OpenChoreo converges the pair once both have a binding.
+		name:       "a converging provider inside the consumer's own cycle does not hold it",
+		design:     designWith(wiringService("svc-a", "svc-b"), wiringService("svc-b", "svc-a")),
+		version:    versionOf(wiringConverging("svc-a"), wiringBehind("svc-b")),
+		want:       [][]string{{"svc-b"}},
+		wantWaited: []string{"svc-a", "svc-b"},
+	}, {
+		// The same through a longer cycle: a → b → c → a, b converging. b reaches
+		// a through c, so it does not hold a; c waits for a inside the pass.
+		name: "a converging provider two hops back in the cycle does not hold it either",
+		design: designWith(wiringService("a", "b"), wiringService("b", "c"),
+			wiringService("c", "a")),
+		version:    versionOf(wiringBehind("a"), wiringConverging("b"), wiringBehind("c")),
+		want:       [][]string{{"a"}, {"c"}},
+		wantWaited: []string{"a", "b", "c"},
+	}, {
 		name:       "no connections is one wave — the ordinary case pays nothing",
 		design:     designWith(wiringService("orders"), wiringService("payments")),
 		version:    versionOf(wiringBehind("orders"), wiringBehind("payments")),
@@ -441,17 +461,24 @@ func TestWavesFromEdges_IgnoresProvidersOutsideTheSet(t *testing.T) {
 // The connection graph the plan was levelled over rides the plan, in the names
 // the run loop addresses OpenChoreo by. The readiness wait needs it at the
 // deadline to tell a consumer blocked behind an unmet provider from one whose
-// own connection cannot resolve.
+// own connection cannot resolve — and it needs it most on the pass that
+// promotes nothing and only waits on converging components, so the graph is
+// carried whether or not anything is behind.
 func TestDeploymentWaves_CarriesTheProvidersForTheDeadline(t *testing.T) {
 	t.Parallel()
-	plan, err := deploymentWaves(
-		designWith(wiringAgent("skill-agent", "allocation-api"), wiringService("allocation-api")),
-		versionOf(wiringBehind("skill-agent"), wiringUnbuilt("allocation-api")))
-	if err != nil {
-		t.Fatalf("deploymentWaves: %v", err)
-	}
+	design := designWith(wiringAgent("skill-agent", "allocation-api"), wiringService("allocation-api"))
 	want := map[string][]string{"skill-agent": {"allocation-api"}}
-	if !reflect.DeepEqual(plan.Providers, want) {
-		t.Errorf("Providers = %v, want %v — carried even when the consumer is held", plan.Providers, want)
+	for name, version := range map[string]delivery.VersionState{
+		"consumer behind, held": versionOf(wiringBehind("skill-agent"), wiringUnbuilt("allocation-api")),
+		"consumer converging":   versionOf(wiringConverging("skill-agent"), wiringUnbuilt("allocation-api")),
+		"nothing behind at all": versionOf(wiringConverging("skill-agent"), wiringServing("allocation-api")),
+	} {
+		plan, err := deploymentWaves(design, version)
+		if err != nil {
+			t.Fatalf("%s: deploymentWaves: %v", name, err)
+		}
+		if !reflect.DeepEqual(plan.Providers, want) {
+			t.Errorf("%s: Providers = %v, want %v", name, plan.Providers, want)
+		}
 	}
 }

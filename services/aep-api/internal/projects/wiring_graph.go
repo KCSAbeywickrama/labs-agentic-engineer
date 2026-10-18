@@ -76,9 +76,6 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 		}
 	}
 	plan := delivery.DeployPlan{Waited: waitedOn(state)}
-	if len(behind) == 0 {
-		return plan, nil
-	}
 
 	// consumer -> providers, k8s-shaped, restricted to components the
 	// version state knows about. Translating here is what makes the design graph
@@ -107,8 +104,14 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 
 	// The graph rides the plan: the readiness wait needs it at the deadline to
 	// tell a consumer blocked behind an unmet provider from one whose own
-	// connection cannot resolve.
+	// connection cannot resolve. On a pass that promotes nothing and only waits
+	// on converging components as much as on one that writes — that pass is the
+	// one the distinction exists for — which is why it is set before the early
+	// return below rather than beside the waves.
 	plan.Providers = providers
+	if len(behind) == 0 {
+		return plan, nil
+	}
 	promotable, held := promotableSet(behind, providers, byName)
 	plan.Held = held
 	if len(promotable) == 0 {
@@ -161,7 +164,16 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 // not reached — is a real unsatisfied edge: the stage's premise is that a
 // provider's binding exists by the time the consumer's connection is resolved,
 // and only a serving release proves that. A converging provider therefore costs its
-// consumer one cycle, which is the conservative direction.
+// consumer one cycle, which is the conservative direction — with one exception.
+// A converging provider INSIDE the consumer's own cycle is waiting on the
+// consumer: it is bound and its endpoint URLs are published (OpenChoreo
+// publishes them before it checks its outbound connections), and the connection
+// it cannot resolve is the one back to this component. Holding the consumer
+// behind it holds both forever — the shape is a pair that connect to each other
+// where one failed to render and has been fixed: the fixed one is behind, the
+// other is converging on the fixed one's missing endpoints, and every later pass
+// plans the same hold. So the pair is promoted together again, and the
+// converging half is waited on as before.
 func promotableSet(behind []string, providers map[string][]string,
 	byName map[string]delivery.ComponentState) (promotable []string, held []delivery.ComponentState) {
 	candidates := make(map[string]struct{}, len(behind))
@@ -185,6 +197,9 @@ func promotableSet(behind []string, providers map[string][]string,
 					continue
 				}
 				if _, promoting := candidates[p]; promoting {
+					continue
+				}
+				if byName[p].State == delivery.ComponentStateConverging && dependsOn(providers, p, name) {
 					continue
 				}
 				unmet = append(unmet, p)
@@ -213,6 +228,35 @@ func promotableSet(behind []string, providers map[string][]string,
 		held = append(held, st)
 	}
 	return promotable, held
+}
+
+// dependsOn reports whether `from` reaches `to` through the provider graph —
+// directly or through providers of providers. With `to` also a consumer of
+// `from`, the two are in one cycle.
+func dependsOn(providers map[string][]string, from, to string) bool {
+	seen := map[string]bool{}
+	var walk func(string) bool
+	walk = func(n string) bool {
+		if n == to {
+			return true
+		}
+		if seen[n] {
+			return false
+		}
+		seen[n] = true
+		for _, p := range providers[n] {
+			if walk(p) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range providers[from] {
+		if walk(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitedOn is the components already converging towards the release they pin —

@@ -1775,6 +1775,40 @@ func TestDeployExpiry_TheConvergeItSkippedIsOwedToTheNextPass(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonVersionIncomplete)
 }
 
+// Two components that connect to each other are promoted together, and when one
+// of them fails to render the other sits ConnectionsPending on its missing
+// endpoints. The failed one is filed, the waiting one is not — the Failed branch
+// files exactly state.Failed — so the pair's next pass finds the fixed half
+// behind and the other converging, which the planner promotes together again.
+func TestDeploy_AFailedProviderIsFiledNotItsWaitingPartner(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		workable(1, 1),
+		MilestoneSnapshot{},
+	)
+	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"svc-a", "svc-b"}})
+	h.wavesAreWith([][]string{{"svc-a", "svc-b"}},
+		map[string][]string{"svc-a": {"svc-b"}, "svc-b": {"svc-a"}})
+	h.deploymentsAre(CycleDeployState{
+		Expected:          2,
+		Failed:            []string{"svc-b"},
+		Pending:           []string{"svc-a"},
+		WaitingOnProvider: []string{"svc-a"},
+		Reasons:           map[string]string{"svc-b": "RenderingFailed", "svc-a": "ConnectionsPending"},
+	})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, 1, h.deployMintCount())
+	require.Equal(t, []string{"svc-b"}, delivery.TargetNames(h.deployMints[0].Failed),
+		"the half that failed to render is filed; its partner waiting on it is not")
+	require.Equal(t, "RenderingFailed", h.deployMints[0].Reasons["svc-b"])
+}
+
 // The deadline belongs to the STAGE, not to a wave.
 //
 // It is created once in deployCycle and passed into every wait, so a design that
