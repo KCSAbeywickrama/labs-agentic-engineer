@@ -18,7 +18,6 @@
 {"at":8,"record":"user"}
 {"at":8,"wd":"observe","n":0}
 {"at":9,"record":"rate_limit_event"}
-{"at":9,"event":{"kind":"notice","agentId":"lead","level":"info","code":"rate_limit","detail":"[rate-limit] allowed on the five_hour window"}}
 {"at":10,"record":"system"}
 {"at":10,"wd":"observe","n":0}
 {"at":11,"record":"system"}

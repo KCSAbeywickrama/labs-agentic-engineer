@@ -83,6 +83,8 @@ import {
   editDelta,
   failureDetail,
   failureText,
+  readerPaths,
+  rowSummary,
   shellEvents,
   summaryFromInput,
   writeDelta,
@@ -220,11 +222,11 @@ function usageFromResult(m: Record<string, unknown>): RunEventUsage | undefined 
   };
 }
 
-// Most file tools carry file_path / pattern / path; `skill` is the Skill tool's,
-// and `description` is the last human-readable field a tool is likely to have.
-// Reaching any of them beats the JSON dump, which rendered
-// `$ Skill {"skill":"aep:aep"}` in a live run.
-const SUMMARY_FIELDS = ["file_path", "path", "pattern", "glob", "url", "skill", "description"] as const;
+// Most file tools carry file_path / pattern / path; `query` is the search
+// tools' (`ToolSearch`, `WebSearch`), `skill` is the Skill tool's, and
+// `description` is the last human-readable field a tool is likely to have. A
+// tool with none of them prints its name alone — see `summaryFromInput`.
+const SUMMARY_FIELDS = ["file_path", "path", "pattern", "glob", "url", "query", "skill", "description"] as const;
 
 interface ToolUseBlock {
   id: string;
@@ -389,8 +391,17 @@ interface BashTaskRecord {
 /** One tool call in flight. */
 interface PendingCall {
   tool: string;
-  /** For a Bash call, the command itself — what a backgrounded task reports. */
+  /**
+   * For a Bash call, the command itself — exact, so a runtime that names no
+   * `tool_use_id` on a backgrounded task can still be matched on it.
+   */
   command: string;
+  /**
+   * The reader's line the call's row carried — what a backgrounded task says
+   * at both its ends, so its start and settle name the command exactly as the
+   * launching row did rather than as the raw text that ran.
+   */
+  summary: string;
   /** Who made the call, so its outcome lands on the same row its action did. */
   agentId: string;
   startedAt: number;
@@ -417,6 +428,13 @@ export interface ClaudeAdapterOptions {
   taskKind?: NonNullable<RunEvent["taskKind"]>;
   /** Heartbeat budget per agent; the default is the design's 10s. */
   heartbeatIntervalMs?: number;
+  /**
+   * The runtime's home directory, which rows shorten to `~` (`PathRoots`).
+   * Defaults to the runner's own: the runtime inherits the runner's
+   * environment, and the workspace guard judges its writes against the same
+   * `os.homedir()`. "" leaves home paths absolute.
+   */
+  homeDir?: string;
 }
 
 export interface ClaudeAdapter {
@@ -493,9 +511,10 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   // the same value the runner passed it as `policy.workspace`, echoed back by
   // the only layer that can confirm it took effect. An option would be a second
   // copy of one fact, and this adapter's whole rule is that the session's own
-  // declaration wins over anything inferred beside it. Empty until the init
-  // arrives, which leaves paths absolute rather than mis-relativised.
-  let workspaceRoot = "";
+  // declaration wins over anything inferred beside it. The home, which no
+  // message declares, is the one root taken from outside: see
+  // `ClaudeAdapterOptions.homeDir`.
+  const paths = readerPaths(opts?.homeDir);
 
   /**
    * Which agent a forwarded message belongs to.
@@ -557,9 +576,8 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   function onInit(m: Record<string, unknown>): RunEventInput[] {
     // Before the `sawInit` gate: a spawned agent's own init carries the same
     // cwd, so learning it from whichever arrives first costs nothing and a run
-    // whose first init was missed still shortens its paths. Trailing slashes
-    // are stripped so the boundary test below is a single form.
-    if (!workspaceRoot) workspaceRoot = str(m.cwd).replace(/\/+$/, "");
+    // whose first init was missed still shortens its paths.
+    if (!paths.roots().workspace) paths.declareWorkspace(str(m.cwd));
     if (sawInit) return [];
     sawInit = true;
     return [{
@@ -598,10 +616,12 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         LEAD_AGENT_ID;
       // `summary`, not `command`: the contract reserves `command` for the
       // `tool_use`/`tool_result`/`git_*` kinds and names `summary` as the one
-      // line describing a task at both its ends. The tool call's own row
-      // already carried the command; this is what will still be true when the
-      // task settles minutes later.
-      const summary = (toolUseId ? pending.get(toolUseId)?.command : "") || trimSummary(str(m.description));
+      // line describing a task at both its ends. It is the launching row's own
+      // reader line, never the raw command: that is the contract's rule, and
+      // the raw text was what put absolute pod paths and multi-line heredocs on
+      // a background row (2026-10-12). The runtime's description is the
+      // fallback for a task whose launching call this adapter never saw.
+      const summary = (toolUseId ? pending.get(toolUseId)?.summary : "") || paths.line(str(m.description));
       bashTasks.set(taskId, { ownerAgentId: owner, summary, ...(toolUseId ? { toolUseId } : {}) });
       return [{
         kind: "task_started",
@@ -617,7 +637,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
     const parentAgentId = toolUseId ? issuedBy.get(toolUseId) : undefined;
     const depth = num(m.spawn_depth);
     agents.set(taskId, {
-      label: trimSummary(str(m.description)),
+      label: paths.line(str(m.description)),
       startedAt: now(),
       countedAdded: 0,
       countedRemoved: 0,
@@ -630,7 +650,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       // Absent means the lead, by the contract: a depth-1 agent's parent is the
       // lead by definition, and repeating it would make absence ambiguous.
       ...(parentAgentId && parentAgentId !== LEAD_AGENT_ID ? { parentAgentId } : {}),
-      ...(str(m.description) ? { label: trimSummary(str(m.description)) } : {}),
+      ...(str(m.description) ? { label: paths.line(str(m.description)) } : {}),
       ...(str(m.subagent_type) ? { role: str(m.subagent_type) } : {}),
       ...(depth ? { depth } : {}),
       // Absence is NOT false here: it means the runtime did not say, and an
@@ -666,7 +686,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
     return [{
       kind: "agent_progress",
       agentId,
-      ...(str(m.description) ? { phrase: trimSummary(str(m.description)) } : {}),
+      ...(str(m.description) ? { phrase: paths.line(str(m.description)) } : {}),
       ...(num(usage.tool_uses) ? { toolCount: num(usage.tool_uses) } : {}),
       ...(num(usage.total_tokens) ? { tokens: num(usage.total_tokens) } : {}),
     }];
@@ -705,7 +725,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
     const usage = obj(m.usage);
     const duration = num(usage.duration_ms) || Math.max(0, now() - agent.startedAt);
     const lines = agent.reportedLines ?? { linesAdded: agent.countedAdded, linesRemoved: agent.countedRemoved };
-    const report = reportFrom(str(m.summary));
+    const report = reportFrom(paths.prose(str(m.summary)));
     return [{
       kind: "agent_settled",
       agentId: taskId,
@@ -740,7 +760,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       if (tu.id) issuedBy.set(tu.id, agentId);
 
       if (FANOUT_TOOLS.has(tu.name) && tu.id) {
-        fanOutCalls.set(tu.id, { label: trimSummary(str(tu.input.description)), model: str(tu.input.model) });
+        fanOutCalls.set(tu.id, { label: paths.line(str(tu.input.description)), model: str(tu.input.model) });
         // No row of its own. The agent's `agent_started` IS the row — printing
         // the call too says the same sentence twice, once as a 200-character
         // dump of the prompt.
@@ -753,7 +773,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         // with no id is a row a consumer cannot fold on.
         if (tu.id) {
           pendingPlanItems.set(tu.id, {
-            title: trimSummary(str(tu.input.subject)),
+            title: paths.line(str(tu.input.subject)),
             agentId,
             ...(planOwner(str(tu.input.owner), agentId) ? { ownerAgentId: planOwner(str(tu.input.owner), agentId) } : {}),
           });
@@ -770,7 +790,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
           agentId,
           source: "plan",
           itemId,
-          ...(str(tu.input.subject) ? { title: trimSummary(str(tu.input.subject)) } : {}),
+          ...(str(tu.input.subject) ? { title: paths.line(str(tu.input.subject)) } : {}),
           ...(planStatus(tu.input.status) ? { itemStatus: planStatus(tu.input.status) } : {}),
           ...(owner ? { ownerAgentId: owner } : {}),
         });
@@ -786,18 +806,18 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       // the same mistake as truncating a path from the wrong end. Each branch
       // caps its own fields once it has composed them.
       const command = tu.name === "Bash" ? str(tu.input.command) : "";
-      trackCall(tu.id, { tool: tu.name, command, agentId, added: delta.added, removed: delta.removed });
-
       const stamp = { agentId, ...(tu.id ? { toolUseId: tu.id } : {}) };
-      if (tu.name === "Bash") {
-        if (!command) {
-          events.push({ kind: "tool_use", tool: "Bash", summary: "", ...stamp });
-        } else {
-          events.push(...shellEvents(command, workspaceRoot, "Bash").map((e) => ({ ...e, ...stamp })));
-        }
-        continue;
-      }
-      events.push({ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input, SUMMARY_FIELDS, workspaceRoot), ...stamp });
+      const rows: RunEventInput[] =
+        tu.name !== "Bash"
+          ? [{ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input, SUMMARY_FIELDS, paths.roots()) }]
+          : command
+            ? shellEvents(command, paths.roots(), "Bash")
+            : [{ kind: "tool_use", tool: "Bash", summary: "" }];
+      // Tracked with the line its row printed, which a backgrounded command's
+      // task events repeat — see `PendingCall.summary`.
+      const summary = rows[0] ? rowSummary(rows[0]) : "";
+      trackCall(tu.id, { tool: tu.name, command, summary, agentId, added: delta.added, removed: delta.removed });
+      events.push(...rows.map((e) => ({ ...e, ...stamp })));
     }
     return events;
   }
@@ -874,7 +894,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
           : // Only failures carry their text: successful output is bulky,
             // uninteresting, and the likelier place for a secret.
             tr.isError
-            ? failureDetail(toolOutputText(tr.content))
+            ? failureDetail(toolOutputText(tr.content), paths.roots())
             : {}),
       });
     }
@@ -909,7 +929,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
     const status = str(obj(m.tool_use_result).status);
     const failed = tr.isError || (status !== "" && status !== "completed" && status !== "async_launched");
     if (!failed) return [];
-    const said = failureText(toolOutputText(tr.content));
+    const said = failureText(toolOutputText(tr.content), paths.roots());
     const label = fanOutCalls.get(tr.toolUseId)?.label || "agent";
     return [{
       kind: "notice",

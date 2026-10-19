@@ -215,6 +215,26 @@ test("translate: edit lines are counted from the call's own input, and only when
   assert.equal(settled.toolCount, 2);
 });
 
+// The phrase is the runtime's title for a child's running call, and for a shell
+// call that title quotes the command — so it is put in reader form like every
+// other line, exactly as the Claude adapter does with its task_progress text.
+test("translate: a child's phrase and a failed call's diagnosis are in reader form", () => {
+  const { run } = adapterAt({ homeDir: "/home/oc" });
+  run(tool("t1", "task", { status: "running", input: { description: `fix ${WS}/api` }, metadata: { sessionId: "kid" } }));
+  const [started] = run(ev("session.created", { info: { id: "kid", parentID: "root" } }));
+  assert.equal(started.label, "fix ~ws/api");
+  const out = run(tool("b1", "bash", { status: "running", input: { command: "npm test" }, title: `Running cd ${WS}/api\n&& npm test` }, "kid"));
+  assert.equal(out.find((e) => e.kind === "agent_progress")?.phrase, "Running cd ~ws/api && npm test");
+  const [failed] = run(tool("b1", "bash", {
+    status: "completed",
+    input: { command: "npm test" },
+    output: `Error: ENOENT /home/oc/.npm/_cacache and ${WS}/api/package.json`,
+    metadata: { exit: 1 },
+    time: { start: 0, end: 5 },
+  }, "kid"));
+  assert.equal(failed.summary, "Error: ENOENT ~/.npm/_cacache and ~ws/api/package.json");
+});
+
 test("translate: a fan-out call that fails is an error line naming the agent", () => {
   const { run } = adapterAt();
   run(tool("t1", "task", { status: "running", input: { description: "walk the app", subagent_type: "general" } }));

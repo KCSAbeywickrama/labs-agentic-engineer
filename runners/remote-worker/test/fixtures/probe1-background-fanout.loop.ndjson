@@ -46,7 +46,6 @@
 {"at":20,"record":"user"}
 {"at":20,"wd":"observe","n":0}
 {"at":21,"record":"rate_limit_event"}
-{"at":21,"event":{"kind":"notice","agentId":"lead","level":"info","code":"rate_limit","detail":"[rate-limit] allowed on the five_hour window"}}
 {"at":22,"record":"system"}
 {"at":22,"wd":"observe","n":0}
 {"at":23,"record":"assistant"}
@@ -97,7 +96,7 @@
 {"at":40,"event":{"kind":"tool_use","tool":"Bash","summary":"echo child","agentId":"a174ace70ca17fabb","toolUseId":"toolu_01P2bbUmVfRKqAwb3xoyLu3C"}}
 {"at":41,"record":"assistant"}
 {"at":41,"wd":"observe","n":1}
-{"at":41,"event":{"kind":"tool_use","tool":"ToolSearch","summary":"{\"query\":\"select:TaskOutput\",\"max_results\":1}","agentId":"lead","toolUseId":"toolu_01V9QbrUMwWKekDMgFbuAT6o"}}
+{"at":41,"event":{"kind":"tool_use","tool":"ToolSearch","summary":"select:TaskOutput","agentId":"lead","toolUseId":"toolu_01V9QbrUMwWKekDMgFbuAT6o"}}
 {"at":42,"record":"user"}
 {"at":42,"wd":"observe","n":1}
 {"at":42,"event":{"kind":"tool_result","agentId":"lead","toolUseId":"toolu_01V9QbrUMwWKekDMgFbuAT6o","ok":true,"tool":"ToolSearch","durationMs":3000}}
@@ -194,19 +193,19 @@
 {"at":79,"wd":"observe","n":0}
 {"at":80,"record":"assistant"}
 {"at":80,"wd":"observe","n":1}
-{"at":80,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"{\"task_id\":\"ac7f4459090cb6845\",\"block\":true,\"timeout\":300000}","agentId":"lead","toolUseId":"toolu_012f2ekkCwnhCfcfngPpkcop"}}
+{"at":80,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"","agentId":"lead","toolUseId":"toolu_012f2ekkCwnhCfcfngPpkcop"}}
 {"at":81,"record":"user"}
 {"at":81,"wd":"observe","n":1}
 {"at":81,"event":{"kind":"tool_result","agentId":"lead","toolUseId":"toolu_012f2ekkCwnhCfcfngPpkcop","ok":true,"tool":"TaskOutput","durationMs":3000}}
 {"at":82,"record":"assistant"}
 {"at":82,"wd":"observe","n":1}
-{"at":82,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"{\"task_id\":\"a8562a681e0fcee7f\",\"block\":true,\"timeout\":300000}","agentId":"lead","toolUseId":"toolu_01C3wCL9zL9EVcSU3kuAZzXf"}}
+{"at":82,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"","agentId":"lead","toolUseId":"toolu_01C3wCL9zL9EVcSU3kuAZzXf"}}
 {"at":83,"record":"user"}
 {"at":83,"wd":"observe","n":1}
 {"at":83,"event":{"kind":"tool_result","agentId":"lead","toolUseId":"toolu_01C3wCL9zL9EVcSU3kuAZzXf","ok":true,"tool":"TaskOutput","durationMs":3000}}
 {"at":84,"record":"assistant"}
 {"at":84,"wd":"observe","n":1}
-{"at":84,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"{\"task_id\":\"a6e8d6b9cd56b107f\",\"block\":true,\"timeout\":300000}","agentId":"lead","toolUseId":"toolu_016AWt4Sva3ukVULsuRRoiWo"}}
+{"at":84,"event":{"kind":"tool_use","tool":"TaskOutput","summary":"","agentId":"lead","toolUseId":"toolu_016AWt4Sva3ukVULsuRRoiWo"}}
 {"at":85,"record":"user"}
 {"at":85,"wd":"observe","n":1}
 {"at":85,"event":{"kind":"tool_result","agentId":"lead","toolUseId":"toolu_016AWt4Sva3ukVULsuRRoiWo","ok":true,"tool":"TaskOutput","durationMs":3000}}

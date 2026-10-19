@@ -67,11 +67,12 @@ import {
   type RunEventModelUsage,
   type RunEventUsage,
 } from "../../lib/progress/emitter.js";
-import { cap, createHeartbeatLimiter, MAX_REPORT, planStatus, reportFrom, trimSummary } from "../../lib/progress/adapter_common.js";
+import { cap, createHeartbeatLimiter, MAX_REPORT, planStatus, reportFrom } from "../../lib/progress/adapter_common.js";
 import {
   editDelta,
   failureDetail,
   failureText,
+  readerPaths,
   shellEvents,
   summaryFromInput,
   writeDelta,
@@ -152,6 +153,12 @@ export interface OpencodeAdapterOptions {
   onWorkspaceDenied?: (reason: string) => void;
   /** Heartbeat budget per agent; the default is the design's 10s. */
   heartbeatIntervalMs?: number;
+  /**
+   * The runtime's home directory, which rows shorten to `~` (`PathRoots`).
+   * Defaults to the runner's own: the server inherits the run's `HOME`. ""
+   * leaves home paths absolute.
+   */
+  homeDir?: string;
 }
 
 export interface OpencodeAdapter {
@@ -194,7 +201,9 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
   });
 
   let rootId = "";
-  let workspaceRoot = "";
+  // The run's roots: the home from `OpencodeAdapterOptions.homeDir`, the
+  // workspace from the root session's own declaration of its directory.
+  const paths = readerPaths(opts.homeDir);
   // The root's newest assistant message and a session.error it raised: the
   // two ways a turn ends in failure. Cleared when a turn reports it.
   let rootLastAssistant: string | undefined;
@@ -231,7 +240,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     if (!spawn && !force) return [];
     session.started = true;
     const parentAgentId = agentOf(spawn?.parentSessionId ?? session.parentSessionId ?? "");
-    const label = spawn?.label || trimSummary(session.title.replace(SUBAGENT_TITLE_SUFFIX, ""));
+    const label = spawn?.label || paths.line(session.title.replace(SUBAGENT_TITLE_SUFFIX, ""));
     return [{
       kind: "agent_started",
       agentId: childId,
@@ -252,7 +261,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     if (!parent) {
       if (rootId) return [];
       rootId = id;
-      workspaceRoot = str(info.directory).replace(/\/+$/, "");
+      paths.declareWorkspace(str(info.directory));
       return [{
         kind: "run_started",
         agentId: LEAD_AGENT_ID,
@@ -384,7 +393,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     countCall(callId, FANOUT_TOOL, parentSessionId, state);
     if (childId && !spawns.has(childId)) {
       spawns.set(childId, {
-        label: trimSummary(str(input.description)),
+        label: paths.line(str(input.description)),
         role: str(input.subagent_type),
         model: platformModel(str(obj(metadata.model).modelID)),
         parentSessionId,
@@ -396,8 +405,8 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
       const call = calls.get(callId);
       if (call && !call.settled) {
         call.settled = true;
-        const said = failureText(str(state.error));
-        const label = spawns.get(childId)?.label || trimSummary(str(input.description)) || "agent";
+        const said = failureText(str(state.error), paths.roots());
+        const label = spawns.get(childId)?.label || paths.line(str(input.description)) || "agent";
         const child = childId ? sessions.get(childId) : undefined;
         if (child && !child.failure) child.failure = said || "the fan-out call failed";
         events.push({
@@ -449,12 +458,12 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
       if (tool === SHELL_TOOL) {
         const command = str(input.command);
         events.push(
-          ...(command ? shellEvents(command, workspaceRoot, tool) : [{ kind: "tool_use" as const, tool, summary: "" }]).map(
+          ...(command ? shellEvents(command, paths.roots(), tool) : [{ kind: "tool_use" as const, tool, summary: "" }]).map(
             (e) => ({ ...e, ...stamp }),
           ),
         );
       } else {
-        events.push({ kind: "tool_use", tool, summary: summaryFromInput(input, SUMMARY_FIELDS, workspaceRoot), ...stamp });
+        events.push({ kind: "tool_use", tool, summary: summaryFromInput(input, SUMMARY_FIELDS, paths.roots()), ...stamp });
       }
     }
 
@@ -466,7 +475,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
       events.push({
         kind: "agent_progress",
         agentId,
-        phrase: trimSummary(title),
+        phrase: paths.line(title),
         ...(session?.toolCount ? { toolCount: session.toolCount } : {}),
       });
     }
@@ -509,10 +518,10 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
         // row carries no second copy of the sentence.
         opts.onWorkspaceDenied?.(text.slice(WORKSPACE_GUARD_MARKER.length).trim());
       } else {
-        failure = failureDetail(text);
+        failure = failureDetail(text, paths.roots());
       }
     } else if (!ok) {
-      failure = failureDetail(str(state.output) || str(metadata.output));
+      failure = failureDetail(str(state.output) || str(metadata.output), paths.roots());
     }
 
     if (ok) {
@@ -545,7 +554,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     const lastError = session.lastAssistant ? messages.get(session.lastAssistant)?.error : undefined;
     const failure = session.failure ?? lastError;
     const status: AgentStatus = stopRequested.has(sessionId) ? "stopped" : failure ? "failed" : "completed";
-    const report = reportFrom(session.lastText);
+    const report = reportFrom(paths.prose(session.lastText));
     const tokens = sessionTokens(sessionId);
     const durationMs = Math.max(0, now() - session.createdAt);
     events.push({
@@ -606,7 +615,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     const after = new Map<string, { title: string; status?: NonNullable<RunEvent["itemStatus"]> }>();
     const events: RunEventInput[] = [];
     for (const todo of todos) {
-      const title = trimSummary(str(todo.content));
+      const title = paths.line(str(todo.content));
       // Measured: 1.18.32's todos carry no id (S2b), so the entry's own text is
       // its identity — a status change keeps it, a rewording is a new item.
       const itemId = str(todo.id) || title;

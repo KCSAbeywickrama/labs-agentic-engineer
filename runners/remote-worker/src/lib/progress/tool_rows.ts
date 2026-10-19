@@ -27,10 +27,26 @@
 // drift, and a feed whose commits read differently depending on which runtime
 // made them is the one thing the canonical events exist to prevent.
 
+import os from "node:os";
 import type { RunEventInput } from "./emitter.js";
 import { trimSummary } from "./adapter_common.js";
 
 // --- paths ----------------------------------------------------------------------
+
+/**
+ * The two directories a reader's line shortens, each "" while unknown (which
+ * leaves its paths exactly as the runtime gave them).
+ *
+ * `workspace` is the run's project, as the runtime declared it. `home` is the
+ * runtime's home directory, where it keeps its OWN files — its session
+ * transcripts under `.claude/projects/`, the toolchain caches — and which spends
+ * the same ten characters on every row that reads one. The workspace sits
+ * inside it on a cluster pod, so the workspace is always tried first.
+ */
+export interface PathRoots {
+  workspace: string;
+  home: string;
+}
 
 /**
  * A path inside the workspace, relative to it: the ~95-character root is the
@@ -44,16 +60,93 @@ export function relativiseToWorkspace(path: string, root: string): string {
   return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
 }
 
+/**
+ * A path as a reader's line: workspace-relative inside the project, `~/…` under
+ * the runtime's home, absolute anywhere else. `~` keeps "this left the project"
+ * visible — which is why the home is not simply stripped the way the workspace
+ * is — and it is the shell's own spelling of that directory, so the line still
+ * names the same file.
+ */
+function readerPath(path: string, roots: PathRoots): string {
+  const inWorkspace = relativiseToWorkspace(path, roots.workspace);
+  if (inWorkspace !== path || !roots.home) return inWorkspace;
+  if (path === roots.home) return "~";
+  return path.startsWith(`${roots.home}/`) ? `~${path.slice(roots.home.length)}` : path;
+}
+
 // --- shell commands ----------------------------------------------------------
 
+/** `s` with every RegExp metacharacter escaped, so a directory matches as text. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * A shell command as a READER's line: the workspace root collapsed to `~ws`, so
- * the tail survives the width. `~ws` rather than nothing, so the line does not
- * read as a command someone could paste; `command` keeps the exact text.
+ * A shell command — or any free text that may quote one, or a path — as a
+ * READER's line: the workspace root collapsed to `~ws`, so the tail survives
+ * the width. `~ws` rather than nothing, so the line does not read as a command
+ * someone could paste; a shell row's `command` keeps the exact text.
+ *
+ * The home directory then collapses to `~`, but only where it stands as a whole
+ * path — at the start of a word and ending at a `/`, a quote, a space or the end
+ * — so `/opt/home/aep` and `/home/aep-old` stay what they are. The workspace
+ * goes first because it sits inside the home on a pod, and collapsing the home
+ * first would leave `~/aep-workspace/…` where `~ws` belongs.
+ *
+ * NOT capped, and nothing else about the text changes: each field has its own
+ * cap (a summary's 200, a report's 500) and applies it AFTER this, so the cap
+ * spends itself on the meaningful tail. Exported because the runtime's own
+ * prose quotes commands and paths too — a progress phrase is often "Running
+ * <the command>", a failed call's output names the file it failed on — and the
+ * contract's reader form holds for every line a reader sees, not only for the
+ * rows composed here.
  */
-function commandForReader(cmd: string, root: string): string {
-  if (!root) return cmd;
-  return cmd.split(root).join("~ws");
+export function readerText(cmd: string, roots: PathRoots): string {
+  const shown = roots.workspace ? cmd.split(roots.workspace).join("~ws") : cmd;
+  if (!roots.home) return shown;
+  return shown.replace(new RegExp(`(?<![\\w.~/-])${escapeRegExp(roots.home)}(?=[/\\s'"]|$)`, "g"), "~");
+}
+
+/**
+ * One run's two roots and the reader form of the runtime's own prose under
+ * them, which every adapter needs the same way. The home is fixed at
+ * construction: no message declares it, so it is the one root taken from
+ * outside (the adapter's `homeDir` option, else this process's). The workspace
+ * is the runtime DECLARING its cwd, so it is empty until the adapter hears it,
+ * which leaves paths absolute rather than mis-relativised. Both are kept with
+ * trailing slashes stripped, the one boundary form `readerText` matches, which
+ * also turns a home of "/" into "unknown".
+ */
+export interface ReaderPaths {
+  /** Both roots as they stand now. */
+  roots(): PathRoots;
+  /** The workspace root, once the runtime declares its cwd. */
+  declareWorkspace(dir: string): void;
+  /**
+   * The runtime's own prose — a phrase, a label, a report, a plan title — in
+   * reader form, uncapped. Its words quote commands: a progress phrase is
+   * usually "Running <the Bash command>", and live (2026-10-12) a crew caption
+   * read "Running cd /home/aep/aep-workspace/default/… && …". Only the two roots
+   * change; the caller caps afterwards, as for every summary.
+   */
+  prose(text: string): string;
+  /** `prose`, capped as a row's one line (a label, a phrase, a title). */
+  line(text: string): string;
+}
+
+export function readerPaths(homeDir?: string): ReaderPaths {
+  const home = (homeDir ?? os.homedir()).replace(/\/+$/, "");
+  let workspace = "";
+  const roots = (): PathRoots => ({ workspace, home });
+  const prose = (text: string): string => readerText(text, roots());
+  return {
+    roots,
+    declareWorkspace: (dir) => {
+      workspace = dir.replace(/\/+$/, "");
+    },
+    prose,
+    line: (text) => trimSummary(prose(text)),
+  };
 }
 
 /**
@@ -82,21 +175,33 @@ function shellFields(cmd: string, shown: string): { summary: string; command?: s
 }
 
 /**
- * A tool input as a reader's line: the first of `fields` it carries (a runtime
- * lists its own argument spellings, most identifying first), relativised
- * before the cap so the cap spends itself on the part that names the file;
- * otherwise a compact JSON dump, which still surfaces an unknown tool.
+ * A tool input as a reader's line: the first of `fields` it carries as text (a
+ * runtime lists its own argument spellings, most identifying first), shortened
+ * by `readerPath` before the cap so the cap spends itself on the part that
+ * names the file.
+ *
+ * A tool none of them fits says nothing here, and its row prints the tool's
+ * name alone. This used to fall back to the input as JSON, on the theory that a
+ * dump still surfaced an unknown tool — but the NAME already surfaces it, and
+ * the dump was the raw arguments the contract keeps off the feed: live, a
+ * `ToolSearch` row read `$ ToolSearch {"query":"select:…","max_results":3}`.
  */
-export function summaryFromInput(input: unknown, fields: readonly string[], workspaceRoot: string): string {
+export function summaryFromInput(input: unknown, fields: readonly string[], roots: PathRoots): string {
   if (!input || typeof input !== "object") return "";
   const o = input as Record<string, unknown>;
-  const candidate = fields.map((f) => o[f]).find((v) => v !== undefined && v !== null);
-  if (typeof candidate === "string") return trimSummary(relativiseToWorkspace(candidate, workspaceRoot));
-  try {
-    return trimSummary(JSON.stringify(o));
-  } catch {
-    return "";
-  }
+  const candidate = fields.map((f) => o[f]).find((v): v is string => typeof v === "string" && v !== "");
+  return candidate ? trimSummary(readerPath(candidate, roots)) : "";
+}
+
+/**
+ * The reader's line a row carries: its `summary`, or — for a row that judged
+ * the exact command enough on its own (`readerLine`) — that command, held to the
+ * same one-line cap. This is what every renderer prints (`summary ?? command`),
+ * so a backgrounded command's task events, which name the command again
+ * minutes later, say it exactly as its launching row did.
+ */
+export function rowSummary(row: RunEventInput): string {
+  return row.summary ?? trimSummary(row.command ?? "");
 }
 
 /**
@@ -115,9 +220,9 @@ export function summaryFromInput(input: unknown, fields: readonly string[], work
  *
  * The caller stamps `agentId` and `toolUseId` onto what comes back.
  */
-export function shellEvents(command: string, workspaceRoot: string, tool: string): RunEventInput[] {
+export function shellEvents(command: string, roots: PathRoots, tool: string): RunEventInput[] {
   const cmd = command.trim();
-  const shown = commandForReader(cmd, workspaceRoot);
+  const shown = readerText(cmd, roots);
   // git commit -m "..." or -F file
   if (/^git\s+commit\b/.test(cmd)) {
     const msgMatch = cmd.match(/-m\s+(['"])(.+?)\1/);
@@ -184,9 +289,13 @@ function outputLines(text: string): string[] {
     .filter((l) => l !== "");
 }
 
-/** The failed call's own words, flattened to one line and bounded. */
-export function failureText(text: string): string {
-  const lines = outputLines(text);
+/**
+ * The failed call's own words, flattened to one line and bounded, in reader
+ * form (`readerText`): a failure names the file it failed on, by its absolute
+ * path.
+ */
+export function failureText(text: string, roots: PathRoots): string {
+  const lines = outputLines(readerText(text, roots));
   if (lines.length === 0) return "";
   const kept = lines.slice(0, MAX_FAILURE_LINES);
   const dropped = lines.length - kept.length;
@@ -197,10 +306,12 @@ export function failureText(text: string): string {
 /**
  * The one-line diagnosis of a failed call, plus its exit code when the tool was
  * a shell that printed one. Everything else in the output is developer material
- * and belongs in the runtime's raw log, not in a progress feed.
+ * and belongs in the runtime's raw log, not in a progress feed. In reader form,
+ * like `failureText`: a compiler's diagnosis leads with the absolute path of
+ * the file it is about.
  */
-export function failureDetail(text: string): { exitCode?: number; summary: string } {
-  const lines = outputLines(text);
+export function failureDetail(text: string, roots: PathRoots): { exitCode?: number; summary: string } {
+  const lines = outputLines(readerText(text, roots));
   if (lines.length === 0) return { summary: "" };
 
   const code = EXIT_CODE_LINE.exec(lines[0]);

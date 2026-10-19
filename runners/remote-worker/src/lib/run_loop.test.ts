@@ -363,13 +363,20 @@ test("consumeRun: the lead waits on its backgrounded work with TaskOutput", asyn
 });
 
 // The subscription window's state arrives on its own message type and used to
-// be dropped with every unrecognised one.
-test("consumeRun: a rate-limit event reaches the feed as a closed-code notice", async () => {
+// be dropped with every unrecognised one. Probe 1's only window is `allowed`,
+// which the contract says is not a notice — `rate_limit` is raised only once
+// calls are held back — so it reaches the feed as nothing at all.
+test("consumeRun: an allowed rate-limit window puts no notice on the feed", async () => {
   const { emitted } = await replay(fixture("probe1-background-fanout.jsonl"));
+  assert.equal(kindsOf(emitted, "notice").filter((e) => e.code === "rate_limit").length, 0);
+});
 
+test("consumeRun: a rate-limit window that bites reaches the feed as a closed-code notice", async () => {
+  const window = { type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "seven_day" } };
+  const { emitted } = await replay([window]);
   const notices = kindsOf(emitted, "notice").filter((e) => e.code === "rate_limit");
   assert.equal(notices.length, 1);
-  assert.equal(notices[0].level, "info", "this window was merely being consumed");
+  assert.equal(notices[0].level, "error");
 });
 
 // The v2 pin the design is emphatic about, checked where it actually matters:

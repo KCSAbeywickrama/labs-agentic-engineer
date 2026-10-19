@@ -108,6 +108,8 @@ async function replay(name: string, endBefore?: number): Promise<Replay> {
     model: "claude-haiku-4-5",
     taskKind: "implementation",
     now: () => clock,
+    // The machine running the test must not decide a golden.
+    homeDir: "",
     // The runner's own onDenied wording (lib/runner.ts), so the golden shows
     // the line a live run would put on the feed.
     onWorkspaceDenied: (reason) =>

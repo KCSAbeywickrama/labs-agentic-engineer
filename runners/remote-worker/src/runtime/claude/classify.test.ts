@@ -185,16 +185,27 @@ test("readStallSignal: a missing field degrades to a usable line, never to undef
 });
 
 // The one entry that is not a system subtype. It arrives on every window
-// change, including the healthy ones, which is why the level moves with the
-// status rather than being fixed at `warn`.
-test("readStallSignal: a rate-limit window is reported at the volume its status earns", () => {
-  const allowed = readStallSignal({
+// change, including the healthy ones, and only the states that hold calls back
+// are notices: the contract raises `rate_limit` at warn or error, never for a
+// window that is still allowed. Live (2026-10-12) an `allowed` window rendered
+// as "rate limited by the provider" on a run nothing had throttled.
+test("readStallSignal: a rate-limit window is a signal only once it bites", () => {
+  assert.equal(
+    readStallSignal({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.26 },
+    }),
+    undefined,
+    "a window merely being consumed is not a notice",
+  );
+
+  const warning = readStallSignal({
     type: "rate_limit_event",
-    rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.26 },
+    rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.82 },
   });
-  assert.equal(allowed?.level, "info");
-  assert.equal(allowed?.code, "rate_limit");
-  assert.equal(allowed?.detail, "[rate-limit] allowed on the five_hour window at 26%");
+  assert.equal(warning?.level, "warn", "the next call may be refused, which someone can act on");
+  assert.equal(warning?.code, "rate_limit");
+  assert.equal(warning?.detail, "[rate-limit] near the limit on the seven_day window at 82%");
 
   const rejected = readStallSignal({
     type: "rate_limit_event",
@@ -276,6 +287,20 @@ test("stall reader: the line that MATTERS is never swallowed by the ones before 
   assert.ok(read(at("allowed_warning", 0.82)));
 });
 
+// `allowed` is silent, but it is still a change: the warning was over. A window
+// that then bites again at the same percent is a second crossing, and the
+// dedupe must not mistake it for the first one repeated.
+test("stall reader: an allowed window says nothing, and ends what was said before it", () => {
+  const read = createStallSignalReader();
+  const at = (status: string, utilization: number): unknown => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status, rateLimitType: "five_hour", utilization },
+  });
+  assert.ok(read(at("allowed_warning", 0.82)));
+  assert.equal(read(at("allowed", 0.1)), undefined, "allowed is not a notice");
+  assert.ok(read(at("allowed_warning", 0.82)), "the second crossing speaks");
+});
+
 // Only the rate limit repeats itself. Everything else here is a discrete
 // occurrence, and a second one is a second fact.
 test("stall reader: a second compaction is a second event, not a repeat", () => {
@@ -343,6 +368,16 @@ test("classify: a rate-limit sentence already said falls through to activity", (
   assert.equal(classify(window).kind, "activity");
   // Per session: a second session has said nothing yet.
   assert.equal(createClaudeClassifier()(window).kind, "stall_signal");
+});
+
+// An allowed window is not a notice, and it is not activity either: while it
+// was a notice it never reached the watchdog, and as `activity` every healthy
+// window would reset the idle clock. It is the account talking, so `noise`.
+test("classify: an allowed rate-limit window is noise, neither a notice nor activity", () => {
+  const allowed = { type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour" } };
+  assert.equal(classOf(allowed), "noise");
+  const rejected = { type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour" } };
+  assert.equal(classOf(rejected), "stall_signal", "a window that bites is still the loud kind");
 });
 
 test("classify: every health message is its own class, not activity", () => {

@@ -185,29 +185,45 @@ export function readStallSignal(message: unknown): StallSignal | undefined {
   }
 }
 
+/** A rate-limit window's own fields, or undefined for any other message. */
+function rateLimitInfo(message: unknown): Record<string, unknown> | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const m = message as Record<string, unknown>;
+  if (m.type !== "rate_limit_event") return undefined;
+  const info = m.rate_limit_info;
+  return info && typeof info === "object" ? (info as Record<string, unknown>) : undefined;
+}
+
 /**
  * A subscription window's state, as the SDK reports it whenever it changes.
  *
- * Reported at `info` while the window is merely being consumed and louder as it
- * bites, because the three states are three different facts: "this run is
- * spending quota" is background, "the next call may be refused" is a warning
- * someone can act on, and "the provider is refusing" is the whole explanation
- * for a run that is about to go nowhere. Every field printed is a closed enum
- * or a number, same rule as the rest of this module — nothing here can carry a
- * prompt or a credential into a build log the console forwards.
+ * Only the two states that bite are signals: "the next call may be refused"
+ * (`allowed_warning`) is a warning someone can act on, and "the provider is
+ * refusing" (`rejected`) is the whole explanation for a run that is about to go
+ * nowhere. A window that is merely being consumed (`allowed`) is not a notice
+ * at all — the contract raises `rate_limit` only when calls are held back.
+ * This used to report it at `info`, and a reader saw "rate limited by the
+ * provider · allowed on the five_hour window" on a run nothing had throttled.
+ * Every field printed is a closed enum or a number, same rule as the rest of
+ * this module — nothing here can carry a prompt or a credential into a build
+ * log the console forwards.
  */
 function readRateLimit(m: Record<string, unknown>): StallSignal | undefined {
-  const info = m.rate_limit_info;
-  if (!info || typeof info !== "object") return undefined;
-  const i = info as Record<string, unknown>;
-  const status = i.status === "rejected" ? "rejected" : i.status === "allowed_warning" ? "near the limit" : "allowed";
-  const level = i.status === "rejected" ? "error" : i.status === "allowed_warning" ? "warn" : "info";
+  const i = rateLimitInfo(m);
+  if (!i) return undefined;
+  const said =
+    i.status === "rejected"
+      ? { level: "error" as const, status: "rejected" }
+      : i.status === "allowed_warning"
+        ? { level: "warn" as const, status: "near the limit" }
+        : undefined;
+  if (!said) return undefined;
   const window = typeof i.rateLimitType === "string" ? i.rateLimitType : "";
   const used = typeof i.utilization === "number" ? ` at ${Math.round(i.utilization * 100)}%` : "";
   return {
-    level,
+    level: said.level,
     code: "rate_limit",
-    detail: `[rate-limit] ${status}${window ? ` on the ${window} window` : ""}${used}`,
+    detail: `[rate-limit] ${said.status}${window ? ` on the ${window} window` : ""}${used}`,
   };
 }
 
@@ -233,6 +249,11 @@ function readRateLimit(m: Record<string, unknown>): StallSignal | undefined {
  * produce a line each way, and it should: only the LAST line said is remembered,
  * so this suppresses repetition, never a change.
  *
+ * A window that reports `allowed` again says nothing, but it does end what was
+ * last said: a later warning at a percent already printed is the window
+ * biting a SECOND time, which is news, so the memory is cleared rather than
+ * left to swallow it.
+ *
  * Only the rate limit is filtered. Every other signal here is a discrete
  * occurrence — a compaction happened, a tool call was denied, the worker is
  * going away — and a second one is a second fact, not a restatement.
@@ -244,7 +265,11 @@ export function createStallSignalReader(): (message: unknown) => StallSignal | u
   let lastRateLimit = "";
   return (message) => {
     const signal = readStallSignal(message);
-    if (!signal || signal.code !== "rate_limit") return signal;
+    if (!signal) {
+      if (rateLimitInfo(message)?.status === "allowed") lastRateLimit = "";
+      return undefined;
+    }
+    if (signal.code !== "rate_limit") return signal;
     const said = `${signal.level} ${signal.detail}`;
     if (said === lastRateLimit) return undefined;
     lastRateLimit = said;
@@ -350,7 +375,12 @@ function resolvedSkills(m: Record<string, unknown>): string[] {
  *
  * The order of the questions is load-bearing in exactly one place: a rate-limit
  * sentence the dedupe drops is not a stall signal, and falls through to
- * `activity` (translated to nothing, and observed). Every other class is
+ * `activity` (translated to nothing, and observed).
+ *
+ * A window that reports `allowed` is `noise`: no notice (see `readRateLimit`),
+ * and not activity either. It is the account's quota talking, not the session
+ * doing anything, and while it was a notice it never touched the idle clock —
+ * falling through to `activity` would have made every healthy window reset it. Every other class is
  * disjoint from the rest by shape, so no message is ever two of them.
  *
  * Per session because the rate-limit reader is: two runs sharing one would
@@ -363,6 +393,7 @@ export function createClaudeClassifier(): MessageClassifier {
     if (retry) return { kind: "retry", info: retry };
     const signal = readStallSignal(message);
     if (signal) return { kind: "stall_signal", signal };
+    if (rateLimitInfo(message)?.status === "allowed") return { kind: "noise" };
     if (!message || typeof message !== "object") return { kind: "activity" };
     const m = message as Record<string, unknown>;
     if (isModelWaitFrame(m)) return { kind: "model_wait", streaming: isStreamFrame(m) };
