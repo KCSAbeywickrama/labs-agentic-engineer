@@ -1866,6 +1866,55 @@ func TestBlockedWave_StillPollsWhatWasAlreadyConverging(t *testing.T) {
 	require.Len(t, h.deploys, 1, "svc-b promoted once; no further wave and no converge")
 }
 
+// The post-block poll covers the waves the pass reached and what was already
+// converging — not the later waves it never promoted. The plan lists every
+// wave's targets in Waited up front; a component with no binding polls as
+// pending with no reason, and the deadline would file it for a deployment
+// that never happened. Here web sits in a second wave behind the blocked one.
+func TestBlockedWave_DoesNotPollWavesItNeverPromoted(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		workable(1, 1),
+		MilestoneSnapshot{},
+	)
+	h.versionIs(
+		delivery.ComponentState{Component: "svc-a", State: delivery.ComponentStateConverging, DesiredSHA: testMergeSHA, Pinned: "release-svc-a"},
+		delivery.ComponentState{Component: "svc-b", State: delivery.ComponentStateBehind, DesiredSHA: testMergeSHA},
+		delivery.ComponentState{Component: "web", State: delivery.ComponentStateBehind, DesiredSHA: testMergeSHA},
+	)
+	h.wavesAreWith([][]string{{"svc-b"}, {"web"}},
+		map[string][]string{"svc-a": {"svc-b"}, "svc-b": {"svc-a"}, "web": {"svc-b"}})
+	var polledWeb bool
+	h.deploymentsAnswer(func(_ int, in WaitSetInput) CycleDeployState {
+		out := CycleDeployState{Expected: len(in.Components)}
+		for _, c := range in.Components {
+			switch c {
+			case "web":
+				polledWeb = true
+				out.Pending = append(out.Pending, c) // no binding: pending, no reason
+			case "svc-a":
+				out.Failed = append(out.Failed, c)
+				out.Reasons = map[string]string{"svc-a": "RenderingFailed"}
+			default:
+				out.Pending = append(out.Pending, c)
+				out.WaitingOnProvider = append(out.WaitingOnProvider, c)
+			}
+		}
+		return out
+	})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	require.False(t, polledWeb, "a wave the pass never promoted is not polled")
+	require.Len(t, h.deploys, 1, "only the first wave was written")
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, []string{"svc-a"}, delivery.TargetNames(h.deployMints[0].Failed),
+		"the converging component that failed is filed; the unpromoted web is not")
+}
+
 // The deadline belongs to the STAGE, not to a wave.
 //
 // It is created once in deployCycle and passed into every wait, so a design that

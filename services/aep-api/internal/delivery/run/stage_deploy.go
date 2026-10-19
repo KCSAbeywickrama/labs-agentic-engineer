@@ -168,12 +168,16 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	// promoted in an earlier wave is met for the deadline's purposes whatever
 	// the snapshot said about it.
 	ready := map[string]bool{}
+	promoted := map[string]bool{}
 	blockedWave := false
 	for _, wave := range plan.Waves {
 		if res, err := l.promote(ctx, wave); err != nil || res != cycleGreen {
 			return res, err
 		}
 		names := delivery.TargetNames(wave)
+		for _, name := range names {
+			promoted[name] = true
+		}
 		res, blocked, err := l.awaitDeployments(ctx, names, version, deadline, plan.Providers, ready)
 		if err != nil || res != cycleGreen {
 			return res, err
@@ -199,7 +203,13 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	// behind the other — and the other half, which had failed to render, never
 	// polled and never filed: the run ended version-incomplete with nothing to
 	// work. With the deadline already spent the wait answers within two polls.
-	res, blocked, err := l.awaitDeployments(ctx, plan.Waited, version, deadline, plan.Providers, ready)
+	//
+	// Less the waves the pass never reached: the plan lists every wave's targets
+	// in Waited before anything is written, and after a blocked wave the later
+	// ones were not. A component with no binding polls as pending with no
+	// reason, and the deadline would file it for a deployment that never
+	// happened.
+	res, blocked, err := l.awaitDeployments(ctx, reachedWaited(plan, promoted), version, deadline, plan.Providers, ready)
 	if err != nil || res != cycleGreen {
 		return res, err
 	}
@@ -232,6 +242,26 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	}
 	l.convergeOwed = false
 	return cycleGreen, nil
+}
+
+// reachedWaited is plan.Waited less the targets of waves this pass did not
+// promote. On a pass with no blocked wave it is plan.Waited itself.
+func reachedWaited(plan delivery.DeployPlan, promoted map[string]bool) []string {
+	unreached := map[string]bool{}
+	for _, wave := range plan.Waves {
+		for _, target := range wave {
+			if !promoted[target.Component] {
+				unreached[target.Component] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(plan.Waited))
+	for _, name := range plan.Waited {
+		if !unreached[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // deferConverge ends a pass whose wait expired with every pending component
