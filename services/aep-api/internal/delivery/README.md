@@ -532,8 +532,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   component whose binding is waiting on a sibling's (`ComponentDeploy.WaitingOnProvider`, read off
   OpenChoreo's `ConnectionsPending`) is not filed: its provider is in the same read with its own work
   or its own failure, and an issue against the consumer sends an agent after a deployment that is
-  healthy and has simply not happened. When nothing else is pending the pass ends on no failure and
-  the serving gate above decides the version. For the same reason the build stage answers only once
+  healthy and has simply not happened. When nothing else is pending the pass stops promoting, still
+  polls what was already converging so a failure there is filed, ends on no failure, and the serving
+  gate above decides the version. For the same reason the build stage answers only once
   EVERY build of the merge has a verdict, so the reconcile never plans around a sibling still
   building, which would classify as `unbuilt`.
 - **The deploy stage GATES on configuration, and the two blockers behave differently** (ADR-0023).

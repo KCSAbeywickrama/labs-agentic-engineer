@@ -129,8 +129,9 @@ indistinguishable from success.
 >   (OpenChoreo's `ConnectionsPending`, carried as `ComponentDeploy.WaitingOnProvider`) is not filed:
 >   its provider's state has its own work or its own failure in the same read — only when that
 >   provider is in fact not met; a waiter whose providers are all met is filed, since then its own
->   connection cannot resolve. When nothing else is pending the pass ends on no failure, the converge
->   it owes its promotes is paid by the next pass, and the serving gate above decides the version.
+>   connection cannot resolve. When nothing else is pending the pass stops promoting but still polls
+>   what was already converging, so a failure there is filed; it ends on no failure, the converge it
+>   owes its promotes is paid by the next pass, and the serving gate above decides the version.
 
 ## Shape
 

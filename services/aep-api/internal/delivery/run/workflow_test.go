@@ -1745,13 +1745,19 @@ func TestDeployExpiry_TheConvergeItSkippedIsOwedToTheNextPass(t *testing.T) {
 	)
 	h.wavesAreWith([][]string{{"api"}, {"web"}}, map[string][]string{"web": {"api", "agent"}})
 	h.deploymentsAnswer(func(cycle int, in WaitSetInput) CycleDeployState {
-		if cycle == 1 && len(in.Components) == 1 && in.Components[0] == "web" {
-			return CycleDeployState{
-				Expected: 1, Pending: []string{"web"}, WaitingOnProvider: []string{"web"},
-				Reasons: map[string]string{"web": "ConnectionsPending"},
+		// In cycle one web never resolves its connection, whichever wait polls
+		// it: its own wave, and the waited set the blocked pass still polls.
+		out := CycleDeployState{Expected: len(in.Components)}
+		for _, c := range in.Components {
+			if cycle == 1 && c == "web" {
+				out.Pending = append(out.Pending, "web")
+				out.WaitingOnProvider = append(out.WaitingOnProvider, "web")
+				out.Reasons = map[string]string{"web": "ConnectionsPending"}
+				continue
 			}
+			out.Ready++
 		}
-		return CycleDeployState{Expected: len(in.Components), Ready: len(in.Components)}
+		return out
 	})
 	h.deployMintsAre(nil)
 	h.merges(2)
@@ -1807,6 +1813,57 @@ func TestDeploy_AFailedProviderIsFiledNotItsWaitingPartner(t *testing.T) {
 	require.Equal(t, []string{"svc-b"}, delivery.TargetNames(h.deployMints[0].Failed),
 		"the half that failed to render is filed; its partner waiting on it is not")
 	require.Equal(t, "RenderingFailed", h.deployMints[0].Reasons["svc-b"])
+}
+
+// A blocked wave ends promotion, not the pass: the components that were already
+// converging are still polled. Here svc-a and svc-b connect to each other,
+// svc-b's fix is behind and svc-a is converging on it — and svc-a has in fact
+// failed to render. svc-b's wave ends blocked, excused behind svc-a; the waited
+// set is where svc-a's failure is read, and it is filed. Ending the pass at the
+// blocked wave left svc-a unpolled and the run version-incomplete with nothing
+// to work (review of #934).
+func TestBlockedWave_StillPollsWhatWasAlreadyConverging(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		workable(1, 1),
+		MilestoneSnapshot{},
+	)
+	h.versionIs(
+		delivery.ComponentState{Component: "svc-a", State: delivery.ComponentStateConverging, DesiredSHA: testMergeSHA, Pinned: "release-svc-a"},
+		delivery.ComponentState{Component: "svc-b", State: delivery.ComponentStateBehind, DesiredSHA: testMergeSHA},
+	)
+	h.wavesAreWith([][]string{{"svc-b"}}, map[string][]string{"svc-a": {"svc-b"}, "svc-b": {"svc-a"}})
+	var polledA bool
+	h.deploymentsAnswer(func(_ int, in WaitSetInput) CycleDeployState {
+		out := CycleDeployState{Expected: len(in.Components)}
+		for _, c := range in.Components {
+			switch c {
+			case "svc-a":
+				polledA = true
+				out.Failed = append(out.Failed, c)
+				if out.Reasons == nil {
+					out.Reasons = map[string]string{}
+				}
+				out.Reasons[c] = "RenderingFailed"
+			default:
+				out.Pending = append(out.Pending, c)
+				out.WaitingOnProvider = append(out.WaitingOnProvider, c)
+			}
+		}
+		return out
+	})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	require.True(t, polledA, "the waited set is polled after the blocked wave")
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, 1, h.deployMintCount())
+	require.Equal(t, []string{"svc-a"}, delivery.TargetNames(h.deployMints[0].Failed),
+		"the half that failed to render is filed; its excused partner is not")
+	require.Len(t, h.deploys, 1, "svc-b promoted once; no further wave and no converge")
 }
 
 // The deadline belongs to the STAGE, not to a wave.
