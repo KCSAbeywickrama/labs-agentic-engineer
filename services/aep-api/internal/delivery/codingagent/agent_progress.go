@@ -74,8 +74,8 @@ const (
 	legacyProgressLimit = 200
 )
 
-// Bootstrap seqs identify the synthetic "dark zone" progress lines the reader
-// emits BEFORE the runner writes its first NDJSON line — the stretch (pod
+// Bootstrap seqs identify the synthetic "dark zone" progress lines the V1
+// surfaces emit BEFORE the runner writes its first NDJSON line — the stretch (pod
 // scheduling, image pull, container boot) the live-tail is otherwise blind to,
 // so the console showed a dead "waiting…" for the slowest part of the flow.
 //
@@ -86,7 +86,8 @@ const (
 // negative seq) shows exactly one new row. Ts is left empty on purpose — these
 // are transient markers, not wall-clock log lines (filterEventsAfter keeps
 // untimestamped events, and lastEventMillis ignores them, so the cursor never
-// advances past a synthetic line).
+// advances past a synthetic line). The v2 run feed has no such lines: there the
+// same states are the cycle's `boot` (cycle_boot.go).
 const (
 	seqBootScheduling    = -10 // Job applied, pod not scheduled / created yet
 	seqBootPulling       = -11 // ContainerCreating / PodInitializing (image pull + setup)
@@ -146,28 +147,27 @@ func logsTruncatedEvent() contracts.ProgressEvent {
 	}
 }
 
-// bootState is one pre-stdout runner state, resolved once and rendered by both
-// envelope versions of the feed.
+// bootState is one pre-stdout runner state, resolved once and rendered twice:
+// as the v1 synthetic progress line (bootstrapEvent) and as the cycle's
+// RunCycleView.boot (cycle_boot.go).
 //
-//   - seq is the stable negative id;
+//   - seq is the v1 line's stable negative id;
 //   - name is the stable phase id — the v1 console maps it to a friendly label,
-//     and it is ALSO the v2 `notice` code verbatim (RunEventCodeRunner*), which
-//     is what lets the v2 render carry no prose at all;
+//     and it is ALSO the boot code verbatim (RunCycleBootCodeRunner*), which is
+//     what lets boot carry no prose of the platform's own;
 //   - summary is the human sentence, and is the V1 render's alone. Wording lives
 //     in @aep/progress-view, keyed off the code; a producer that shipped its own
 //     copy would be a second place the words could change;
-//   - detail is the only prose the v2 render carries, and only where the code
-//     genuinely cannot say the whole thing: the scheduler's own message on an
-//     unschedulable pod, and the raw waiting reason on one this build does not
-//     recognise. Empty everywhere else;
-//   - alarming marks the states that are a problem rather than a wait (the v2
-//     feed renders it as a `warn` notice).
+//   - detail is the cluster's own words, and only where the code genuinely
+//     cannot say the whole thing: the scheduler's message on an unschedulable
+//     pod, the error a failing pull or a missing secret reports, and the raw
+//     waiting reason on one this build does not recognise. Empty everywhere
+//     else.
 type bootState struct {
-	seq      int64
-	name     string
-	summary  string
-	detail   string
-	alarming bool
+	seq     int64
+	name    string
+	summary string
+	detail  string
 }
 
 // bootstrapState maps a pre-stdout runner state to its marker. podFound=false
@@ -183,10 +183,10 @@ func bootstrapState(podFound bool, phase, waitingReason, message string) bootSta
 	switch waitingReason {
 	case "ImagePullBackOff", "ErrImagePull", "ImageInspectError", "RegistryUnavailable":
 		return bootState{seq: seqBootBackoff, name: "runner_image_pull_backoff",
-			summary: "Pulling the agent image is taking longer than usual (retrying)…", alarming: true}
+			summary: "Pulling the agent image is taking longer than usual (retrying)…", detail: firstLine(message)}
 	case "CreateContainerConfigError", "CreateContainerError", "InvalidImageName":
 		return bootState{seq: seqBootConfig, name: "runner_config_error",
-			summary: "Runner is waiting on its configuration and secrets…", alarming: true}
+			summary: "Runner is waiting on its configuration and secrets…", detail: firstLine(message)}
 	case "ContainerCreating", "PodInitializing":
 		return bootState{seq: seqBootPulling, name: "runner_pulling_image", summary: "Pulling the agent image and preparing the container…"}
 	case "Unschedulable", "SchedulerError":
@@ -195,7 +195,7 @@ func bootstrapState(podFound bool, phase, waitingReason, message string) bootSta
 		// is capacity. The scheduler's own first line is the one thing the code
 		// cannot carry (WHICH resource ran out), so it rides `detail`.
 		st := bootState{seq: seqBootUnschedulable, name: "runner_unschedulable",
-			summary: "No capacity to schedule the runner on the cluster…", alarming: true}
+			summary: "No capacity to schedule the runner on the cluster…"}
 		if detail := firstLine(message); detail != "" {
 			st.detail = detail
 			st.summary = "No capacity to schedule the runner: " + detail

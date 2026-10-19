@@ -2080,16 +2080,28 @@ paths:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/RunProgressEvent'
-          description: 'ONE SSE stream stitching every cycle of the run: a `cycle` frame per cycle record
-            (client upserts by id) and a `line` frame per agent-log entry, each line carrying the id of
-            the cycle that produced it so the console can render one accordion section per cycle. Each
-            line also carries an `emitter` chip — `main` for the run''s main agent, `subagent` for work
-            it fanned out with the Task tool. One `data:` JSON frame per event (a RunProgressEvent
-            discriminated by `type`), each stamped `id: <seq>`; `: keep-alive` comments pace idle waits.
-            ONLY a terminal run settles the stream: a terminal run streams its whole history then ends
-            with a `done` frame, `data: [DONE]`, and a server close, while a live run stays open
-            indefinitely. Reconnects are idempotent — the client upserts cycles by id and dedups lines
-            by cycleId+seq.'
+          description: >-
+            ONE SSE stream stitching every cycle of the run, one `data:` JSON
+            frame per RunProgressEvent (discriminated by `type`), each stamped
+            `id: <n>` and carrying `serverTime`. The frame types split FACTS from
+            STATE, and a client relies on the split.
+
+            `event` frames are facts: one RunEvent each, keyed by (cycleId,
+            attempt, seq), append-only and never retracted, so a client folds
+            them and never has to drop one later. `cycle` frames are state: the
+            whole cycle record, re-sent each time anything on it changes (its
+            pull request, its `recording`, its startup `boot`); the newest wins.
+            `tick` frames carry nothing but `serverTime`, sent when the stream
+            has been quiet for 15 seconds, so a client can tell a quiet run on a
+            live connection from a dead connection. `done` is the terminal run
+            state: ONLY a terminal run sends it, after its whole history,
+            followed by `data: [DONE]` and a server close. A live run's stream
+            stays open indefinitely.
+
+            Reconnects replay from the start and are idempotent: the client
+            upserts cycles by id and dedups events by (cycleId, attempt, seq).
+            `line` frames (v1 RunProgressLine) remain for the compatibility
+            window and carry their own cycle attribution.
         default:
           content:
             application/json:
@@ -2370,7 +2382,11 @@ paths:
             timeline across all attempts. One `data:` JSON frame per event (a TaskStreamEvent discriminated
             by `type`: task | execution | line | done), each stamped `id: <seq>`; `: keep-alive` comments
             pace idle waits. A settled Task streams its full history then ends with `data: [DONE]` and
-            the server closes the connection. Reconnects are idempotent: the client upserts task/execution
+            the server closes the connection. A Task with no log of its own ends the same way at once, once
+            it has no execution rows: only a `provision` gate still gains rows (the gate run, possibly after
+            the stream opened, so it is waited for); coding work (`development`, `bug`, `conflict`) is logged
+            on its milestone run''s feed (stream-run-progress) and a validation on the version''s validation.
+            Reconnects are idempotent: the client upserts task/execution
             by id and dedups lines, so state re-emitted on reconnect is safe. There are deliberately no
             server-side filters (executionId/kind) — every line carries its own attribution and the console
             groups by attempt client-side.'
@@ -6311,6 +6327,20 @@ components:
             cycle boundary).
           format: int64
           type: integer
+        boot:
+          allOf:
+          - $ref: '#/components/schemas/RunCycleBoot'
+          description: >-
+            Where this open cycle's current attempt is in starting its runner,
+            before the agent's first event. Absent once that event arrives, and
+            on an ended cycle. STATE, not history: the progress stream re-sends
+            the cycle frame each time it changes, and a client shows the newest
+            and keeps none of the earlier ones. It replaces the negative-seq
+            `runner_*` notices the stream used to send as events. It is sent on
+            the run progress stream's cycle frames, read from the pod with the
+            feed; run reads and the version build-progress stream, which read no
+            pod, leave it absent.
+          x-go-type-skip-optional-pointer: false
         branch:
           type: string
         createdAt:
@@ -6491,6 +6521,73 @@ components:
       - since
       - failsAt
       type: object
+    RunCycleBoot:
+      additionalProperties: false
+      description: >-
+        One open cycle's runner on its way up, as the platform last read the
+        attempt's pod: the dark zone between dispatch and the agent's first
+        event, which is the slowest stretch of a run and the one a reader is
+        most likely to be watching. Read from the pod on the same read that
+        serves the cycle's feed, so it is as fresh as the feed.
+
+        It answers "where is startup", and `startupWait` answers "is startup
+        stuck, and until when does the platform wait". Both can be present: an
+        attempt whose pod cannot be scheduled has `boot.code`
+        `runner_unschedulable` and a `startupWait` with its `failsAt`.
+
+        The runner's own two pre-session conditions (`workspace_provisioning`,
+        `workspace_ready`) are not here: the runner emits them, so they are
+        events with real seqs, and their arrival ends `boot`.
+      properties:
+        attempt:
+          description: Which dispatch of the cycle this describes (RunProgressEvent.attempt).
+          type: integer
+        code:
+          description: >-
+            Which startup state, in the vocabulary of the `notice` codes it
+            replaces. `runner_scheduling` the Job exists and no pod has a node
+            yet; `runner_unschedulable` the cluster has no room for the pod;
+            `runner_pulling_image` the image is being fetched and the container
+            prepared; `runner_image_pull_backoff` that fetch is failing and
+            retrying; `runner_config_error` the container cannot start because a
+            secret or config it mounts is not there; `runner_starting` the
+            container is running and the agent has not spoken yet. A client
+            renders the sentence `@aep/progress-view` owns for the code, and
+            shows a code it does not know as is.
+          enum:
+          - runner_scheduling
+          - runner_unschedulable
+          - runner_pulling_image
+          - runner_image_pull_backoff
+          - runner_config_error
+          - runner_starting
+          type: string
+          x-enum-varnames:
+          - RunnerScheduling
+          - RunnerUnschedulable
+          - RunnerPullingImage
+          - RunnerImagePullBackOff
+          - RunnerConfigError
+          - RunnerStarting
+        detail:
+          description: >-
+            The cluster's own words for the state, capped and scrubbed: the
+            scheduler's reason there is no room, the pull error being retried.
+            Absent when the code says everything.
+          maxLength: 500
+          type: string
+        since:
+          description: >-
+            When the pod entered this state (its condition's transition time),
+            so a client can say how long startup has been in it. Kept across
+            reads; a new code takes a new time.
+          format: date-time
+          type: string
+      required:
+      - attempt
+      - code
+      - since
+      type: object
     RunEvent:
       additionalProperties: false
       description: >-
@@ -6559,7 +6656,9 @@ components:
             Nine conditions the RUN can hit. `api_retry` a retryable model
             failure the runtime is re-attempting; `compaction` the session's
             context being compacted; `refusal` the model declining to answer;
-            `rate_limit` the provider throttling; `permission_denied` a tool call
+            `rate_limit` the provider throttling (raised at `warn` or `error`,
+            and only when calls are actually held back: a window that reports
+            it is still allowed is not a notice); `permission_denied` a tool call
             the harness refused; `terminated` the run being killed from outside;
             `workspace_guard` a write denied outside the workspace; `gap` the
             feed itself losing events (a hole in the producer's seqs, or a log
@@ -6582,6 +6681,11 @@ components:
             They are notices rather than agent events for the same reason
             throughout: a pod that has not started is not an agent, and there is
             no session to report a phrase about.
+
+            The six pod-truth codes are STATE, and they are RunCycleView.boot
+            now. They stay in this set for the compatibility window, while an
+            older aep-api may still send them as negative-seq notices; a client
+            treats such a notice as the cycle's startup state, never as a row.
 
             `run_settled` carries one code of its own: `provider_limit`, the
             model provider refused the run's calls with HTTP 429 for longer
@@ -6841,7 +6945,9 @@ components:
             its own words, capped and scrubbed. It is a state, not a log line — a
             new phrase REPLACES the previous one on that agent's row rather than
             appending, which is the whole reason the kind exists separately from
-            `notice`.
+            `notice`. In the same READER form as `summary`: one line, with the
+            commands and paths it quotes shortened the way the agent's rows
+            shorten them.
           maxLength: 200
           type: string
         providerDetail:
@@ -6908,8 +7014,10 @@ components:
             event carries the same `seq` whichever source the platform read it
             from (the pod's log or the observability plane), and a client that
             reconnects and replays receives the same `seq` again and dedupes it.
-            Platform notices take negative seqs, stable for the state or the
-            position they describe.
+            A notice the PLATFORM adds for a position in the feed (a `gap`) takes
+            a negative seq, stable for the position it describes. Platform STATE
+            never rides an event: startup is RunCycleView.boot, and whether the
+            log can be read is RunCycleView.recording.
             It is NOT unique across a cycle — a re-dispatch starts a new attempt
             at the beginning — so anything that orders or dedupes needs
             RunProgressEvent.attempt alongside it.
@@ -6947,7 +7055,10 @@ components:
             composed by the producer for a reader — a file path, a search term, a
             workflow name. Capped, and never the raw arguments, which is what
             keeps a feed readable when an agent passes a whole file as a
-            parameter.
+            parameter. Always in READER form: one line, paths relative to the
+            workspace, and the same form on every kind it appears on. A
+            `task_started` summarises its command exactly as the `tool_use` that
+            launched it did, never as the raw command line.
 
             A `task_settled` carries the SAME summary its `task_started` did.
             Without it the only thing left to name a finished background command
@@ -7144,11 +7255,13 @@ components:
       additionalProperties: false
       description: >-
         One SSE frame on the run progress stream. `type` discriminates the
-        payload: `cycle` carries a RunCycleView (the client upserts by id and
-        renders one accordion section per cycle), `event` one RunEvent — the v2
-        feed — stamped with the cycle and attempt that produced it, `line` one
-        RunProgressLine attributed to its own cycle, and `done` the terminal run
-        state, after which the server closes the stream.
+        payload: `cycle` carries a RunCycleView (state: the client upserts by id
+        and the newest wins), `event` one RunEvent — the v2 feed, a fact —
+        stamped with the cycle and attempt that produced it, `line` one
+        RunProgressLine attributed to its own cycle, `tick` nothing but the
+        server's clock on a quiet stream, and `done` the terminal run state,
+        after which the server closes the stream. Every frame carries
+        `serverTime`.
 
         `event` and `line` are the same feed in two envelope versions and a
         single stream can carry both: a run whose earlier cycles were dispatched
@@ -7177,6 +7290,16 @@ components:
           $ref: '#/components/schemas/RunEvent'
         line:
           $ref: '#/components/schemas/RunProgressLine'
+        serverTime:
+          description: >-
+            When aep-api wrote this frame, by the platform's clock. On every
+            frame. Event `ts` values are stamped in the cluster and a reader's
+            "quiet for 40s" is measured against them, so a client estimates its
+            own clock's offset from this rather than trusting the browser's; and
+            the newest `serverTime` received says the connection is alive while
+            the run itself is quiet.
+          format: date-time
+          type: string
         state:
           description: Terminal run state — present only on the `done` frame.
           type: string
@@ -7185,12 +7308,14 @@ components:
           - cycle
           - line
           - event
+          - tick
           - done
           type: string
           x-enum-varnames:
           - Cycle
           - Line
           - Event
+          - Tick
           - Done
       required:
       - type

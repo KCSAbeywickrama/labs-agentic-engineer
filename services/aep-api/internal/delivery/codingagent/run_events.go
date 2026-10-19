@@ -16,15 +16,16 @@
 
 package codingagent
 
-// run_events.go — one cycle's feed as v2 RunEvents, and the platform's own
-// notices on it.
+// run_events.go — one cycle's feed as v2 RunEvents, the cycle state read
+// beside it, and the platform's own notices on it.
 //
 // The feed itself is the CycleFeed's (cycle_feed.go): the pod's log while the
 // pod exists, the observability plane's once it is gone, numbered by the
 // producer's own seq so either source serves the same events. The reader
-// delegates to it; what lives here is the vocabulary of platform-authored
-// rows the feed mixes in — a notice, the "log unavailable" state, the dark
-// zone before the runner's first line.
+// delegates to it; what lives here is the reader's surface (the feed, its
+// `recording` and its `boot`) and the shape of a platform-authored notice.
+// The only notice the feed mixes in is a gap: platform STATE (a log that
+// cannot be read, a runner still starting) rides the cycle record instead.
 
 import (
 	"context"
@@ -54,6 +55,17 @@ func (r *AgentProgressReader) CycleEvents(ctx context.Context, run *delivery.Mil
 	return r.feed.Events(ctx, run, cycle, cursor)
 }
 
+// CycleBoot is RunCycleView.boot for the cycle: where its current attempt is
+// in starting its runner, as the feed's last read (CycleEvents) found it. nil
+// once the attempt has spoken, on an ended cycle, and on a reader with no feed.
+// It reads nothing itself, so a stream asks for it right after CycleEvents.
+func (r *AgentProgressReader) CycleBoot(cycle *delivery.RunCycle) *gen.RunCycleBoot {
+	if r == nil || r.feed == nil {
+		return nil
+	}
+	return r.feed.Boot(cycle)
+}
+
 // RecordingState is what the platform can serve of this cycle's feed, for
 // RunCycleView.recording. It is a different question from what the cycle DID,
 // and one a client has to ask before presenting a feed as the story of a cycle.
@@ -68,10 +80,10 @@ func (r *AgentProgressReader) RecordingState(cycle *delivery.RunCycle) gen.RunCy
 // platformNotice is a marker the PLATFORM put on the feed, not something a
 // producer said. Three things mark it as such and each is deliberate:
 //
-//   - the negative, STABLE seq (the seqBoot* / seqLogs* space): a client dedups
+//   - the negative, STABLE seq (seqGapBase less the position): a client dedups
 //     on (cycle, attempt, seq) and a producer's seqs are positive, so the same
-//     state re-derived every tick collapses to one row and a state TRANSITION
-//     shows exactly one new row;
+//     position re-derived every tick, or read from the other source, collapses
+//     to one row;
 //   - `at`, the instant the platform DERIVED this marker, passed in by the
 //     caller that derived it — see below;
 //   - `agentId: lead`. The field is required and there is no honest third value:
@@ -80,9 +92,8 @@ func (r *AgentProgressReader) RecordingState(cycle *delivery.RunCycle) gen.RunCy
 //     exist.
 //
 // `at` is a parameter and not a `time.Now()` in here because the caller always
-// knows a truer instant than this function could read: the dark zone takes the
-// read that observed the pod, and a gap takes the clock of the line after it,
-// which is the same on every read and from either source.
+// knows a truer instant than this function could read: a gap takes the clock of
+// the line after it, which is the same on every read and from either source.
 //
 // IT MUST BE A REAL INSTANT. These markers used to carry no timestamp at all, on
 // the reasoning that a recorded marker is ordered by its position in the file
@@ -90,9 +101,8 @@ func (r *AgentProgressReader) RecordingState(cycle *delivery.RunCycle) gen.RunCy
 // contract says so. But `RunEvent.ts` is required and generates as a
 // `time.Time`, so "no timestamp" was never on the wire: Go's zero value
 // marshalled as `0001-01-01T00:00:00Z`, a well-formed date no consumer can tell
-// from a real one. Because these notices belong to the lead, and the dark-zone
-// one sits at the head of very nearly every feed, a console subtracting it
-// from the clock showed the lead agent as 2026 years old (`1065409035m47s`)
+// from a real one. Because these notices belong to the lead, a console
+// subtracting one from the clock showed the lead agent as 2026 years old (`1065409035m47s`)
 // while its two children read `2m45s` and `2m25s`, and drew the lead's timeline
 // lane across the whole axis. A field a producer cannot honestly fill has to be
 // absent; this one cannot be absent, so it is filled honestly.
@@ -106,51 +116,4 @@ func platformNotice(at time.Time, seq int64, level gen.RunEventLevel, detail str
 		Level:   level,
 		Detail:  capText(detail, capLongText),
 	}
-}
-
-// logsUnavailableRunEvent is the empty state for a cycle whose log cannot be
-// served — expired, or a read that failed. `code: gap` is the contract's word
-// for the feed itself losing events, which is what has happened: an empty feed and a lost
-// one look identical to a reader and mean opposite things about the agent, so
-// the platform never lets "gone" render as "silent".
-func logsUnavailableRunEvent(at time.Time, reason string) gen.RunEvent {
-	detail := "This cycle's log is not available."
-	if reason != "" {
-		detail += " (" + reason + ")"
-	}
-	ev := platformNotice(at, seqLogsUnavailable, gen.RunEventLevelWarn, detail)
-	ev.Code = gen.RunEventCodeGap
-	return ev
-}
-
-// bootstrapRunEvent narrates the dark zone — the stretch (pod scheduling, image
-// pull, container boot) before the runner writes its first line, which the
-// console otherwise showed as a dead "waiting…" for the slowest part of the flow.
-//
-// It is a `notice` and NOT an agent event, because a pod that has not started is
-// not an agent: there is no session, no lead turn and nothing to report a phrase
-// about, and lifting a scheduling delay into `agent_progress` would put words in
-// the mouth of an agent that does not exist yet.
-//
-// It carries a CODE and, ordinarily, no prose. `code` gained six pod-truth
-// members (`runner_scheduling`, `runner_unschedulable`, `runner_pulling_image`,
-// `runner_image_pull_backoff`, `runner_config_error`, `runner_starting`), and
-// they are exactly the stable ids bootstrapState has always carried in its
-// `name`. Sending the sentence instead would put the wording in a producer,
-// which is the one place the design says it may not live: @aep/progress-view
-// owns the copy, keyed off the code, so a consumer can relabel or translate the
-// dark zone without a platform release. The stable negative seq stays the dedup
-// key; `detail` is filled only where the code genuinely cannot say the whole
-// thing (see bootState.detail).
-func bootstrapRunEvent(at time.Time, podFound bool, phase, waitingReason, message string) gen.RunEvent {
-	st := bootstrapState(podFound, phase, waitingReason, message)
-	level := gen.RunEventLevelInfo
-	if st.alarming {
-		level = gen.RunEventLevelWarn
-	}
-	ev := platformNotice(at, st.seq, level, st.detail)
-	if code := gen.RunEventCode(st.name); code.Valid() {
-		ev.Code = code
-	}
-	return ev
 }

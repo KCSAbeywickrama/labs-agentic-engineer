@@ -23,6 +23,18 @@ package runread
 // and the ATTEMPT that produced it, so the console renders one accordion section
 // per cycle and can order and dedup a feed whose seqs restart on a re-dispatch.
 //
+// FACTS AND STATE are kept apart, and a client relies on it. An `event` is a
+// fact: append-only, never retracted, so a client folds it and never has to
+// drop it. Platform STATE rides the `cycle` frame, which is re-sent whenever
+// any of it changes: whether the log can be read (`recording`) and where an
+// attempt's runner is in starting (`boot`). Neither is ever an event.
+//
+// LIVENESS. Every frame carries `serverTime`, the server's clock as it was
+// written, and a stream that has sent nothing for runStreamKeepAlive sends a
+// `tick` frame carrying only that. A client can then tell a quiet run on a live
+// connection from a dead connection, and measure event ages against the
+// platform's clock rather than the browser's.
+//
 // The events are v2 RunEvents and this stream sends NOTHING ELSE. It emitted v1
 // `line` frames until the cutover, and the frame type stays in the contract
 // because the VERSION build-progress stream still sends it — but a single
@@ -56,6 +68,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
@@ -68,10 +81,12 @@ const (
 	// Everything it touches is DB or OpenChoreo / the observer — never GitHub —
 	// so it can be fast without spending rate.
 	runStreamTick = 2 * time.Second
-	// runStreamKeepAlive paces `: keep-alive` comments so proxies keep an idle
-	// stream open and a dead client is noticed. A run parked in `waiting` emits
-	// nothing for as long as the gate holds it, which is exactly the case this
-	// covers.
+	// runStreamKeepAlive is how long a stream may stay silent before it proves
+	// it is alive, so proxies keep an idle stream open and a dead client is
+	// noticed: the run stream sends a `tick` frame after this much quiet, the
+	// version stream a `: keep-alive` comment on this cadence. A run parked in
+	// `waiting` emits nothing for as long as the gate holds it, which is exactly
+	// the case this covers.
 	runStreamKeepAlive = 15 * time.Second
 )
 
@@ -94,18 +109,21 @@ type ProgressService struct {
 	// and the frame must then say `unavailable` rather than nothing.
 	recordings RecordingReader
 
-	// tick / keepAlive are the loop's two cadences, held as fields purely so a
-	// same-package test can drive the live loop in milliseconds instead of
-	// waiting out the real ones. Production never overrides them.
+	// tick / keepAlive are the loop's two cadences and now is the clock that
+	// stamps `serverTime`, held as fields purely so a same-package test can
+	// drive the live loop in milliseconds instead of waiting out the real ones,
+	// and pin the stamp. Production never overrides them.
 	tick      time.Duration
 	keepAlive time.Duration
+	now       func() time.Time
 }
 
 // NewProgressService wires the stream service. logs may be nil (no progress
 // reader wired): the stream then carries cycle frames and settles normally,
 // just with no lines.
 func NewProgressService(runs RunReader, cycles CycleReader, logs CycleLogReader) *ProgressService {
-	return &ProgressService{runs: runs, cycles: cycles, logs: logs, tick: runStreamTick, keepAlive: runStreamKeepAlive}
+	return &ProgressService{runs: runs, cycles: cycles, logs: logs,
+		tick: runStreamTick, keepAlive: runStreamKeepAlive, now: time.Now}
 }
 
 // WithRecordings attaches the recording-state reader so every `cycle` frame can
@@ -126,14 +144,20 @@ func (s *ProgressService) WithRecordings(rec RecordingReader) *ProgressService {
 // Attempt is load-bearing next to RunEvent.seq — a seq is monotonic only WITHIN
 // one dispatch, so a re-dispatched cycle starts numbering again and a client that
 // deduped on seq alone would silently drop the retry's whole feed.
+//
+// ServerTime is stamped by the frameWriter as the frame goes out (serverTimed),
+// on every frame including `tick` and `done`.
 type runFrame struct {
-	Type    string            `json:"type"` // cycle | event | done
-	Cycle   *gen.RunCycleView `json:"cycle,omitempty"`
-	Event   *gen.RunEvent     `json:"event,omitempty"`
-	CycleID string            `json:"cycleId,omitempty"`
-	Attempt int               `json:"attempt,omitempty"`
-	State   string            `json:"state,omitempty"`
+	Type       string            `json:"type"` // cycle | event | tick | done
+	Cycle      *gen.RunCycleView `json:"cycle,omitempty"`
+	Event      *gen.RunEvent     `json:"event,omitempty"`
+	CycleID    string            `json:"cycleId,omitempty"`
+	Attempt    int               `json:"attempt,omitempty"`
+	State      string            `json:"state,omitempty"`
+	ServerTime time.Time         `json:"serverTime"`
 }
+
+func (f *runFrame) stampServerTime(at time.Time) { f.ServerTime = at }
 
 // runLine is one v1 agent-log line with the attribution the console groups on.
 // contracts.ProgressEvent is EMBEDDED, so its fields flatten into the JSON and
@@ -176,7 +200,7 @@ func (s *ProgressService) OpenRunProgressStream(ctx context.Context, orgID, proj
 // All dedup state is per-connection; a reconnect re-derives from scratch and the
 // client dedups by cycle id and (cycleId, seq).
 func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), orgID string, first *delivery.MilestoneRun) {
-	out := &frameWriter{w: w, flush: flush}
+	out := &frameWriter{w: w, flush: flush, clock: s.now}
 	writeDone := func(state string) {
 		_ = out.write(&runFrame{Type: frameTypeDone, State: state})
 		out.sentinel()
@@ -198,12 +222,29 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 	//   - gone=true — the run ROW is gone (a project delete purges its runs).
 	//   - otherwise — state is what the row says, and a transient read failure
 	//     keeps the stream and retries next tick.
+	// readFailing logs the first failed read of a streak and its recovery, so
+	// a stream holding still on a failing read is visible and a long one does
+	// not log every tick: a pass that cannot read the rows sends nothing, and
+	// from the client side that is indistinguishable from a quiet run.
+	readFailing := false
+	noteRead := func(what string, err error) {
+		switch {
+		case err != nil && !readFailing:
+			slog.WarnContext(ctx, "runread: run stream read failed; holding the stream and retrying each tick",
+				"run", first.ID, "read", what, "error", err)
+		case err == nil && readFailing:
+			slog.InfoContext(ctx, "runread: run stream reads recovered", "run", first.ID)
+		}
+		readFailing = err != nil
+	}
+
 	derive := func(row *delivery.MilestoneRun) (state string, gone, alive bool) {
 		if row == nil {
 			fresh, err := s.runs.GetByIDScoped(ctx, orgID, first.ID)
 			if err != nil {
 				// A read that FAILED says nothing about the row. Hold the stream open
 				// and ask again next tick.
+				noteRead("run", err)
 				return "", false, true
 			}
 			if fresh == nil {
@@ -212,12 +253,13 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 			row = fresh
 		}
 		cycles, err := s.cycles.ListByRun(ctx, orgID, row.ID)
+		noteRead("cycles", err)
 		if err != nil {
 			return row.State, false, true
 		}
 		alive = s.emitCycles(ctx, out, cycles, lastCycleJSON,
 			func(v *gen.RunCycleView) any { return &runFrame{Type: frameTypeCycle, Cycle: v} },
-			func(ctx context.Context, c *delivery.RunCycle, _ int) []any {
+			func(ctx context.Context, c *delivery.RunCycle, _ int) cycleRead {
 				return s.readEvents(ctx, row, c, cursor)
 			})
 		return row.State, false, alive
@@ -254,15 +296,19 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 
 	tick := time.NewTicker(s.tick)
 	defer tick.Stop()
-	keepAlive := time.NewTicker(s.keepAlive)
-	defer keepAlive.Stop()
+	// quiet fires once the connection has written nothing for keepAlive: any
+	// frame re-arms it, so a busy stream sends no ticks and an idle one sends
+	// one per window.
+	quiet := time.NewTimer(s.keepAlive)
+	defer quiet.Stop()
+	sent := out.seq
 
 	for {
 		select {
 		case <-ctx.Done():
 			return // client disconnected
-		case <-keepAlive.C:
-			if !out.keepAlive() {
+		case <-quiet.C:
+			if !out.write(&runFrame{Type: frameTypeTick}) {
 				return
 			}
 		case <-tick.C:
@@ -275,6 +321,10 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 			if settled(state, gone) {
 				return
 			}
+		}
+		if out.seq != sent {
+			sent = out.seq
+			quiet.Reset(s.keepAlive)
 		}
 	}
 }
@@ -293,13 +343,17 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 // The cursor moves at the READ, before the frames are written. It is this
 // connection's alone, and a write fails only when the client is gone, which
 // ends the connection and its cursor with it.
-func (s *ProgressService) readEvents(ctx context.Context, run *delivery.MilestoneRun, c *delivery.RunCycle, cursor map[string]string) []any {
+//
+// The cycle's boot is asked right after the feed read, because that read is
+// what looked at the pod (CycleLogReader.CycleBoot). A cycle with no feed to
+// read has no boot.
+func (s *ProgressService) readEvents(ctx context.Context, run *delivery.MilestoneRun, c *delivery.RunCycle, cursor map[string]string) cycleRead {
 	if s.logs == nil || c.JobRef == "" {
-		return nil
+		return cycleRead{}
 	}
 	events, attempt, next, err := s.logs.CycleEvents(ctx, run, c, cursor[c.ID])
 	if err != nil {
-		return nil
+		return cycleRead{boot: s.logs.CycleBoot(c)}
 	}
 	frames := make([]any, 0, len(events))
 	for i := range events {
@@ -308,7 +362,7 @@ func (s *ProgressService) readEvents(ctx context.Context, run *delivery.Mileston
 	if next != "" {
 		cursor[c.ID] = next
 	}
-	return frames
+	return cycleRead{frames: frames, boot: s.logs.CycleBoot(c)}
 }
 
 // readLines pulls one cycle's NEW v1 log lines, attributed to the cycle and to

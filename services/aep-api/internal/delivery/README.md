@@ -742,9 +742,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   [`codingagent/design/cycle-status-and-logs.md`](codingagent/design/cycle-status-and-logs.md)).
   The v1 VERSION build-progress stream still derives per viewer from the pod, then the archive, then a
   synthetic "logs unavailable" marker (`CycleProgress`, resolved once by `resolveCycleLog`), and keeps its
-  200-event page cap. Every platform-minted marker that is re-derived per poll — the dark zone, a
-  truncation, a lost log — is a `notice` on a stable NEGATIVE seq, which is what makes it dedup to one
-  row, stamped with the instant the platform derived it. `CycleLogReader` serves both streams; `codingagent` owns it and writes no log text to Postgres. The one thing taken from
+  200-event page cap. There, every platform-minted marker that is re-derived per poll — the dark zone, a
+  truncation, a lost log — is a line on a stable NEGATIVE seq, which is what makes it dedup to one
+  row. The v2 run stream keeps FACTS and STATE apart: an `event` is append-only, its only platform
+  marker a positional `gap` notice, while a runner still starting (`boot`) and a log that cannot be read
+  (`recording`) ride the re-sent `cycle` frame; every frame carries `serverTime`, and a quiet stream sends
+  a `tick` frame after 15 s. `CycleLogReader` serves both streams; `codingagent` owns it and writes no log text to Postgres. The one thing taken from
   a terminal pod's log by the WATCHER is the runner's token-usage line — v2 `run_settled` or v1 `result`,
   always the LAST one, because the runtime reports usage cumulatively — stamped onto the cycle row:
   accounting, not logging. `coding_agent_logs` remains for legacy execution rows; milestone cycles never
@@ -763,7 +766,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it
   rides the shared agent-stream parser. The server buffers no history and keeps no cursor; the client
   dedups and a reconnect re-derives. It settles when the Task's ISSUE closes, because nothing further will
-  arrive on it. It is the per-ISSUE view; a run's own feed is `stream-run-progress` and a version's is
+  arrive on it, or at once for a Task with no log of its own and no execution rows (`hasOwnLog`: only a
+  provision gate still gains rows; coding work is logged on its run's feed), because none is coming. It is the per-ISSUE view; a run's own feed is `stream-run-progress` and a version's is
   `stream-build-progress`.
 - **`derivedStatus` is the issue's own state, and only that.** Two values — `pending` (open) and `merged`
   (closed) — both deliberately members of the retired ten-value vocabulary, because the console consumes

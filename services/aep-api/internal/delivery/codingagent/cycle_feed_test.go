@@ -444,19 +444,28 @@ func TestCycleFeed_V1LinesLiftToDoubledSeqs(t *testing.T) {
 	}
 }
 
-// The dark zone: the Job is bound, no pod yet, the cycle open.
-func TestCycleFeed_NoPodYetOnAnOpenCycleNarratesTheDarkZone(t *testing.T) {
+// The dark zone: the Job is bound, no pod yet, the cycle open. The pod's state
+// is the cycle's boot, and the feed carries nothing until the runner speaks.
+func TestCycleFeed_NoPodYetOnAnOpenCycleIsTheBootNotAnEvent(t *testing.T) {
 	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: false}}
 	c := openCycle("c1", "uid-1")
-	evs, attempt, _, _ := newTestFeed(rt, &fakeObserver{}).Events(context.Background(), nil, &c, "")
-	if len(evs) != 1 || evs[0].Seq != seqBootScheduling || evs[0].Code != gen.RunEventCodeRunnerScheduling || attempt != 1 {
-		t.Fatalf("events %+v attempt %d", evs, attempt)
+	f := newTestFeed(rt, &fakeObserver{})
+	evs, attempt, _, _ := f.Events(context.Background(), nil, &c, "")
+	if len(evs) != 0 || attempt != 1 {
+		t.Fatalf("events %+v attempt %d, want none", evs, attempt)
+	}
+	if b := f.Boot(&c); b == nil || b.Code != gen.RunCycleBootCodeRunnerScheduling || b.Attempt != 1 {
+		t.Fatalf("boot %+v, want runner_scheduling on attempt 1", b)
 	}
 
 	pending := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Pending", WaitingReason: "ImagePullBackOff"}}
-	evs, _, _, _ = newTestFeed(pending, nil).Events(context.Background(), nil, &c, "")
-	if len(evs) != 1 || evs[0].Seq != seqBootBackoff {
-		t.Fatalf("pending pod events %+v", evs)
+	f = newTestFeed(pending, nil)
+	evs, _, _, _ = f.Events(context.Background(), nil, &c, "")
+	if len(evs) != 0 {
+		t.Fatalf("pending pod events %+v, want none", evs)
+	}
+	if b := f.Boot(&c); b == nil || b.Code != gen.RunCycleBootCodeRunnerImagePullBackOff {
+		t.Fatalf("pending pod boot %+v, want runner_image_pull_backoff", b)
 	}
 }
 
@@ -466,8 +475,8 @@ func TestCycleFeed_NoUIDAndNoPodIsExpiredWithoutAnObserverRead(t *testing.T) {
 	c := settledCycle("c1", "")
 	f := newTestFeed(rt, obs)
 	evs, _, _, _ := f.Events(context.Background(), nil, &c, "")
-	if obs.calls != 0 || len(evs) != 1 || evs[0].Seq != seqLogsUnavailable || evs[0].Code != gen.RunEventCodeGap {
-		t.Fatalf("observer calls %d events %+v", obs.calls, evs)
+	if obs.calls != 0 || len(evs) != 0 {
+		t.Fatalf("observer calls %d events %+v, want neither: the recording says expired", obs.calls, evs)
 	}
 	if st := f.State(&c); st != gen.RunCycleViewRecordingExpired {
 		t.Fatalf("state %s", st)
@@ -480,9 +489,13 @@ func TestCycleFeed_PastRetentionIsExpiredWithoutAnObserverRead(t *testing.T) {
 	c := settledCycle("c1", "uid-1")
 	old := time.Now().Add(-73 * time.Hour)
 	c.EndedAt, c.JobSuspendedAt, c.CreatedAt = &old, &old, old.Add(-time.Hour)
-	evs, _, _, _ := newTestFeed(rt, obs).Events(context.Background(), nil, &c, "")
-	if obs.calls != 0 || len(evs) != 1 || evs[0].Seq != seqLogsUnavailable {
-		t.Fatalf("observer calls %d events %+v", obs.calls, evs)
+	f := newTestFeed(rt, obs)
+	evs, _, _, _ := f.Events(context.Background(), nil, &c, "")
+	if obs.calls != 0 || len(evs) != 0 {
+		t.Fatalf("observer calls %d events %+v, want neither", obs.calls, evs)
+	}
+	if st := f.State(&c); st != gen.RunCycleViewRecordingExpired {
+		t.Fatalf("state %s, want expired", st)
 	}
 }
 
@@ -509,7 +522,10 @@ func TestCycleFeed_State(t *testing.T) {
 	}
 }
 
-func TestCycleFeed_ObserverErrorIsUnavailableNotEmpty(t *testing.T) {
+// A failed read is the cycle's STATE, never a row: the feed adds nothing (an
+// append-only client could not take a "logs unavailable" row back once the log
+// came back) and the recording turns unavailable.
+func TestCycleFeed_ObserverErrorIsUnavailableNotANotice(t *testing.T) {
 	rt := &fakeRuntime{bindingErr: openchoreo.ErrNotFound}
 	obs := &fakeObserver{err: errors.New("observer: 503")}
 	f := newTestFeed(rt, obs)
@@ -521,8 +537,8 @@ func TestCycleFeed_ObserverErrorIsUnavailableNotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events: %v", err)
 	}
-	if len(evs) != 1 || evs[0].Code != gen.RunEventCodeGap || evs[0].Seq != seqLogsUnavailable {
-		t.Fatalf("events %+v", evs)
+	if len(evs) != 0 {
+		t.Fatalf("events %+v, want none", evs)
 	}
 	if cur != "f:1:7" {
 		t.Fatalf("cursor %q, want the caller's cursor held", cur)
@@ -547,8 +563,8 @@ func TestCycleFeed_SuccessfulReadAfterAFailureIsKept(t *testing.T) {
 	f.now = func() time.Time { return clock }
 	c := settledCycle("c1", "uid-1")
 
-	if evs, _, _, _ := f.Events(context.Background(), nil, &c, ""); len(evs) != 1 || evs[0].Seq != seqLogsUnavailable {
-		t.Fatalf("failed read events %+v, want the unavailable notice", evs)
+	if evs, _, _, _ := f.Events(context.Background(), nil, &c, ""); len(evs) != 0 {
+		t.Fatalf("failed read events %+v, want none", evs)
 	}
 	if st := f.State(&c); st != gen.RunCycleViewRecordingUnavailable {
 		t.Fatalf("state %s after a failed read, want unavailable", st)
@@ -573,8 +589,8 @@ func TestCycleFeed_NoObserverConfiguredIsUnavailable(t *testing.T) {
 	f := newTestFeed(rt, nil)
 	c := settledCycle("c1", "uid-1")
 	evs, _, _, _ := f.Events(context.Background(), nil, &c, "")
-	if len(evs) != 1 || evs[0].Seq != seqLogsUnavailable {
-		t.Fatalf("events %+v", evs)
+	if len(evs) != 0 {
+		t.Fatalf("events %+v, want none", evs)
 	}
 	if st := f.State(&c); st != gen.RunCycleViewRecordingUnavailable {
 		t.Fatalf("state %s", st)
@@ -642,7 +658,7 @@ func TestCycleFeed_AnIndexThatCatchesUpDeliversTheTailOnce(t *testing.T) {
 // An open cycle whose pod is Pending and has never run has written
 // nothing, so the observer is not asked, and a pod-log read that fails on a
 // container not yet created is the dark zone, not "logs unavailable".
-func TestCycleFeed_PendingPodNarratesTheDarkZoneWithoutAnObserverRead(t *testing.T) {
+func TestCycleFeed_PendingPodIsTheBootWithoutAnObserverRead(t *testing.T) {
 	pending := openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Pending", WaitingReason: "ContainerCreating"}
 	for name, logErr := range map[string]error{
 		"log not found":  openchoreo.ErrNotFound,
@@ -657,8 +673,11 @@ func TestCycleFeed_PendingPodNarratesTheDarkZoneWithoutAnObserverRead(t *testing
 			if obs.calls != 0 {
 				t.Fatalf("observer calls %d, want 0 for a pod that never ran", obs.calls)
 			}
-			if len(evs) != 1 || evs[0].Seq >= 0 || evs[0].Seq == seqLogsUnavailable || attempt != 1 {
-				t.Fatalf("events %+v attempt %d, want one bootstrap marker", evs, attempt)
+			if len(evs) != 0 || attempt != 1 {
+				t.Fatalf("events %+v attempt %d, want none", evs, attempt)
+			}
+			if b := f.Boot(&c); b == nil || b.Code != gen.RunCycleBootCodeRunnerPullingImage {
+				t.Fatalf("boot %+v, want runner_pulling_image", b)
 			}
 			if st := f.State(&c); st != gen.RunCycleViewRecordingLive {
 				t.Fatalf("state %s, want live", st)
@@ -667,26 +686,49 @@ func TestCycleFeed_PendingPodNarratesTheDarkZoneWithoutAnObserverRead(t *testing
 	}
 }
 
-// An open cycle with no pod yet narrates its dark zone even when the
-// observer read fails, as the v1 resolver does.
-func TestCycleFeed_ObserverErrorOnAnOpenCycleWithoutAPodIsTheDarkZone(t *testing.T) {
+// An open cycle with no pod yet is in its dark zone even when the observer
+// read fails, as the v1 resolver says.
+func TestCycleFeed_ObserverErrorOnAnOpenCycleWithoutAPodIsTheBoot(t *testing.T) {
 	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: false}}
 	obs := &fakeObserver{err: errors.New("observer: 500")}
 	c := openCycle("c1", "uid-1")
-	evs, _, _, _ := newTestFeed(rt, obs).Events(context.Background(), nil, &c, "")
-	if len(evs) != 1 || evs[0].Seq != seqBootScheduling {
-		t.Fatalf("events %+v, want the scheduling marker", evs)
+	f := newTestFeed(rt, obs)
+	evs, _, _, _ := f.Events(context.Background(), nil, &c, "")
+	if len(evs) != 0 {
+		t.Fatalf("events %+v, want none", evs)
+	}
+	if b := f.Boot(&c); b == nil || b.Code != gen.RunCycleBootCodeRunnerScheduling {
+		t.Fatalf("boot %+v, want runner_scheduling", b)
 	}
 }
 
-// A running pod whose log read fails is still a failed read: it has spoken,
-// and the dark-zone marker would hide that.
-func TestCycleFeed_RunningPodLogFailureIsUnavailable(t *testing.T) {
-	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}, logErr: errors.New("openchoreo: 500")}
+// A failed log read is a failed read (recorded, no row), and it cannot see
+// events, so it never brings back the boot of an attempt a successful read
+// already saw speak.
+func TestCycleFeed_RunningPodLogFailureKeepsAnAttemptThatSpokeSilent(t *testing.T) {
+	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}, logs: toPodLines(v2Lines(t, 1))}
 	c := openCycle("c1", "uid-1")
-	evs, _, _, _ := newTestFeed(rt, &fakeObserver{}).Events(context.Background(), nil, &c, "")
-	if len(evs) != 1 || evs[0].Seq != seqLogsUnavailable {
-		t.Fatalf("events %+v, want logs unavailable", evs)
+	f := newTestFeed(rt, &fakeObserver{})
+	clock := time.Now()
+	f.now = func() time.Time { return clock }
+	if evs, _, _, _ := f.Events(context.Background(), nil, &c, ""); len(evs) != 1 {
+		t.Fatalf("events %+v, want the runner's first", evs)
+	}
+
+	rt.logErr = errors.New("openchoreo: 500")
+	clock = clock.Add(feedReadTTL + time.Second)
+	evs, _, _, _ := f.Events(context.Background(), nil, &c, "")
+	if len(evs) != 0 {
+		t.Fatalf("events %+v, want none", evs)
+	}
+	if b := f.Boot(&c); b != nil {
+		t.Fatalf("boot %+v, want none for an attempt that has spoken", b)
+	}
+	if !f.failedRecently(c.ID, f.clock()) {
+		t.Fatalf("the failed read was not remembered")
+	}
+	if st := f.State(&c); st != gen.RunCycleViewRecordingLive {
+		t.Fatalf("recording %s, want live while the cycle runs", st)
 	}
 }
 

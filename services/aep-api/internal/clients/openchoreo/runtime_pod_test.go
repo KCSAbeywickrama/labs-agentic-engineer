@@ -163,3 +163,28 @@ func TestPodFromNodeObject_FinishedAtIsTheContainersTermination(t *testing.T) {
 		t.Fatalf("a running pod has no finish time, got %v", running.FinishedAt)
 	}
 }
+
+// The startup clock: since when the pod has been in its present startup state.
+// PodScheduled's transition time dates both "got a node" and "no room", and a
+// running container's startedAt dates the boot.
+func TestPodFromNodeObject_CarriesTheStartupTransitionTimes(t *testing.T) {
+	obj := podObject("Running", "", map[string]interface{}{
+		"running": map[string]interface{}{"startedAt": "2026-08-06T10:02:00Z"},
+	})
+	obj["status"].(map[string]interface{})["conditions"] = []interface{}{
+		map[string]interface{}{"type": "Ready", "status": "False", "lastTransitionTime": "2026-08-06T09:59:00Z"},
+		map[string]interface{}{"type": "PodScheduled", "status": "True", "lastTransitionTime": "2026-08-06T10:00:30Z"},
+	}
+	got := PodFromNodeObject(obj, "pod-1")
+	if want := time.Date(2026, 8, 6, 10, 0, 30, 0, time.UTC); !got.ScheduledAt.Equal(want) {
+		t.Errorf("ScheduledAt = %v, want %v", got.ScheduledAt, want)
+	}
+	if want := time.Date(2026, 8, 6, 10, 2, 0, 0, time.UTC); !got.StartedAt.Equal(want) {
+		t.Errorf("StartedAt = %v, want %v", got.StartedAt, want)
+	}
+
+	bare := PodFromNodeObject(podObject("Pending", "", nil), "pod-2")
+	if !bare.ScheduledAt.IsZero() || !bare.StartedAt.IsZero() {
+		t.Errorf("a pod with no condition or running container carries no times: %+v", bare)
+	}
+}

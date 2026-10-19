@@ -37,14 +37,12 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 )
 
-// unavailableSeq is the feed's "logs unavailable" notice seq.
-const unavailableSeq = -20
-
 // memoFeed is the cycle feed as codingagent.CycleFeed behaves: one object
 // answers both the feed read and the recording state, and the state is a
 // MEMO of the last read's outcome — a failed read turns the cycle
-// `unavailable` and serves the "logs unavailable" notice in place of the feed;
-// a successful one clears it. Before any read, a settled cycle is `kept`.
+// `unavailable` and serves nothing (the state is the cycle's, never a row on
+// its feed); a successful one clears it. Before any read, a settled cycle is
+// `kept`.
 type memoFeed struct {
 	mu     sync.Mutex
 	fail   bool
@@ -66,9 +64,7 @@ func (f *memoFeed) CycleEvents(_ context.Context, _ *delivery.MilestoneRun, c *d
 	defer f.mu.Unlock()
 	if f.fail {
 		f.failed[c.ID] = true
-		notice := event(unavailableSeq, gen.RunEventKindNotice, "lead")
-		notice.Code = gen.RunEventCodeGap
-		return []gen.RunEvent{notice}, c.Attempts, cursor, nil
+		return nil, c.Attempts, cursor, nil
 	}
 	delete(f.failed, c.ID)
 	if cursor != "" {
@@ -76,6 +72,8 @@ func (f *memoFeed) CycleEvents(_ context.Context, _ *delivery.MilestoneRun, c *d
 	}
 	return []gen.RunEvent{event(1, gen.RunEventKindToolUse, "lead")}, c.Attempts, "drained", nil
 }
+
+func (f *memoFeed) CycleBoot(*delivery.RunCycle) *gen.RunCycleBoot { return nil }
 
 func (f *memoFeed) CycleProgress(context.Context, *delivery.RunCycle, int64) (*contracts.ProgressResponse, error) {
 	return &contracts.ProgressResponse{Final: true}, nil
@@ -129,9 +127,9 @@ func streamCycleFrames(t *testing.T, h *componenttest.Harness) (cycles, events [
 
 // TestRunProgress_FinishedRunFirstReadFails_FrameSaysUnavailable: the contract
 // says `unavailable` means the log could not be read right now. A finished run
-// whose first log read fails gets that word in its first and only cycle frame,
-// beside the notice the same read produced — never `kept` next to "logs
-// unavailable".
+// whose first log read fails gets that word in its first and only cycle frame —
+// never `kept` — and the failure is never an event: an append-only client could
+// not take a "logs unavailable" row back once the log came back.
 func TestRunProgress_FinishedRunFirstReadFails_FrameSaysUnavailable(t *testing.T) {
 	h := newMemoFeedHarness(t, newMemoFeed(true))
 
@@ -142,8 +140,8 @@ func TestRunProgress_FinishedRunFirstReadFails_FrameSaysUnavailable(t *testing.T
 	if got := cycles[0]["recording"]; got != string(gen.RunCycleViewRecordingUnavailable) {
 		t.Errorf("recording = %v, want unavailable (the read that produced this frame's feed failed)", got)
 	}
-	if len(events) != 1 || events[0]["seq"] != float64(unavailableSeq) || events[0]["code"] != string(gen.RunEventCodeGap) {
-		t.Errorf("events = %+v, want the one logs-unavailable notice", events)
+	if len(events) != 0 {
+		t.Errorf("events = %+v, want none: the recording carries the failure", events)
 	}
 }
 

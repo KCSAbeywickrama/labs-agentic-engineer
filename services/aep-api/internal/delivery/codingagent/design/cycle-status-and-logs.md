@@ -131,8 +131,13 @@ sources apply it identically.
 
 One read of a cycle serves every viewer for 2 s, so N viewers cost one
 OpenChoreo or observer read per tick. The read runs detached from the viewer
-that started it, bounded at 30 s. A failed read becomes a `logs unavailable`
-notice on the feed and holds the cycle's state `unavailable` for 60 s.
+that started it, bounded at 30 s. A live cycle's viewer waits at most 500 ms for
+it when a read from the last 32 s can stand in, and is served that one
+meanwhile: the run stream projects a cycle's record after its feed read, and a
+read that takes its whole bound (OpenChoreo retrying a 5xx, an observer that
+does not answer) would otherwise hold every change to the record with it. An
+ended cycle always waits, since a finished run's stream makes one pass. A failed read adds nothing to the feed and
+holds the cycle's state `unavailable` for 60 s, or until a read succeeds.
 
 The cursor is opaque (`f:<attempt>:<lastSeq>`). Anything else restarts at the
 first attempt, because a duplicate event is deduped and a silently empty feed
@@ -237,19 +242,18 @@ reader has to be able to tell a tree this reader DEDUCED from one a runtime
 declared. A console upserting agents by id repaints one row for an agent it
 has already seen.
 
-### Platform markers are notices
+### Facts on the feed, state on the cycle
 
-Everything the platform itself puts on a feed — the dark zone (pod scheduling,
-image pull, container boot), a gap, a lost log — is a `notice` on the lead, on a
-STABLE NEGATIVE seq, stamped with the instant the platform derived it:
+The feed is facts: a client folds events append-only and never retracts one.
+So the only marker the platform puts on it is a POSITIONAL one, a gap: a
+`notice` with `code: gap` on the lead, on a STABLE NEGATIVE seq, stamped with
+the instant the platform derived it:
 
 - the negative seq is the marker's id: a client dedups on `(cycle, attempt, seq)`
-  and a producer's seqs are positive, so the same state re-derived every read
-  collapses to one row and a state TRANSITION shows exactly one new row. A gap
-  starting at producer seq `n` is notice seq `-1000000 - n` (`seqGapBase`), so
-  the same hole is the same row on every read and from either source;
-- the timestamp is a REAL instant, passed in by whoever derived the marker — the
-  read that observed the pod, or the clock of the line after a gap
+  and a producer's seqs are positive. A gap starting at producer seq `n` is
+  notice seq `-1000000 - n` (`seqGapBase`), so the same hole is the same row on
+  every read and from either source;
+- the timestamp is a REAL instant, the clock of the line after the gap
   (`platformNotice`, `run_events.go`). `RunEvent.ts` is required and generates
   as a `time.Time`, so a marker without one would go out as
   `0001-01-01T00:00:00Z`, which a console reads as an agent 2026 years old.
@@ -258,21 +262,36 @@ STABLE NEGATIVE seq, stamped with the instant the platform derived it:
   SPAWNED agent under the contract — a made-up id would have a console open a row
   for an agent that does not exist.
 
-A pod that has not started is deliberately **not** an agent event. There is no
-session, no turn and nothing to report a phrase about, so a scheduling delay is
-never lifted into `agent_progress`.
+Platform STATE never rides the feed, because a state that passes would be a row
+an append-only client can never drop. Whether the log can be served is
+`RunCycleView.recording` (above). Where the runner is in starting is
+`RunCycleView.boot` (`cycle_boot.go`), sent on the run progress stream's cycle
+frames, which are re-sent whenever it changes:
 
-The dark-zone notices carry a **code and, ordinarily, no prose**:
-`runner_scheduling`, `runner_pulling_image`, `runner_image_pull_backoff`,
-`runner_config_error`, `runner_unschedulable`, `runner_starting` — exactly the
-stable ids `bootstrapState` has always held in its `name`. Wording lives in
-`@aep/progress-view`, keyed off the code, so a consumer can relabel or translate
-the dark zone without a platform release; a producer that shipped the sentence
-would be a second place the copy could change. `detail` is filled only where the
-code genuinely cannot say the whole thing: the scheduler's own first line on an
-unschedulable pod (WHICH resource ran out), and the raw waiting reason on one
-this build has never seen (bucketed under `runner_pulling_image`).
+- present only while the cycle is live, its current attempt has produced no
+  event, and its pod has not finished. The runner's first line (its own
+  `workspace_provisioning` notice, a real seq) ends it;
+- `code` is one of `runner_scheduling`, `runner_unschedulable`,
+  `runner_pulling_image`, `runner_image_pull_backoff`, `runner_config_error`,
+  `runner_starting` — the stable ids `bootstrapState` holds in its `name`.
+  Wording lives in `@aep/progress-view`, keyed off the code;
+- `detail` is the cluster's own first line, redacted and capped at 500, only
+  where the code cannot say it: the scheduler's message on an unschedulable pod,
+  the error a failing pull or a missing secret reports, the raw waiting reason
+  this build has never seen (bucketed under `runner_pulling_image`);
+- `since` is when the pod entered the state by the cluster's clock where the pod
+  dates it (pod or Job creation, the PodScheduled transition, the container's
+  start; the dispatch while no Job is applied), else the first read that saw it.
+  It is kept while the attempt stays in the state, and a new code or attempt
+  takes a new time.
 
-The markers that ARE a lost feed — a log that cannot be served, a detected
-`seq` gap — carry `code: gap`. The one positive seq the platform mints is a
-cancelled cycle's closing `run_settled`.
+`boot` comes out of the feed read and is remembered per cycle, so the stream
+asks for it right after `CycleEvents`; the run reads, which read no pod, leave it
+absent. It follows the POD, not the log source: a read whose log read fails (a
+container OpenChoreo serves no log for, no observability plane) still moves boot
+from the pod it read, unless an earlier successful read already saw the attempt
+speak. A pod that has not started is deliberately never an agent event: there
+is no session and nothing to report a phrase about.
+
+The one positive seq the platform mints is a cancelled cycle's closing
+`run_settled`.

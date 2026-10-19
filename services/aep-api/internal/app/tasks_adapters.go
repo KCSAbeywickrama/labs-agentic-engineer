@@ -66,7 +66,8 @@ func lookupRepoByFullName(ctx context.Context, db *gorm.DB, fullName string) (st
 
 // taskSnapshotAdapter reads a Task's current snapshot for the task-log stream's
 // `task` frame: the full TaskDetail JSON (forwarded verbatim — the stream never
-// unmarshals it) plus the derived status the stream uses to detect settle. The
+// unmarshals it) plus the derived status the stream uses to detect settle and
+// the label kind it reads for whether the Task has a log of its own. The
 // projection lives here at the composition root because execution never imports
 // the task read path. Satisfies execution.TaskSnapshotReader.
 type taskSnapshotAdapter struct{ reads *task.Reads }
@@ -86,7 +87,7 @@ func (a taskSnapshotAdapter) TaskSnapshot(ctx context.Context, orgID, projectID 
 	if err != nil {
 		return nil, err
 	}
-	return &execution.TaskSnapshot{JSON: raw, DerivedStatus: detail.DerivedStatus}, nil
+	return &execution.TaskSnapshot{JSON: raw, DerivedStatus: detail.DerivedStatus, Kind: detail.Kind}, nil
 }
 
 // executionsByIssueAdapter lists a Task's execution rows (oldest first) for the

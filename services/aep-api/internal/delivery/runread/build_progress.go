@@ -175,10 +175,10 @@ func (s *ProgressService) version(ctx context.Context, w io.Writer, flush func()
 				func(v *gen.RunCycleView) any {
 					return &buildFrame{Type: frameTypeCycle, Run: run, Cycle: v}
 				},
-				func(ctx context.Context, c *delivery.RunCycle, index int) []any {
-					return s.readLines(ctx, c, index, cursor, func(l *runLine) any {
+				func(ctx context.Context, c *delivery.RunCycle, index int) cycleRead {
+					return cycleRead{frames: s.readLines(ctx, c, index, cursor, func(l *runLine) any {
 						return &buildFrame{Type: frameTypeLine, Run: run, Line: l}
-					})
+					})}
 				})
 			if !ok {
 				return live, false

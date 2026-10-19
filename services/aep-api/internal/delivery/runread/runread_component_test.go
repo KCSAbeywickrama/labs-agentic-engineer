@@ -105,7 +105,11 @@ func (f fakeCycles) ListByRun(_ context.Context, _, runID string) ([]delivery.Ru
 type fakeCycleLogs struct {
 	byCycle   map[string][]contracts.ProgressEvent
 	eventsFor map[string][]gen.RunEvent
+	// boots is each cycle's startup state, as its feed read would leave it.
+	boots map[string]*gen.RunCycleBoot
 }
+
+func (f fakeCycleLogs) CycleBoot(c *delivery.RunCycle) *gen.RunCycleBoot { return f.boots[c.ID] }
 
 func (f fakeCycleLogs) CycleProgress(_ context.Context, c *delivery.RunCycle, since int64) (*contracts.ProgressResponse, error) {
 	if since > 0 {

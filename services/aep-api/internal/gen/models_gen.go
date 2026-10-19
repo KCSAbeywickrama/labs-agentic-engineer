@@ -643,6 +643,36 @@ func (e ResourceDocWriteDTOType) Valid() bool {
 	}
 }
 
+// Defines values for RunCycleBootCode.
+const (
+	RunCycleBootCodeRunnerConfigError      RunCycleBootCode = "runner_config_error"
+	RunCycleBootCodeRunnerImagePullBackOff RunCycleBootCode = "runner_image_pull_backoff"
+	RunCycleBootCodeRunnerPullingImage     RunCycleBootCode = "runner_pulling_image"
+	RunCycleBootCodeRunnerScheduling       RunCycleBootCode = "runner_scheduling"
+	RunCycleBootCodeRunnerStarting         RunCycleBootCode = "runner_starting"
+	RunCycleBootCodeRunnerUnschedulable    RunCycleBootCode = "runner_unschedulable"
+)
+
+// Valid indicates whether the value is a known member of the RunCycleBootCode enum.
+func (e RunCycleBootCode) Valid() bool {
+	switch e {
+	case RunCycleBootCodeRunnerConfigError:
+		return true
+	case RunCycleBootCodeRunnerImagePullBackOff:
+		return true
+	case RunCycleBootCodeRunnerPullingImage:
+		return true
+	case RunCycleBootCodeRunnerScheduling:
+		return true
+	case RunCycleBootCodeRunnerStarting:
+		return true
+	case RunCycleBootCodeRunnerUnschedulable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunCycleViewKind.
 const (
 	RunCycleViewKindCoding     RunCycleViewKind = "coding"
@@ -1048,6 +1078,7 @@ const (
 	RunProgressEventTypeDone  RunProgressEventType = "done"
 	RunProgressEventTypeEvent RunProgressEventType = "event"
 	RunProgressEventTypeLine  RunProgressEventType = "line"
+	RunProgressEventTypeTick  RunProgressEventType = "tick"
 )
 
 // Valid indicates whether the value is a known member of the RunProgressEventType enum.
@@ -1060,6 +1091,8 @@ func (e RunProgressEventType) Valid() bool {
 	case RunProgressEventTypeEvent:
 		return true
 	case RunProgressEventTypeLine:
+		return true
+	case RunProgressEventTypeTick:
 		return true
 	default:
 		return false
@@ -2615,6 +2648,26 @@ type RunBudgets struct {
 	ValidationCycles int64 `json:"validationCycles"`
 }
 
+// RunCycleBoot One open cycle's runner on its way up, as the platform last read the attempt's pod: the dark zone between dispatch and the agent's first event, which is the slowest stretch of a run and the one a reader is most likely to be watching. Read from the pod on the same read that serves the cycle's feed, so it is as fresh as the feed.
+// It answers "where is startup", and `startupWait` answers "is startup stuck, and until when does the platform wait". Both can be present: an attempt whose pod cannot be scheduled has `boot.code` `runner_unschedulable` and a `startupWait` with its `failsAt`.
+// The runner's own two pre-session conditions (`workspace_provisioning`, `workspace_ready`) are not here: the runner emits them, so they are events with real seqs, and their arrival ends `boot`.
+type RunCycleBoot struct {
+	// Attempt Which dispatch of the cycle this describes (RunProgressEvent.attempt).
+	Attempt int `json:"attempt"`
+
+	// Code Which startup state, in the vocabulary of the `notice` codes it replaces. `runner_scheduling` the Job exists and no pod has a node yet; `runner_unschedulable` the cluster has no room for the pod; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because a secret or config it mounts is not there; `runner_starting` the container is running and the agent has not spoken yet. A client renders the sentence `@aep/progress-view` owns for the code, and shows a code it does not know as is.
+	Code RunCycleBootCode `json:"code"`
+
+	// Detail The cluster's own words for the state, capped and scrubbed: the scheduler's reason there is no room, the pull error being retried. Absent when the code says everything.
+	Detail string `json:"detail,omitempty"`
+
+	// Since When the pod entered this state (its condition's transition time), so a client can say how long startup has been in it. Kept across reads; a new code takes a new time.
+	Since time.Time `json:"since"`
+}
+
+// RunCycleBootCode Which startup state, in the vocabulary of the `notice` codes it replaces. `runner_scheduling` the Job exists and no pod has a node yet; `runner_unschedulable` the cluster has no room for the pod; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because a secret or config it mounts is not there; `runner_starting` the container is running and the agent has not spoken yet. A client renders the sentence `@aep/progress-view` owns for the code, and shows a code it does not know as is.
+type RunCycleBootCode string
+
 // RunCycleStartupWait Why an OPEN cycle's agent has not started yet: the platform has not applied its Job yet, or its pod is stuck before Running, as the platform's pod-truth watcher last saw it. Present only while the cycle is open and its current attempt waits so; absent once the pod runs or is merely starting, and once the cycle has ended (an agent that never started then ends the cycle with an `agentReason` of `startup_failed:<reason>`, `startup_failed:not_applied` when the Job was never applied). Derived from the cycle record alone; no cluster read answers it.
 type RunCycleStartupWait struct {
 	// FailsAt When the platform gives up on this attempt if the pod has still not started: the startup grace (10 min) from when the attempt's Job or pod was first seen to exist, or, while the Job has not been applied, the apply cap (30 min) from the attempt's dispatch. The cycle then closes `startup_failed:<reason>`, its Job is suspended, and the run fails `agent-start-failed`.
@@ -2636,11 +2689,14 @@ type RunCycleView struct {
 	AgentReason string `json:"agentReason,omitempty"`
 
 	// Attempts Dispatches of THIS cycle (the per-cycle re-dispatch budget, which resets at every cycle boundary).
-	Attempts  int64      `json:"attempts"`
-	Branch    string     `json:"branch,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	EndedAt   *time.Time `json:"endedAt,omitempty"`
-	ID        string     `json:"id"`
+	Attempts int64 `json:"attempts"`
+
+	// Boot Where this open cycle's current attempt is in starting its runner, before the agent's first event. Absent once that event arrives, and on an ended cycle. STATE, not history: the progress stream re-sends the cycle frame each time it changes, and a client shows the newest and keeps none of the earlier ones. It replaces the negative-seq `runner_*` notices the stream used to send as events. It is sent on the run progress stream's cycle frames, read from the pod with the feed; run reads and the version build-progress stream, which read no pod, leave it absent.
+	Boot      *RunCycleBoot `json:"boot,omitempty"`
+	Branch    string        `json:"branch,omitempty"`
+	CreatedAt time.Time     `json:"createdAt"`
+	EndedAt   *time.Time    `json:"endedAt,omitempty"`
+	ID        string        `json:"id"`
 
 	// JobRef The dispatched runner Job for the current attempt; replaced on re-dispatch.
 	JobRef string           `json:"jobRef,omitempty"`
@@ -2707,8 +2763,9 @@ type RunEvent struct {
 	Branch string `json:"branch,omitempty"`
 
 	// Code `notice`, and `run_settled`'s one code below: WHICH condition, as a closed set. Closed on purpose, twice over — a consumer can react to one condition without parsing prose, and no free text (a prompt, a credential, a path) can ride a notice into a user-visible build log. It is also where the WORDING comes from: a surface renders a code's own sentence (`@aep/progress-view` owns those), so the same condition cannot read one way in the console and another in the playground, which is exactly what happened while each producer wrote its own prose.
-	// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (a hole in the producer's seqs, or a log the platform can no longer read); `artifact_failed` something the run produced that could not be stored.
+	// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling (raised at `warn` or `error`, and only when calls are actually held back: a window that reports it is still allowed is not a notice); `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (a hole in the producer's seqs, or a log the platform can no longer read); `artifact_failed` something the run produced that could not be stored.
 	// Eight more describe the stretch BEFORE the first model turn — the dark zone, which is the slowest part of a run and used to show as a dead "waiting…". Six are the platform's reading of pod truth: `runner_scheduling` no runner has a node yet; `runner_unschedulable` the cluster has no room for one; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because its configuration or secrets are wrong; `runner_starting` the container is up and the agent is booting. Two are the runner's own, once it has a process but no session: `workspace_provisioning` it is cloning the repo, mirroring skills and installing credentials; `workspace_ready` that finished and the agent is about to start. They are notices rather than agent events for the same reason throughout: a pod that has not started is not an agent, and there is no session to report a phrase about.
+	// The six pod-truth codes are STATE, and they are RunCycleView.boot now. They stay in this set for the compatibility window, while an older aep-api may still send them as negative-seq notices; a client treats such a notice as the cycle's startup state, never as a row.
 	// `run_settled` carries one code of its own: `provider_limit`, the model provider refused the run's calls with HTTP 429 for longer than a wait (a `retry-after` of five minutes or more, or five minutes of 429 retries in total). The run stopped rather than retry until its deadline; `host` and, when the provider gave one, `resetAt` say whose limit and until when. No other code appears on `run_settled`, and `provider_limit` appears nowhere else.
 	Code RunEventCode `json:"code,omitempty"`
 
@@ -2778,7 +2835,7 @@ type RunEvent struct {
 	// ParentAgentID `agent_started`, `agent_progress` and `agent_settled`: the agent that spawned this one. Absent on a depth-1 agent, whose parent is the lead by definition, and on the lead's own events — so absence means "the lead", not "unknown".
 	ParentAgentID string `json:"parentAgentId,omitempty"`
 
-	// Phrase `agent_progress` only: what the agent says it is doing right now, in its own words, capped and scrubbed. It is a state, not a log line — a new phrase REPLACES the previous one on that agent's row rather than appending, which is the whole reason the kind exists separately from `notice`.
+	// Phrase `agent_progress` only: what the agent says it is doing right now, in its own words, capped and scrubbed. It is a state, not a log line — a new phrase REPLACES the previous one on that agent's row rather than appending, which is the whole reason the kind exists separately from `notice`. In the same READER form as `summary`: one line, with the commands and paths it quotes shortened the way the agent's rows shorten them.
 	Phrase string `json:"phrase,omitempty"`
 
 	// ProviderDetail `run_settled` with `code: provider_limit` only: the provider's own words on the last 429 the runtime reported (its retry message, or its status and error class), capped and scrubbed. It is evidence for the operator, who learns each provider's limit shape from it; the platform logs it and neither stores nor shows it, because it is a third party's text.
@@ -2799,7 +2856,7 @@ type RunEvent struct {
 	// Runtime `run_started` only: which coding runtime executed this attempt. Recorded on the event rather than looked up from the run, because a feed is read back long after the org's runtime setting may have moved on, and the two runtimes emit different agent ids, model names and tool names — a reader that guesses wrong misreads all three.
 	Runtime RunEventRuntime `json:"runtime,omitempty"`
 
-	// Seq Position of this event within its attempt, monotonic from the attempt's first event. It is the producer's own number, so the same event carries the same `seq` whichever source the platform read it from (the pod's log or the observability plane), and a client that reconnects and replays receives the same `seq` again and dedupes it. Platform notices take negative seqs, stable for the state or the position they describe. It is NOT unique across a cycle — a re-dispatch starts a new attempt at the beginning — so anything that orders or dedupes needs RunProgressEvent.attempt alongside it.
+	// Seq Position of this event within its attempt, monotonic from the attempt's first event. It is the producer's own number, so the same event carries the same `seq` whichever source the platform read it from (the pod's log or the observability plane), and a client that reconnects and replays receives the same `seq` again and dedupes it. A notice the PLATFORM adds for a position in the feed (a `gap`) takes a negative seq, stable for the position it describes. Platform STATE never rides an event: startup is RunCycleView.boot, and whether the log can be read is RunCycleView.recording. It is NOT unique across a cycle — a re-dispatch starts a new attempt at the beginning — so anything that orders or dedupes needs RunProgressEvent.attempt alongside it.
 	Seq int64 `json:"seq"`
 
 	// Sha `git_commit` and `git_push`: the commit.
@@ -2811,7 +2868,7 @@ type RunEvent struct {
 	// Status `agent_settled` and `task_settled` only: how the agent, or the backgrounded task it owned, ended. See AgentStatus — in particular that `stopped` is a cancellation and not a failure.
 	Status AgentStatus `json:"status,omitempty"`
 
-	// Summary `tool_use`, `tool_result`, the `git_*` kinds, `gh_action`, `task_started` and `task_settled`: one line describing the call, composed by the producer for a reader — a file path, a search term, a workflow name. Capped, and never the raw arguments, which is what keeps a feed readable when an agent passes a whole file as a parameter.
+	// Summary `tool_use`, `tool_result`, the `git_*` kinds, `gh_action`, `task_started` and `task_settled`: one line describing the call, composed by the producer for a reader — a file path, a search term, a workflow name. Capped, and never the raw arguments, which is what keeps a feed readable when an agent passes a whole file as a parameter. Always in READER form: one line, paths relative to the workspace, and the same form on every kind it appears on. A `task_started` summarises its command exactly as the `tool_use` that launched it did, never as the raw command line.
 	// A `task_settled` carries the SAME summary its `task_started` did. Without it the only thing left to name a finished background command is its `taskId`, and a row reading `background bql1cn6sh · failed` cannot be matched by eye to the command that failed.
 	Summary string `json:"summary,omitempty"`
 
@@ -2852,8 +2909,9 @@ type RunEvent struct {
 }
 
 // RunEventCode `notice`, and `run_settled`'s one code below: WHICH condition, as a closed set. Closed on purpose, twice over — a consumer can react to one condition without parsing prose, and no free text (a prompt, a credential, a path) can ride a notice into a user-visible build log. It is also where the WORDING comes from: a surface renders a code's own sentence (`@aep/progress-view` owns those), so the same condition cannot read one way in the console and another in the playground, which is exactly what happened while each producer wrote its own prose.
-// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (a hole in the producer's seqs, or a log the platform can no longer read); `artifact_failed` something the run produced that could not be stored.
+// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling (raised at `warn` or `error`, and only when calls are actually held back: a window that reports it is still allowed is not a notice); `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (a hole in the producer's seqs, or a log the platform can no longer read); `artifact_failed` something the run produced that could not be stored.
 // Eight more describe the stretch BEFORE the first model turn — the dark zone, which is the slowest part of a run and used to show as a dead "waiting…". Six are the platform's reading of pod truth: `runner_scheduling` no runner has a node yet; `runner_unschedulable` the cluster has no room for one; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because its configuration or secrets are wrong; `runner_starting` the container is up and the agent is booting. Two are the runner's own, once it has a process but no session: `workspace_provisioning` it is cloning the repo, mirroring skills and installing credentials; `workspace_ready` that finished and the agent is about to start. They are notices rather than agent events for the same reason throughout: a pod that has not started is not an agent, and there is no session to report a phrase about.
+// The six pod-truth codes are STATE, and they are RunCycleView.boot now. They stay in this set for the compatibility window, while an older aep-api may still send them as negative-seq notices; a client treats such a notice as the cycle's startup state, never as a row.
 // `run_settled` carries one code of its own: `provider_limit`, the model provider refused the run's calls with HTTP 429 for longer than a wait (a `retry-after` of five minutes or more, or five minutes of 429 retries in total). The run stopped rather than retry until its deadline; `host` and, when the provider gave one, `resetAt` say whose limit and until when. No other code appears on `run_settled`, and `provider_limit` appears nowhere else.
 type RunEventCode string
 
@@ -2923,7 +2981,7 @@ type RunFailure struct {
 	WorkflowID string `json:"workflowId,omitempty"`
 }
 
-// RunProgressEvent One SSE frame on the run progress stream. `type` discriminates the payload: `cycle` carries a RunCycleView (the client upserts by id and renders one accordion section per cycle), `event` one RunEvent — the v2 feed — stamped with the cycle and attempt that produced it, `line` one RunProgressLine attributed to its own cycle, and `done` the terminal run state, after which the server closes the stream.
+// RunProgressEvent One SSE frame on the run progress stream. `type` discriminates the payload: `cycle` carries a RunCycleView (state: the client upserts by id and the newest wins), `event` one RunEvent — the v2 feed, a fact — stamped with the cycle and attempt that produced it, `line` one RunProgressLine attributed to its own cycle, `tick` nothing but the server's clock on a quiet stream, and `done` the terminal run state, after which the server closes the stream. Every frame carries `serverTime`.
 // `event` and `line` are the same feed in two envelope versions and a single stream can carry both: a run whose earlier cycles were dispatched before the v2 cutover replays them as `line` frames and its later ones as `event` frames. A consumer must therefore handle whichever it is given rather than choosing one, for as long as the compatibility window lasts.
 type RunProgressEvent struct {
 	// Attempt Which dispatch of `cycleId` produced the frame's `event`. Stamped by aep-api on `event` frames. RunEvent.seq is monotonic only WITHIN one attempt — a re-dispatch starts again at the beginning — so anything that orders or dedupes events needs this alongside it.
@@ -2942,6 +3000,9 @@ type RunProgressEvent struct {
 
 	// Line One line of a cycle's agent log: the runner's progress envelope (phase | tool_use | activity | tool_result | git_commit | git_push | gh_action | log | progress_item | result) plus the attribution the console groups on — which cycle produced it, and whether the main agent or one of its Task subagents did.
 	Line RunProgressLine `json:"line,omitempty"`
+
+	// ServerTime When aep-api wrote this frame, by the platform's clock. On every frame. Event `ts` values are stamped in the cluster and a reader's "quiet for 40s" is measured against them, so a client estimates its own clock's offset from this rather than trusting the browser's; and the newest `serverTime` received says the connection is alive while the run itself is quiet.
+	ServerTime time.Time `json:"serverTime,omitempty"`
 
 	// State Terminal run state — present only on the `done` frame.
 	State string               `json:"state,omitempty"`

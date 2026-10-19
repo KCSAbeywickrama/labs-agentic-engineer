@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -50,8 +51,18 @@ const (
 	frameTypeCycle = "cycle"
 	frameTypeEvent = "event"
 	frameTypeLine  = "line"
+	frameTypeTick  = "tick"
 	frameTypeDone  = "done"
 )
+
+// serverTimed is a frame that carries the server's clock at the moment it is
+// written (RunProgressEvent.serverTime). frameWriter stamps it on the way out,
+// so the time is the write's and never the derive's: a frame composed before a
+// slow read of the next cycle still says when the client could have had it.
+// Only the run stream's frames carry it; the version stream's do not.
+type serverTimed interface {
+	stampServerTime(at time.Time)
+}
 
 // frameWriter stamps ONE connection's frames: an `id: <seq>` header and one
 // `data:` line per frame, flushed as it goes.
@@ -59,10 +70,14 @@ const (
 // The sequence is a connection-local counter and nothing more. The server keeps
 // no history and no cursor, so a reconnect starts counting from zero and
 // re-derives — which is why the client's dedup key is (cycleId, the RUNNER's
-// seq) and never this one.
+// seq) and never this one. It also counts what the connection has sent, which
+// is how the run stream tells a quiet stretch.
+//
+// clock stamps serverTimed frames; nil is the wall clock.
 type frameWriter struct {
 	w     io.Writer
 	flush func()
+	clock func() time.Time
 	seq   int
 }
 
@@ -71,6 +86,9 @@ type frameWriter struct {
 // the timeline. It reports false only when the CLIENT is gone, which is the one
 // condition that must stop the loop.
 func (f *frameWriter) write(frame any) bool {
+	if st, ok := frame.(serverTimed); ok {
+		st.stampServerTime(f.now())
+	}
 	b, err := json.Marshal(frame)
 	if err != nil {
 		return true
@@ -92,14 +110,32 @@ func (f *frameWriter) sentinel() {
 	f.flush()
 }
 
+func (f *frameWriter) now() time.Time {
+	if f.clock == nil {
+		return time.Now().UTC()
+	}
+	return f.clock().UTC()
+}
+
 // keepAlive writes the comment that holds an idle connection open through a
-// proxy and notices a dead client. False = the client is gone.
+// proxy and notices a dead client. Only the version stream sends it; the run
+// stream sends a `tick` frame instead, which a client can read. False = the
+// client is gone.
 func (f *frameWriter) keepAlive() bool {
 	if _, err := io.WriteString(f.w, ": keep-alive\n\n"); err != nil {
 		return false
 	}
 	f.flush()
 	return true
+}
+
+// cycleRead is what one pass read beside a cycle's record: the feed frames the
+// connection has not sent yet, ready to write, and the startup state the same
+// read found (RunCycleView.boot; nil when there is none, and always on the
+// version stream, which does not project it).
+type cycleRead struct {
+	frames []any
+	boot   *gen.RunCycleBoot
 }
 
 // emitCycles walks one run's cycles OLDEST FIRST, sending a `cycle` frame for
@@ -109,20 +145,22 @@ func (f *frameWriter) keepAlive() bool {
 // before filling it.
 //
 // The feed is READ before the cycle is projected, though it is WRITTEN after.
-// The projection's `recording` is what the platform could serve of the cycle's
-// log, and the platform learns that by reading it: a failed read is what turns
-// a cycle `unavailable`. Projecting first would describe the PREVIOUS read, and
-// a finished run's stream makes one pass and closes, so its only frame would say
-// `kept` beside this read's "logs unavailable" notice.
+// Two members of the projection are learned by that read. `recording` is what
+// the platform could serve of the cycle's log, and a failed read is what turns
+// a cycle `unavailable`; `boot` is the state of the pod the read looked at.
+// Projecting first would describe the PREVIOUS read, and a finished run's
+// stream makes one pass and closes, so its only frame would say `kept` about a
+// log this read could not serve.
 //
 // last is the CONNECTION's cycle dedup state, keyed by cycle id. A cycle id is
 // unique across runs, so the version stream shares one map across every run it
 // stitches rather than keeping a set per run — and a cycle re-read on the next
-// tick emits nothing unless a webhook, or a read's outcome, actually changed it.
+// tick emits nothing unless a webhook, or a read's outcome (its recording, its
+// boot), actually changed it.
 //
 // readFeed is the caller's, and is the one thing the two streams do NOT share:
 // the run stream reads v2 `event` frames and the version stream v1 `line`
-// frames. It returns the cycle's new frames, ready to write. It takes the
+// frames. It returns the cycle's new frames and its boot. It takes the
 // cycle's 1-based position WITHIN THIS RUN, which is what the contract's
 // `cycleIndex` says it is. The version stream deliberately does not renumber
 // it: see build_progress.go.
@@ -130,11 +168,12 @@ func (f *frameWriter) keepAlive() bool {
 // False means the client is gone.
 func (s *ProgressService) emitCycles(ctx context.Context, out *frameWriter, cycles []delivery.RunCycle,
 	last map[string]string, cycleFrame func(*gen.RunCycleView) any,
-	readFeed func(context.Context, *delivery.RunCycle, int) []any) bool {
+	readFeed func(context.Context, *delivery.RunCycle, int) cycleRead) bool {
 	for i := range cycles {
 		c := &cycles[i]
 		feed := readFeed(ctx, c, i+1)
 		view := CycleView(c, RecordingOf(s.recordings, c))
+		view.Boot = feed.boot
 		b, _ := json.Marshal(view)
 		if last[c.ID] != string(b) {
 			last[c.ID] = string(b)
@@ -142,7 +181,7 @@ func (s *ProgressService) emitCycles(ctx context.Context, out *frameWriter, cycl
 				return false
 			}
 		}
-		for _, f := range feed {
+		for _, f := range feed.frames {
 			if !out.write(f) {
 				return false
 			}
