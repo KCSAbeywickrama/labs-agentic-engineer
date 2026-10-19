@@ -139,9 +139,17 @@ function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<U
   const script = scriptOf(build);
   const encoder = new TextEncoder();
   const timers: ReturnType<typeof setTimeout>[] = [];
+  let ticker: ReturnType<typeof setInterval> | undefined;
+  let closed = false;
+  // Everything that would write again, stopped: on the run's end, on an
+  // aborted request, and when the reader cancels, which aborts nothing.
+  const stop = () => {
+    closed = true;
+    timers.forEach(clearTimeout);
+    clearInterval(ticker);
+  };
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      let closed = false;
       let lastSent = Date.now();
       const write = (data: string) => {
         if (closed || signal.aborted) return;
@@ -151,12 +159,10 @@ function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<U
       const send = (frame: object) => write(JSON.stringify({ ...frame, serverTime: new Date().toISOString() }));
       const close = () => {
         if (closed) return;
-        closed = true;
-        timers.forEach(clearTimeout);
-        clearInterval(ticker);
+        stop();
         controller.close();
       };
-      const ticker = setInterval(() => {
+      ticker = setInterval(() => {
         if (Date.now() - lastSent >= TICK_AFTER_MS) send({ type: "tick" });
       }, 1_000);
       signal.addEventListener("abort", close);
@@ -173,7 +179,7 @@ function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<U
       );
     },
     cancel() {
-      timers.forEach(clearTimeout);
+      stop();
     },
   });
 }
