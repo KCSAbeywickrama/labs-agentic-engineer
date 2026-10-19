@@ -177,6 +177,16 @@ const NOTICE_LABELS: Record<string, string> = {
   ...LIFECYCLE_LABELS,
 };
 
+// The few labels that are only true at `warn` or `error`. A `rate_limit` raised
+// at those levels means calls are being held back, which is what the contract
+// now limits the code to; an older runner also raised it at `info` for a window
+// that was merely being consumed ("allowed on the five_hour window"), and
+// labelling that row "rate limited" told a reader a healthy run was throttled.
+// Below `warn` the code reads as the status report it was.
+const NOTICE_LABELS_BELOW_WARN: Record<string, string> = {
+  rate_limit: "provider rate-limit status",
+};
+
 const NOTICE_GLYPHS: Record<string, string> = { info: "ℹ", warn: "⚠", error: "✗" };
 
 // What the run is waiting on, said as a wait rather than as a field value.
@@ -392,8 +402,17 @@ export function formatEvent(e: RunEventView): FormattedLine {
  * caption of an agent whose silence that notice is the explanation for.
  */
 export function noticeSentence(e: RunEventView): string {
-  const label = e.code ? (NOTICE_LABELS[e.code] ?? e.code) : "";
-  return [label, e.detail].filter(Boolean).join(" · ");
+  return [noticeLabel(e), e.detail].filter(Boolean).join(" · ");
+}
+
+/**
+ * A coded notice's label at the level it was raised. "Below warn" includes an
+ * absent level, matching the row's own tone, which reads that as `info` too.
+ */
+function noticeLabel(e: RunEventView): string {
+  if (!e.code) return "";
+  const belowWarn = e.level !== "warn" && e.level !== "error";
+  return (belowWarn ? NOTICE_LABELS_BELOW_WARN[e.code] : undefined) ?? NOTICE_LABELS[e.code] ?? e.code;
 }
 
 /**

@@ -28,12 +28,17 @@ import type { components } from "../../../generated/aep-api";
 
 type TaskStreamEvent = components["schemas"]["TaskStreamEvent"];
 type TimelineEvent = components["schemas"]["TimelineEvent"];
+type ExecutionView = components["schemas"]["ExecutionView"];
 
 export type TaskLogPhase = "connecting" | "live" | "reconnecting" | "ended";
 
 export interface TaskLogState {
   /** The log's lines, oldest first. */
   lines: TimelineEvent[];
+  /** The task's attempts, as last reported, oldest first. */
+  executions: ExecutionView[];
+  /** The task's label kind, once its task frame arrived. */
+  kind: string | undefined;
   phase: TaskLogPhase;
 }
 
@@ -52,12 +57,16 @@ export function timelineEventKey(e: TimelineEvent): string {
 /** Attach to one task's log while it is open; the stream closes when it is. */
 export function useTaskLog(projectName: string, issueNumber: number): TaskLogState {
   const [lines, setLines] = useState<TimelineEvent[]>([]);
+  const [executions, setExecutions] = useState<ExecutionView[]>([]);
+  const [kind, setKind] = useState<string>();
   const [phase, setPhase] = useState<TaskLogPhase>("connecting");
   const seen = useRef(new Set<string>());
 
   useEffect(() => {
     seen.current = new Set();
     setLines([]);
+    setExecutions([]);
+    setKind(undefined);
     setPhase("connecting");
     const controller = new AbortController();
     let disposed = false;
@@ -75,6 +84,18 @@ export function useTaskLog(projectName: string, issueNumber: number): TaskLogSta
         const next = await frames.next();
         if (next.done) return next.value;
         const event = next.value as unknown as TaskStreamEvent;
+        if (event.type === "task" && event.task) {
+          setKind(event.task.kind);
+          continue;
+        }
+        const execution = event.type === "execution" ? event.execution : undefined;
+        if (execution) {
+          setExecutions((prev) => {
+            const at = prev.findIndex((e) => e.id === execution.id);
+            return at < 0 ? [...prev, execution] : prev.map((e, i) => (i === at ? execution : e));
+          });
+          continue;
+        }
         if (event.type !== "line" || !event.line) continue;
         const line = event.line;
         const key = timelineEventKey(line);
@@ -107,5 +128,5 @@ export function useTaskLog(projectName: string, issueNumber: number): TaskLogSta
     };
   }, [projectName, issueNumber]);
 
-  return { lines, phase };
+  return { lines, executions, kind, phase };
 }

@@ -195,6 +195,47 @@ explanation are unaffected.
 No retention number and no expiry date in copy: "a few days" is the promise,
 and the exact window is the platform's to change.
 
+## A build session's crew
+
+Inside a session's log, the agents that worked it: who is doing what now
+(**Crew**), and where the time went (**Timeline**, offered from the second
+agent on). `@aep/progress-view` owns the state words and the runtime's own
+sentences; the Build card's crew components own the rest.
+
+| Where | Says |
+|---|---|
+| The session's line over the crew | **N agents · N running · last event 12s ago**, or **N agents · all settled** once nothing runs |
+| The connection gone quiet (three missed ticks) | warning · *No word from the platform for 45s: the connection may have dropped.* |
+| An agent's state | **working** · **waiting** · **stalled** · **completed** · **failed** · **cancelled** |
+| A row's age, while it runs | **quiet 1m** |
+| An agent the runtime detached | **background**, beside its name |
+| The picked agent's own task list | **Plan · 2 of 5 done**, each entry with its status (**pending** · **in progress** · **completed**) |
+| What the picked agent started | **Subagents · 4**, each with its state or, settled, its totals |
+| Its detached commands still going | **Running in the background · 2**, each **running · 3m** |
+| Its steps | **Steps**: oldest first, the newest at the bottom; **Show 340 earlier steps** above the newest 200 |
+| Steps arrived while the reader read back | **Latest · 3 new** (just **Latest** when none arrived), which returns to the newest |
+| An agent with no steps | *No steps from this agent yet.* |
+| The Timeline's key | **solid · working** · **faded · waiting on another agent** |
+| A Timeline with nothing timed | *Nothing has been timed yet: the crew view has the live picture.* |
+
+**Subagents**, not "dispatched" or "spawned": the reader's word for an agent
+another agent started.
+
+## A task's log
+
+One task's own log, under its row on the Build card and on its Issue card.
+
+| The log | Says |
+|---|---|
+| Opening | *Attaching to the task's log…* |
+| Open, nothing yet | *Attached. Nothing logged for this task yet.* |
+| Reopening | *Connection lost, reconnecting…* |
+| Ended empty, coding work (`development`, `bug`, `conflict`) | *No log of its own: the coding agent's log has this task's work.* |
+| Ended empty, validation | *No log of its own: the version's validation has this task's work.* |
+| Ended empty, a provision gate | *No log: the platform resolves this gate itself.* |
+| Ended empty, any other kind | *Nothing logged for this task.* |
+| A run of it that wrote no lines | one line of its kind and status as the platform states them, with its reason: *provision completed: …* |
+
 ## An agent that has not started
 
 A coding or validation agent can wait for the cluster before its first line:
@@ -219,7 +260,7 @@ the words.
 | It never started, validation, on the Validation card | **The validation agent could not start** · *Nothing ran; the version was not validated.* · *Validate once the cluster has room.* before any attempt has a verdict, *Revalidate …* after one: the word on the card's button (`validateLabel`) |
 | It never started, validation, on the Build card | the same, with *Validate it again from its Validation card once the cluster has room.* and **Go to Validation** |
 | A validation attempt, waiting / never started | **Waiting to start** / **Agent could not start** |
-| A build session the cluster holds | its header reads **waiting to start**, never **writing now**; the Coding agent's log meta reads **newest first** |
+| A build session the cluster holds | its header reads **waiting to start**, never **writing now** |
 | The short label | **Agent could not start** |
 
 The deadline is the platform's, never a guess, and the time gains its date

@@ -28,6 +28,7 @@ import type { components } from "../../generated/aep-api";
 import { addBuild, elapsed, mockBuilds, projectBuilds, scriptOf, type MockBuild } from "../buildsState";
 import { designView } from "../designState";
 import { framesUntil, runAt, snapshotAt, summaryAt } from "../fixtures/buildRun";
+import { mockStallMs } from "../fixtures/codingSession";
 import { specView } from "../specState";
 import { aeStudioReadRefusal } from "./aeStudio";
 
@@ -95,6 +96,7 @@ function newRun(projectName: string, build: Omit<ProjectBuild, "status">, failin
       criteria: criteriaFor(projectName, build.features.map((f) => f.id)),
       failing,
       startedAt: Date.now(),
+      stallMs: mockStallMs(),
     },
   };
 }
@@ -125,7 +127,14 @@ function byTag(projectName: string, tag: string): MockBuild | undefined {
   return mockBuilds(projectName).find((b) => b.build.version === tag);
 }
 
-/** The run's progress stream: what has happened at once, then the rest as it happens, then `done`. */
+/** How long the stream may stay quiet before it sends a `tick` (the contract's 15 seconds). */
+const TICK_AFTER_MS = 15_000;
+
+/**
+ * The run's progress stream: what has happened at once, then the rest as it
+ * happens, then `done`. Every frame is stamped with the platform's clock as it
+ * is sent, and a stream quiet for 15s sends a `tick`, as aep-api does.
+ */
 function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<Uint8Array> {
   const script = scriptOf(build);
   const encoder = new TextEncoder();
@@ -133,24 +142,32 @@ function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<U
   return new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const send = (data: string) => {
-        if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      let lastSent = Date.now();
+      const write = (data: string) => {
+        if (closed || signal.aborted) return;
+        lastSent = Date.now();
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
+      const send = (frame: object) => write(JSON.stringify({ ...frame, serverTime: new Date().toISOString() }));
       const close = () => {
         if (closed) return;
         closed = true;
         timers.forEach(clearTimeout);
+        clearInterval(ticker);
         controller.close();
       };
+      const ticker = setInterval(() => {
+        if (Date.now() - lastSent >= TICK_AFTER_MS) send({ type: "tick" });
+      }, 1_000);
       signal.addEventListener("abort", close);
       const now = elapsed(build);
-      for (const { frame } of framesUntil(script, now)) send(JSON.stringify(frame));
+      for (const { frame } of framesUntil(script, now)) send(frame);
       for (const { at, frame } of script.frames.filter((f) => f.at > now)) {
-        timers.push(setTimeout(() => send(JSON.stringify(frame)), at - now));
+        timers.push(setTimeout(() => send(frame), at - now));
       }
       timers.push(
         setTimeout(() => {
-          send("[DONE]");
+          write("[DONE]");
           close();
         }, Math.max(0, script.end - now) + 10),
       );

@@ -31,6 +31,7 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type RunCycleView = components["schemas"]["RunCycleView"];
 type CycleBuild = components["schemas"]["CycleBuild"];
 type TimelineEvent = components["schemas"]["TimelineEvent"];
+type ExecutionView = components["schemas"]["ExecutionView"];
 
 /**
  * The cycle kinds a build owns. Validation is not one: its attempts and
@@ -66,6 +67,23 @@ export function isAgentStreaming(runs: readonly MilestoneRunView[]): boolean {
   const newest = runs[0];
   if (!newest || isTerminalRun(newest.state)) return false;
   return buildCycles(newest.cycles).some((c) => !c.endedAt && !c.startupWait);
+}
+
+/**
+ * How a session's agents ended, once its stream will say no more, in
+ * `run_settled`'s outcome words: the crew model settles any agent still
+ * `running` with it, so a finished session never shows a live lead.
+ *
+ * The cycle's own end comes first, because one session can succeed in a run
+ * that later fails (its validation did): an ended cycle with no `agentReason`
+ * opened its pull request. A cycle still open settles only with the run.
+ * Undefined while either can still change.
+ */
+export function cycleEndedWith(cycle: Pick<RunCycleView, "endedAt" | "agentReason">, runState: string | undefined): string | undefined {
+  if (cycle.endedAt) return cycle.agentReason ? "failure" : "success";
+  if (runState === "cancelled") return "cancelled";
+  if (runState === "failed" || runState === "blocked") return "failure";
+  return runState ? "success" : undefined;
 }
 
 /**
@@ -128,7 +146,15 @@ export function agentLogLines(events: readonly StampedRunEvent[]): string[] {
   return newestFirst(events.map((e) => ({ ts: e.ts, text: formatEvent(e).text })));
 }
 
-/** A task's log (its executions' timeline), newest first. */
-export function taskLogLines(lines: readonly TimelineEvent[]): string[] {
-  return newestFirst(lines.map((l) => ({ ts: l.ts, text: formatLine(l).text })));
+/**
+ * A task's log (its executions' timeline), newest first. An execution that
+ * wrote no lines, as a provision gate never does, is one line of its outcome.
+ */
+export function taskLogLines(lines: readonly TimelineEvent[], executions: readonly ExecutionView[] = []): string[] {
+  const logged = new Set(lines.map((l) => l.executionId));
+  const silent = executions
+    .filter((e) => !logged.has(e.id))
+    .map((e) => ({ ts: e.endedAt ?? e.startedAt ?? e.createdAt, text: `${e.kind} ${e.status}${e.reason ? `: ${e.reason}` : ""}` }));
+  const entries = [...lines.map((l) => ({ ts: l.ts, text: formatLine(l).text })), ...silent];
+  return newestFirst(silent.length ? entries.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts)) : entries);
 }
