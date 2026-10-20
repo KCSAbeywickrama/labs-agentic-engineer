@@ -168,17 +168,25 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	// promoted in an earlier wave is met for the deadline's purposes whatever
 	// the snapshot said about it.
 	ready := map[string]bool{}
+	promoted := map[string]bool{}
+	blockedWave := false
 	for _, wave := range plan.Waves {
 		if res, err := l.promote(ctx, wave); err != nil || res != cycleGreen {
 			return res, err
 		}
 		names := delivery.TargetNames(wave)
+		for _, name := range names {
+			promoted[name] = true
+		}
 		res, blocked, err := l.awaitDeployments(ctx, names, version, deadline, plan.Providers, ready)
 		if err != nil || res != cycleGreen {
 			return res, err
 		}
 		if blocked {
-			return l.deferConverge(ctx), nil
+			// No later wave is promoted into the same expired wait. The pass is
+			// not over, though: the waited set below is still polled.
+			blockedWave = true
+			break
 		}
 		for _, name := range names {
 			ready[name] = true
@@ -187,11 +195,25 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	// Everything this pass wrote, plus what was already converging: a component
 	// promoted by an EARLIER pass may still be rolling out, and the version does
 	// not serve until it does.
-	res, blocked, err := l.awaitDeployments(ctx, plan.Waited, version, deadline, plan.Providers, ready)
+	//
+	// After a blocked wave too, and that is not optional. A component that was
+	// converging when the pass began may have failed since, and this is the one
+	// poll in the pass that reads it. Ending the pass at the blocked wave left a
+	// pair that connect to each other with its fixed half excused — blocked
+	// behind the other — and the other half, which had failed to render, never
+	// polled and never filed: the run ended version-incomplete with nothing to
+	// work. With the deadline already spent the wait answers within two polls.
+	//
+	// Less the waves the pass never reached: the plan lists every wave's targets
+	// in Waited before anything is written, and after a blocked wave the later
+	// ones were not. A component with no binding polls as pending with no
+	// reason, and the deadline would file it for a deployment that never
+	// happened.
+	res, blocked, err := l.awaitDeployments(ctx, reachedWaited(plan, promoted), version, deadline, plan.Providers, ready)
 	if err != nil || res != cycleGreen {
 		return res, err
 	}
-	if blocked {
+	if blocked || blockedWave {
 		return l.deferConverge(ctx), nil
 	}
 
@@ -222,10 +244,30 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	return cycleGreen, nil
 }
 
+// reachedWaited is plan.Waited less the targets of waves this pass did not
+// promote. On a pass with no blocked wave it is plan.Waited itself.
+func reachedWaited(plan delivery.DeployPlan, promoted map[string]bool) []string {
+	unreached := map[string]bool{}
+	for _, wave := range plan.Waves {
+		for _, target := range wave {
+			if !promoted[target.Component] {
+				unreached[target.Component] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(plan.Waited))
+	for _, name := range plan.Waited {
+		if !unreached[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // deferConverge ends a pass whose wait expired with every pending component
-// blocked behind an unmet provider. No later wave is promoted into the same
-// expired wait, and the converge this pass owes its promotes is left to the next
-// pass (convergeOwed). The pass itself answers green: nothing it wrote failed,
+// blocked behind an unmet provider, once the waited set has been polled. No
+// later wave is promoted into the same expired wait, and the converge this
+// pass owes its promotes is left to the next pass (convergeOwed). The pass itself answers green: nothing it wrote failed,
 // and the boundary's serving gate (ADR-0026) decides whether the version is
 // delivered.
 func (l *loop) deferConverge(ctx workflow.Context) cycleResult {
