@@ -37,6 +37,20 @@ type BuildPreflight = components["schemas"]["BuildPreflight"];
 type BuildList = components["schemas"]["BuildList"];
 type SpecVersionList = components["schemas"]["SpecVersionList"];
 type BuildRunList = components["schemas"]["BuildRunList"];
+type CycleBuildList = components["schemas"]["CycleBuildList"];
+type BuildLogs = components["schemas"]["BuildLogs"];
+
+// A finished component build's log, served whole: the live tail and the
+// expired answers are the real API's, pinned in BuildLogs.test.tsx.
+const MOCK_BUILD_LOG = [
+  ">> Repository: https://github.com/acme/shop.git",
+  ">> Branch: main",
+  "#1 [build 1/4] FROM docker.io/library/node:22-alpine",
+  "#5 [build 4/4] RUN npm run build",
+  "#7 exporting to image",
+  ">> Image pushed",
+  ">> WorkflowRun annotated successfully (HTTP 200)",
+];
 type ApiError = components["schemas"]["Error"];
 
 // What each version built answers list-project-versions, off the builds the
@@ -226,6 +240,22 @@ export const buildsHandlers = [
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
     });
   }),
+
+  // The component builds a merged cycle started: one web build that finished.
+  http.get("*/api/v1/projects/:projectName/builds/:tag/cycles/:cycleId/builds", ({ params }) => {
+    const build = byTag(String(params.projectName), String(params.tag));
+    if (!build) return refuse(404, { code: "not_found", message: `No version named ${String(params.tag)}.` });
+    return HttpResponse.json<CycleBuildList>({
+      items: [{ component: "web", buildName: `${String(params.projectName)}-web-1`, status: "Succeeded", completed: true, attempt: 1 }],
+    });
+  }),
+
+  http.get("*/api/v1/projects/:projectName/components/:componentName/builds/:buildName/logs", () =>
+    HttpResponse.json<BuildLogs>({
+      complete: true,
+      logs: MOCK_BUILD_LOG.map((log, i) => ({ log, timestamp: new Date(Date.UTC(2026, 9, 19, 15, 24, 36 + i)).toISOString() })),
+    }),
+  ),
 
   http.get("*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report", ({ params }) => {
     const build = byTag(String(params.projectName), String(params.tag));

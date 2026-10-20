@@ -512,12 +512,6 @@ func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName,
 	return list, nil
 }
 
-// logCursorOverlap widens each tail read past the cursor. The cursor is the
-// node's clock and sinceSeconds is measured on it too, but the gap between them
-// is computed on ours; the overlap absorbs skew and whole-second rounding, and
-// the cursor filter drops what it re-reads.
-const logCursorOverlap = 30 * time.Second
-
 // GetBuildLogs reads one build's log live from OpenChoreo, after a cursor, and
 // reports whether that read is the whole of it.
 //
@@ -542,11 +536,8 @@ func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectNam
 		return nil, ErrBuildNotInComponent
 	}
 
-	var sinceSeconds int64
-	if !after.IsZero() {
-		sinceSeconds = int64((max(time.Since(after), 0) + logCursorOverlap) / time.Second)
-	}
-	lines, err := s.client.GetWorkflowRunLogs(ctx, orgName, buildName, sinceSeconds)
+	// The read reaches back past the cursor; the filter below drops what it re-reads.
+	lines, err := s.client.GetWorkflowRunLogs(ctx, orgName, buildName, after)
 	switch {
 	case errors.Is(err, openchoreo.ErrNotFound) && run.Completed:
 		// Deleted between the two reads: past its TTL.
@@ -572,20 +563,21 @@ func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectNam
 		if !l.Timestamp.After(after) {
 			continue
 		}
-		out.Logs = append(out.Logs, gen.BuildLogEntry{Log: l.Log, Timestamp: l.Timestamp.UTC().Format(time.RFC3339Nano)})
+		out.Logs = append(out.Logs, gen.BuildLogEntry{Log: l.Log, Timestamp: logStamp(l.Timestamp)})
 		if l.Timestamp.After(newest) {
 			newest = l.Timestamp
 		}
 	}
 	if !newest.IsZero() {
-		out.NextCursor = formatLogCursor(newest)
+		out.NextCursor = logStamp(newest)
 	}
 	return out, nil
 }
 
-// The cursor is the newest line's timestamp at full precision. Opaque on the
-// wire; a client carries back what it was handed.
-func formatLogCursor(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+// logStamp is a line's time on the wire, at full precision. The cursor is the
+// newest line's stamp: opaque to the client, which carries back what it was
+// handed, and parsed back here by parseLogCursor.
+func logStamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
 func parseLogCursor(cursor string) (time.Time, error) {
 	if cursor == "" {

@@ -58,7 +58,7 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			GetWorkflowRunFunc: func(ctx context.Context, orgName string, runName string) (*gen.WorkflowRun, error) {
 //				panic("mock out the GetWorkflowRun method")
 //			},
-//			GetWorkflowRunLogsFunc: func(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error) {
+//			GetWorkflowRunLogsFunc: func(ctx context.Context, orgName string, runName string, after time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 //				panic("mock out the GetWorkflowRunLogs method")
 //			},
 //			ListBuildRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) ([]openchoreo.BuildRunSummary, error) {
@@ -138,7 +138,7 @@ type ComponentClientMock struct {
 	GetWorkflowRunFunc func(ctx context.Context, orgName string, runName string) (*gen.WorkflowRun, error)
 
 	// GetWorkflowRunLogsFunc mocks the GetWorkflowRunLogs method.
-	GetWorkflowRunLogsFunc func(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error)
+	GetWorkflowRunLogsFunc func(ctx context.Context, orgName string, runName string, after time.Time) ([]openchoreo.WorkflowRunLogLine, error)
 
 	// ListBuildRunsFunc mocks the ListBuildRuns method.
 	ListBuildRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string) ([]openchoreo.BuildRunSummary, error)
@@ -317,8 +317,8 @@ type ComponentClientMock struct {
 			OrgName string
 			// RunName is the runName argument value.
 			RunName string
-			// SinceSeconds is the sinceSeconds argument value.
-			SinceSeconds int64
+			// After is the after argument value.
+			After time.Time
 		}
 		// ListBuildRuns holds details about calls to the ListBuildRuns method.
 		ListBuildRuns []struct {
@@ -1023,25 +1023,25 @@ func (mock *ComponentClientMock) GetWorkflowRunCalls() []struct {
 }
 
 // GetWorkflowRunLogs calls GetWorkflowRunLogsFunc.
-func (mock *ComponentClientMock) GetWorkflowRunLogs(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error) {
+func (mock *ComponentClientMock) GetWorkflowRunLogs(ctx context.Context, orgName string, runName string, after time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 	if mock.GetWorkflowRunLogsFunc == nil {
 		panic("ComponentClientMock.GetWorkflowRunLogsFunc: method is nil but ComponentClient.GetWorkflowRunLogs was just called")
 	}
 	callInfo := struct {
-		Ctx          context.Context
-		OrgName      string
-		RunName      string
-		SinceSeconds int64
+		Ctx     context.Context
+		OrgName string
+		RunName string
+		After   time.Time
 	}{
-		Ctx:          ctx,
-		OrgName:      orgName,
-		RunName:      runName,
-		SinceSeconds: sinceSeconds,
+		Ctx:     ctx,
+		OrgName: orgName,
+		RunName: runName,
+		After:   after,
 	}
 	mock.lockGetWorkflowRunLogs.Lock()
 	mock.calls.GetWorkflowRunLogs = append(mock.calls.GetWorkflowRunLogs, callInfo)
 	mock.lockGetWorkflowRunLogs.Unlock()
-	return mock.GetWorkflowRunLogsFunc(ctx, orgName, runName, sinceSeconds)
+	return mock.GetWorkflowRunLogsFunc(ctx, orgName, runName, after)
 }
 
 // GetWorkflowRunLogsCalls gets all the calls that were made to GetWorkflowRunLogs.
@@ -1049,16 +1049,16 @@ func (mock *ComponentClientMock) GetWorkflowRunLogs(ctx context.Context, orgName
 //
 //	len(mockedComponentClient.GetWorkflowRunLogsCalls())
 func (mock *ComponentClientMock) GetWorkflowRunLogsCalls() []struct {
-	Ctx          context.Context
-	OrgName      string
-	RunName      string
-	SinceSeconds int64
+	Ctx     context.Context
+	OrgName string
+	RunName string
+	After   time.Time
 } {
 	var calls []struct {
-		Ctx          context.Context
-		OrgName      string
-		RunName      string
-		SinceSeconds int64
+		Ctx     context.Context
+		OrgName string
+		RunName string
+		After   time.Time
 	}
 	mock.lockGetWorkflowRunLogs.RLock()
 	calls = mock.calls.GetWorkflowRunLogs

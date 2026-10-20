@@ -39,15 +39,15 @@ func lineAt(ns int, log string) openchoreo.WorkflowRunLogLine {
 }
 
 // liveLogs is an OC client whose run is web/svc's, with the given state and
-// log; it records the sinceSeconds each log read asked for.
-func liveLogs(completed bool, lines []openchoreo.WorkflowRunLogLine, since *[]int64) *ocmocks.ComponentClientMock {
+// log; it records the `after` each log read asked from.
+func liveLogs(completed bool, lines []openchoreo.WorkflowRunLogLine, after *[]time.Time) *ocmocks.ComponentClientMock {
 	return &ocmocks.ComponentClientMock{
 		GetWorkflowRunFunc: func(_ context.Context, _, run string) (*gen.WorkflowRun, error) {
 			return &gen.WorkflowRun{Name: run, ProjectName: "web", ComponentName: "svc", Completed: completed}, nil
 		},
-		GetWorkflowRunLogsFunc: func(_ context.Context, _, _ string, s int64) ([]openchoreo.WorkflowRunLogLine, error) {
-			if since != nil {
-				*since = append(*since, s)
+		GetWorkflowRunLogsFunc: func(_ context.Context, _, _ string, a time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
+			if after != nil {
+				*after = append(*after, a)
 			}
 			return lines, nil
 		},
@@ -61,8 +61,8 @@ func readLogs(t *testing.T, oc openchoreo.ComponentClient, cursor string) (*gen.
 
 func TestGetBuildLogs_FinishedBuildIsCompleteWithANanosecondCursor(t *testing.T) {
 	t.Parallel()
-	var since []int64
-	logs, err := readLogs(t, liveLogs(true, []openchoreo.WorkflowRunLogLine{lineAt(1, "clone"), lineAt(2, "build")}, &since), "")
+	var after []time.Time
+	logs, err := readLogs(t, liveLogs(true, []openchoreo.WorkflowRunLogLine{lineAt(1, "clone"), lineAt(2, "build")}, &after), "")
 	if err != nil {
 		t.Fatalf("GetBuildLogs: %v", err)
 	}
@@ -72,8 +72,8 @@ func TestGetBuildLogs_FinishedBuildIsCompleteWithANanosecondCursor(t *testing.T)
 	if logs.NextCursor != "2026-10-12T16:47:20.000000002Z" {
 		t.Errorf("nextCursor = %q, want the newest line's timestamp at full precision", logs.NextCursor)
 	}
-	if len(since) != 1 || since[0] != 0 {
-		t.Errorf("a first read must ask for the whole log, asked sinceSeconds=%v", since)
+	if len(after) != 1 || !after[0].IsZero() {
+		t.Errorf("a first read must ask for the whole log, asked after %v", after)
 	}
 }
 
@@ -82,8 +82,8 @@ func TestGetBuildLogs_FinishedBuildIsCompleteWithANanosecondCursor(t *testing.T)
 func TestGetBuildLogs_TailKeepsLinesFromTheCursorsOwnSecond(t *testing.T) {
 	t.Parallel()
 	all := []openchoreo.WorkflowRunLogLine{lineAt(1, "a"), lineAt(2, "b"), lineAt(3, "c")}
-	var since []int64
-	logs, err := readLogs(t, liveLogs(false, all, &since), "2026-10-12T16:47:20.000000001Z")
+	var after []time.Time
+	logs, err := readLogs(t, liveLogs(false, all, &after), "2026-10-12T16:47:20.000000001Z")
 	if err != nil {
 		t.Fatalf("GetBuildLogs: %v", err)
 	}
@@ -93,9 +93,9 @@ func TestGetBuildLogs_TailKeepsLinesFromTheCursorsOwnSecond(t *testing.T) {
 	if len(logs.Logs) != 2 || logs.Logs[0].Log != "b" || logs.Logs[1].Log != "c" {
 		t.Fatalf("logs = %+v, want only the lines after the cursor", logs.Logs)
 	}
-	// The tail asks OpenChoreo for a window reaching back past the cursor.
-	if want := int64((time.Since(logT0) + logCursorOverlap) / time.Second); len(since) != 1 || since[0] < want-2 || since[0] > want+2 {
-		t.Errorf("sinceSeconds = %v, want about %d", since, want)
+	// The tail asks OpenChoreo for the log after the cursor.
+	if len(after) != 1 || !after[0].Equal(logT0.Add(1)) {
+		t.Errorf("read after %v, want the cursor", after)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestGetBuildLogs_NothingNewKeepsTheCursor(t *testing.T) {
 func TestGetBuildLogs_NotStartedIsAnEmptyIncompleteRead(t *testing.T) {
 	t.Parallel()
 	oc := liveLogs(false, nil, nil)
-	oc.GetWorkflowRunLogsFunc = func(context.Context, string, string, int64) ([]openchoreo.WorkflowRunLogLine, error) {
+	oc.GetWorkflowRunLogsFunc = func(context.Context, string, string, time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 		return nil, fmt.Errorf("%w: WorkflowRun not found", openchoreo.ErrNotFound)
 	}
 	logs, err := readLogs(t, oc, "")
@@ -142,7 +142,7 @@ func TestGetBuildLogs_ExpiredBuild(t *testing.T) {
 	})
 	t.Run("deleted between the two reads", func(t *testing.T) {
 		oc := liveLogs(true, nil, nil)
-		oc.GetWorkflowRunLogsFunc = func(context.Context, string, string, int64) ([]openchoreo.WorkflowRunLogLine, error) {
+		oc.GetWorkflowRunLogsFunc = func(context.Context, string, string, time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 			return nil, fmt.Errorf("%w: WorkflowRun not found", openchoreo.ErrNotFound)
 		}
 		if _, err := readLogs(t, oc, ""); !errors.Is(err, ErrBuildExpired) {

@@ -53,8 +53,8 @@ package projects_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -394,7 +394,7 @@ func TestComponentComponent_TriggerBuild_HappyAndError(t *testing.T) {
 func TestComponentComponent_BuildLogs_ReadsTheLiveLog(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		GetWorkflowRunLogsFunc: func(_ context.Context, org, run string, _ int64) ([]openchoreo.WorkflowRunLogLine, error) {
+		GetWorkflowRunLogsFunc: func(_ context.Context, org, run string, _ time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 			if org != "acme" || run != "run-1" {
 				t.Errorf("live log read for %s/%s", org, run)
 			}
@@ -458,7 +458,7 @@ func TestComponentComponent_BuildLogs_AnotherComponentsBuildIs404(t *testing.T) 
 func TestComponentComponent_BuildLogs_SourceFailureIs503(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		GetWorkflowRunLogsFunc: func(context.Context, string, string, int64) ([]openchoreo.WorkflowRunLogLine, error) {
+		GetWorkflowRunLogsFunc: func(context.Context, string, string, time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
 			return nil, fmt.Errorf("%w: gateway down", openchoreo.ErrInternalServerError)
 		},
 	}
@@ -466,6 +466,9 @@ func TestComponentComponent_BuildLogs_SourceFailureIs503(t *testing.T) {
 	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs")
 	if resp.Code != 503 {
 		t.Fatalf("want 503, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Code != "log_source_unavailable" {
+		t.Fatalf("503 code: got %q", e.Code)
 	}
 	if strings.Contains(resp.Body.String(), "gateway down") {
 		t.Fatalf("503 body leaks internals: %s", resp.Body.String())

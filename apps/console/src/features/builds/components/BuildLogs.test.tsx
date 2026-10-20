@@ -26,10 +26,11 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
-// A merge's builds are read live from OpenChoreo, which keeps a build only for
-// its builder workflow's TTL. The panel tails a running build through the
-// server's cursor, and says plainly when a build, or a whole merge's builds,
-// are no longer kept, instead of reading as broken or not started.
+// A merge's builds are read live, and a build is kept only for a while after
+// it finishes. The panel tails a running build through the server's cursor,
+// says plainly when a build, or a whole merge's builds, are no longer kept
+// (design/lexicon.md, "A component build's log"), and offers Try again when the
+// log cannot be read right now.
 
 const BASE = "http://localhost/api/v1";
 vi.mock("../../../api/client", async () => {
@@ -45,7 +46,7 @@ type BuildLogs = components["schemas"]["BuildLogs"];
 const build = { component: "notes-api", buildName: "shop-notes-api-3a982eb7bb13-1", status: "Running", completed: false, attempt: 1 };
 
 let list: CycleBuildList = { items: [build] };
-let reads: (BuildLogs | "expired")[] = [];
+let reads: (BuildLogs | "expired" | "unavailable")[] = [];
 let cursors: (string | null)[] = [];
 
 const server = setupServer(
@@ -54,6 +55,7 @@ const server = setupServer(
     cursors.push(new URL(request.url).searchParams.get("cursor"));
     const next = reads.shift() ?? { logs: [], complete: true };
     if (next === "expired") return HttpResponse.json({ code: "build_expired", message: "this build is no longer kept" }, { status: 410 });
+    if (next === "unavailable") return HttpResponse.json({ code: "log_source_unavailable", message: "the build log cannot be read right now" }, { status: 503 });
     return HttpResponse.json(next);
   }),
 );
@@ -92,17 +94,29 @@ describe("BuildLogs", () => {
     expect(screen.queryByText(/…tailing/)).toBeNull();
   });
 
-  it("says a build OpenChoreo no longer keeps has no log, without an error", async () => {
+  it("says a build no longer kept has no log, and offers nothing", async () => {
     reads = ["expired"];
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "Show log" }));
-    expect(await screen.findByText(/This build is no longer kept/)).toBeTruthy();
+    expect(await screen.findByText("This build's log is no longer kept")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
-  it("says a merge's builds expired instead of 'not reached the cluster'", async () => {
+  it("offers Try again when the log cannot be read right now, and resumes", async () => {
+    reads = ["unavailable", { logs: [{ log: ">> Branch: main", timestamp: "2026-10-12T16:47:20.835000001Z" }], complete: true }];
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Show log" }));
+    expect(await screen.findByText("Couldn't load this build's log right now")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText(/>> Branch: main/)).toBeTruthy();
+    expect(screen.queryByText("Couldn't load this build's log right now")).toBeNull();
+  });
+
+  it("says a merge's builds are no longer kept instead of 'not reached the cluster'", async () => {
     list = { items: [], expired: true };
     renderPanel();
-    expect(await screen.findByText(/This merge's builds are no longer kept/)).toBeTruthy();
+    expect(await screen.findByText("These builds are no longer kept")).toBeTruthy();
     expect(screen.queryByText(/has not reached the cluster/)).toBeNull();
   });
 

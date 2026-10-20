@@ -188,11 +188,12 @@ type ComponentClient interface {
 	ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error)
 	GetWorkflowRun(ctx context.Context, orgName, runName string) (*gen.WorkflowRun, error)
 	// GetWorkflowRunLogs reads a build's log live from its pods on the
-	// workflow plane: every step's main container, ordered by time. A positive
-	// sinceSeconds narrows each pod's read to that recent window. ErrNotFound
-	// when the run, or the Argo workflow behind it, is not there — not yet
-	// (just created) or not any more (past its TTL).
-	GetWorkflowRunLogs(ctx context.Context, orgName, runName string, sinceSeconds int64) ([]WorkflowRunLogLine, error)
+	// workflow plane: every step's main container, ordered by time. A non-zero
+	// `after` narrows the read to a window reaching back past it; the window
+	// overlaps, so the caller still drops lines at or before `after`.
+	// ErrNotFound when the run, or the Argo workflow behind it, is not there —
+	// not yet (just created) or not any more (past its TTL).
+	GetWorkflowRunLogs(ctx context.Context, orgName, runName string, after time.Time) ([]WorkflowRunLogLine, error)
 	// ClusterWorkflowTTL is how long OpenChoreo keeps a run of the named
 	// ClusterWorkflow after the run completes — its ttlAfterCompletion. Zero
 	// when the workflow sets none, which means runs are kept.

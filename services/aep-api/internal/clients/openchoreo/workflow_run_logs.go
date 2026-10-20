@@ -44,10 +44,16 @@ type WorkflowRunLogLine struct {
 	Log       string
 }
 
-func (c *componentClient) GetWorkflowRunLogs(ctx context.Context, orgName, runName string, sinceSeconds int64) ([]WorkflowRunLogLine, error) {
+// logWindowOverlap widens a read past `after`. OpenChoreo's window is
+// `sinceSeconds` on the node's clock, but the gap is computed on ours; the
+// overlap absorbs skew and whole-second rounding.
+const logWindowOverlap = 30 * time.Second
+
+func (c *componentClient) GetWorkflowRunLogs(ctx context.Context, orgName, runName string, after time.Time) ([]WorkflowRunLogLine, error) {
 	params := &ocgen.GetWorkflowRunLogsParams{}
-	if sinceSeconds > 0 {
-		params.SinceSeconds = &sinceSeconds
+	if !after.IsZero() {
+		since := int64((max(time.Since(after), 0) + logWindowOverlap) / time.Second)
+		params.SinceSeconds = &since
 	}
 	resp, err := c.oc.GetWorkflowRunLogsWithResponse(ctx, orgName, runName, params)
 	if err != nil {

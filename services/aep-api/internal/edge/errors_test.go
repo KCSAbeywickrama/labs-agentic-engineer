@@ -96,6 +96,12 @@ func TestWriteResponseError_LogsTheCauseOfATyped5xx(t *testing.T) {
 	}
 
 	buf.Reset()
+	writeFor(t, apierr.Internal("internal error"))
+	if !strings.Contains(buf.String(), "status=500") {
+		t.Fatalf("a typed 5xx with no cause must still be logged: %q", buf.String())
+	}
+
+	buf.Reset()
 	writeFor(t, apierr.WithCause(apierr.NotFound("no such build"), cause))
 	if buf.Len() != 0 {
 		t.Fatalf("a 4xx verdict must not log as a server error: %q", buf.String())

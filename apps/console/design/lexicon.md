@@ -195,6 +195,22 @@ explanation are unaffected.
 No retention number and no expiry date in copy: "a few days" is the promise,
 and the exact window is the platform's to change.
 
+## A component build's log
+
+Under a version's Build logs, each component build the version's merge started,
+and, opened, its log. A build is kept only for a while after it finishes, then
+it is gone with its log; the version's own outcome is unaffected.
+
+| The build or its log is | Says | Offers |
+|---|---|---|
+| Being written | its lines, then **…tailing** | |
+| Finished, nothing written | **This build wrote nothing to its log** | |
+| No longer kept (one build) | **This build's log is no longer kept** | nothing: it is not coming back |
+| No longer kept (the merge's builds) | **These builds are no longer kept** | nothing |
+| Not loadable right now | **Couldn't load this build's log right now** | **Try again** |
+
+No retention number in copy, for the same reason as a session's log.
+
 ## A build session's crew
 
 Inside a session's log, the agents that worked it: who is doing what now

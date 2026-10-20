@@ -21,6 +21,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -40,12 +41,12 @@ func TestGetWorkflowRunLogs_OrdersLinesByTime(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "notes-api-abc-1", 30)
+	got, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "notes-api-abc-1", time.Time{})
 	if err != nil {
 		t.Fatalf("GetWorkflowRunLogs: %v", err)
 	}
-	if gotPath != "/api/v1/namespaces/acme/workflowruns/notes-api-abc-1/logs" || gotSince != "30" {
-		t.Fatalf("request = %s ?sinceSeconds=%s", gotPath, gotSince)
+	if gotPath != "/api/v1/namespaces/acme/workflowruns/notes-api-abc-1/logs" || gotSince != "" {
+		t.Fatalf("a first read must ask for the whole log: %s ?sinceSeconds=%s", gotPath, gotSince)
 	}
 	want := []string{">> Repository: https://github.com/ae-demo/notes.git", ">> Branch: main", "workload generated"}
 	if len(got) != len(want) {
@@ -75,7 +76,7 @@ func TestGetWorkflowRunLogs_ABareTimestampIsAnEmptyLine(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "run-1", 0)
+	got, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "run-1", time.Time{})
 	if err != nil {
 		t.Fatalf("GetWorkflowRunLogs: %v", err)
 	}
@@ -93,6 +94,25 @@ func TestGetWorkflowRunLogs_ABareTimestampIsAnEmptyLine(t *testing.T) {
 	}
 }
 
+// A tail read asks for a window reaching back past `after` by the overlap.
+func TestGetWorkflowRunLogs_TailWindowReachesPastAfter(t *testing.T) {
+	var gotSince string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSince = r.URL.Query().Get("sinceSeconds")
+		writeJSON(t, w, http.StatusOK, []map[string]any{})
+	}))
+	defer srv.Close()
+
+	after := time.Now().Add(-90 * time.Second)
+	if _, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "run-1", after); err != nil {
+		t.Fatalf("GetWorkflowRunLogs: %v", err)
+	}
+	want := int64((90*time.Second + logWindowOverlap) / time.Second)
+	if got, _ := strconv.ParseInt(gotSince, 10, 64); got < want || got > want+2 {
+		t.Fatalf("sinceSeconds = %q, want about %d", gotSince, want)
+	}
+}
+
 // A run past its TTL is gone from OpenChoreo; the caller tells that apart from
 // a failure by the sentinel.
 func TestGetWorkflowRunLogs_MissingRunIsNotFound(t *testing.T) {
@@ -101,7 +121,7 @@ func TestGetWorkflowRunLogs_MissingRunIsNotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "gone-1", 0)
+	_, err := NewComponentClient(Config{BaseURL: srv.URL}).GetWorkflowRunLogs(context.Background(), "acme", "gone-1", time.Time{})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}

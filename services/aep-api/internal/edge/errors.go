@@ -87,9 +87,9 @@ func writeResponseError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 	}
 	if typed {
-		if ae.Status >= http.StatusInternalServerError && ae.Cause != nil {
+		if ae.Status >= http.StatusInternalServerError {
 			// The envelope hides the cause from the caller; the log is the only
-			// place it is ever seen.
+			// place a server-side failure is ever seen.
 			slog.ErrorContext(r.Context(), "handler error", "path", r.URL.Path, "status", ae.Status, "code", ae.Code, "cause", ae.Cause)
 		}
 		writeAPIError(w, ae)

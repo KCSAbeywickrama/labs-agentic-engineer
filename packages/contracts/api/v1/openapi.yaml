@@ -1066,9 +1066,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-          description: The build is no longer kept. OpenChoreo deletes a build's WorkflowRun, and its
-            log with it, a while after the build finishes (the builder workflow's
-            `ttlAfterCompletion`); code `build_expired`.
+          description: The build is not on the cluster, so there is no log to read; code
+            `build_expired`. OpenChoreo deletes a build's WorkflowRun, and its log with it, a while
+            after the build finishes (the builder workflow's `ttlAfterCompletion`). A name that never
+            named a build reads the same, since the two cannot be told apart.
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: OpenChoreo cannot serve the log right now; code `log_source_unavailable`. A
+            retry may succeed.
         default:
           content:
             application/json:
@@ -3240,8 +3248,6 @@ components:
     BuildLogEntry:
       additionalProperties: false
       properties:
-        level:
-          type: string
         log:
           type: string
         timestamp:

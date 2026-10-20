@@ -1513,7 +1513,6 @@ type BuildList struct {
 
 // BuildLogEntry defines model for BuildLogEntry.
 type BuildLogEntry struct {
-	Level     string `json:"level,omitempty"`
 	Log       string `json:"log"`
 	Timestamp string `json:"timestamp,omitempty"`
 }

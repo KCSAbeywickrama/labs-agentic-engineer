@@ -27,8 +27,12 @@ import (
 	"github.com/wso2/aep/aep-api/internal/projects"
 )
 
-// codeBuildExpired is get-build-logs' 410: OpenChoreo no longer keeps the build.
-const codeBuildExpired = "build_expired"
+// get-build-logs' own error codes: the 410 when OpenChoreo no longer keeps the
+// build, and the 503 when it cannot serve the log right now.
+const (
+	codeBuildExpired         = "build_expired"
+	codeLogSourceUnavailable = "log_source_unavailable"
+)
 
 // Handler serves the component build + deploy read feature on the strict
 // interface. Every operation is org-scoped: the deny-by-default tenant gate
@@ -87,7 +91,7 @@ func (h *Handler) GetBuildLogs(ctx context.Context, request gen.GetBuildLogsRequ
 	case errors.Is(err, projects.ErrInvalidLogCursor):
 		return nil, apierr.BadRequest("invalid cursor")
 	case errors.Is(err, projects.ErrLogSourceUnavailable):
-		return nil, apierr.WithCause(apierr.ServiceUnavailable("the build log could not be read from OpenChoreo"), err)
+		return nil, apierr.WithCause(apierr.New(http.StatusServiceUnavailable, codeLogSourceUnavailable, "the build log cannot be read right now", nil), err)
 	case err != nil:
 		return nil, projects.MapComponentError(err, "failed to get build logs")
 	}
