@@ -17,12 +17,17 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { cycleCrew, RunFeed } from "@aep/progress-view";
 import type { RunProgressCycle } from "../../features/builds/hooks/useRunProgress";
 import { runSteps } from "../../features/builds/model/phases";
 import { groupByFeature, validationOutcome } from "../../features/builds/model/validation";
 import type { SpecFeature } from "../../features/spec/api/specModel";
 import { framesUntil, runAt, runScript, snapshotAt, summaryAt, type RunInput, type RunScript } from "./buildRun";
 import { designCatalog } from "./design";
+import type { components } from "../../generated/aep-api";
+
+type RunCycleView = components["schemas"]["RunCycleView"];
+type RunEvent = components["schemas"]["RunEvent"];
 
 // Acme Expenses' v1 as the card reads it: the scripted run folded as the
 // progress stream would deliver it, then through the card's own models.
@@ -46,19 +51,10 @@ const v1: RunInput = {
 };
 
 /** The cycles and their events as useRunProgress folds the stream, `t` ms in. */
-function streamed(script: RunScript, t: number): RunProgressCycle[] {
-  const cycles: RunProgressCycle[] = [];
-  for (const { frame } of framesUntil(script, t)) {
-    if (frame.type === "cycle" && frame.cycle) {
-      const i = cycles.findIndex((c) => c.cycle.id === frame.cycle!.id);
-      if (i === -1) cycles.push({ cycle: frame.cycle, events: [] });
-      else cycles[i] = { ...cycles[i]!, cycle: frame.cycle };
-    }
-    if (frame.type === "event" && frame.event && frame.cycleId) {
-      cycles.find((c) => c.cycle.id === frame.cycleId)?.events.push({ ...frame.event, cycleId: frame.cycleId, attempt: 1 });
-    }
-  }
-  return cycles;
+function streamed(script: RunScript, t: number): readonly RunProgressCycle[] {
+  const feed = new RunFeed<RunCycleView, RunEvent>();
+  for (const { frame } of framesUntil(script, t)) feed.apply(frame);
+  return feed.snapshot().cycles;
 }
 
 function resultAt(script: RunScript, t: number) {
@@ -77,7 +73,7 @@ describe("Acme Expenses' first build, scripted", () => {
   });
 
   it("plans the foundation, then each feature's API and web app, then validates", () => {
-    const steps = runSteps(runAt(script, 2_500), streamed(script, 2_500));
+    const steps = runSteps(runAt(script, 4_500), streamed(script, 4_500));
     expect(steps.phases.map((p) => [p.label, p.state])).toEqual([
       ["Plan", "live"],
       ["Foundation · API", "queued"],
@@ -87,7 +83,7 @@ describe("Acme Expenses' first build, scripted", () => {
       ["F2 Approvals · Web app", "queued"],
       ["Validate", "queued"],
     ]);
-    const later = runSteps(runAt(script, 6_000), streamed(script, 6_000));
+    const later = runSteps(runAt(script, 8_000), streamed(script, 8_000));
     expect(later.phases.slice(0, 3).map((p) => p.state)).toEqual(["done", "done", "live"]);
   });
 
@@ -115,5 +111,42 @@ describe("Acme Expenses' first build, scripted", () => {
     const steps = runSteps(runAt(fix, fix.end), streamed(fix, fix.end));
     expect(steps.phases.map((p) => p.label)).toEqual(["Plan", "F2 Approvals · API fix", "Validate"]);
     expect(validationOutcome(resultAt(fix, fix.end)!)).toEqual({ passed: 11, total: 11, failing: [], regressions: 0 });
+  });
+});
+
+describe("the coding session's crew, scripted", () => {
+  const script = runScript(v1);
+  const coding = (t: number) => streamed(script, t).find((c) => c.cycle.id === script.coding.id)!;
+  const at = (t: number) => v1.startedAt + t;
+
+  it("starts as the runner's startup on the cycle, with no startup row in the log", () => {
+    const c = coding(1_000);
+    expect(c.events).toHaveLength(0);
+    expect(c.boot?.code).toBe("runner_scheduling");
+    expect(cycleCrew(c, at(1_000)).lead.caption).toBe("Waiting for a runner to be scheduled… · 0.2s");
+    expect(coding(2_400).boot?.code).toBe("runner_starting");
+    expect(coding(3_000).boot).toBeUndefined();
+  });
+
+  it("fans the features out to background agents, one of which waits inside a reviewer", () => {
+    const crew = cycleCrew(coding(10_000), at(10_000));
+    expect(crew.members.map((m) => [m.agent.label, m.depth, m.background])).toEqual([
+      ["lead agent", 0, false],
+      ["F1 Submit expenses · API", 1, true],
+      ["F1 Submit expenses · Web app", 1, true],
+      ["Review Submit expenses screens against the design", 2, false],
+      ["F2 Approvals · API", 1, true],
+      ["F2 Approvals · Web app", 1, true],
+    ]);
+    const web = crew.members.find((m) => m.id === "agent-F1-web");
+    expect(web?.state).toBe("waiting");
+    expect(web?.caption).toMatch(/^waiting on Review Submit expenses screens/);
+  });
+
+  it("ends with every agent settled with its report, and the lead's outcome", () => {
+    const crew = cycleCrew(coding(script.coding.ended), at(script.coding.ended));
+    expect(crew.running).toBe(0);
+    expect(crew.outcome).toBe("success");
+    expect(crew.members.slice(1).every((m) => m.state === "done" && m.agent.report)).toBe(true);
   });
 });

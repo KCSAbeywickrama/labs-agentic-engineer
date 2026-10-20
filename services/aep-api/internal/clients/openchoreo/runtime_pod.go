@@ -54,6 +54,14 @@ type RuntimePod struct {
 	// any container still runs, or when the tree did not carry one). It tells a
 	// pod that ended before a re-dispatch from one still running at it.
 	FinishedAt time.Time
+	// ScheduledAt is the PodScheduled condition's lastTransitionTime: when the
+	// pod got a node, or, while that condition is False, when the scheduler
+	// found no room for it (zero when the tree did not carry the condition).
+	// StartedAt is the first running container's startedAt (zero until one
+	// runs). Both say since when the pod has been in its present startup
+	// state, which the pod's other fields only name.
+	ScheduledAt time.Time
+	StartedAt   time.Time
 	// JobFound says the same tree read carried a Job node: OpenChoreo has
 	// applied the binding's Job. JobCreatedAt is the newest Job node's creation
 	// time (zero when absent or not carried). Both are about the Job, not the
@@ -111,6 +119,9 @@ func PodFromNodeObject(obj map[string]interface{}, name string) RuntimePod {
 				pod.Message = msg
 			}
 		}
+		if running, _ := state["running"].(map[string]interface{}); running != nil && pod.StartedAt.IsZero() {
+			pod.StartedAt = parseObjectTime(running["startedAt"])
+		}
 		if term, _ := state["terminated"].(map[string]interface{}); term != nil {
 			if raw, _ := term["finishedAt"].(string); raw != "" {
 				if at, err := time.Parse(time.RFC3339, raw); err == nil && at.After(pod.FinishedAt) {
@@ -125,6 +136,7 @@ func PodFromNodeObject(obj map[string]interface{}, name string) RuntimePod {
 			}
 		}
 	}
+	pod.ScheduledAt = podScheduledTransition(status)
 	// A Pending pod with no containerStatuses yet (never scheduled) carries its
 	// failure on PodScheduled=False — container waiting reasons never appear.
 	// Surface Unschedulable / scheduling failures there so the console can
@@ -163,4 +175,34 @@ func podScheduledFailure(status map[string]interface{}) (reason, message string)
 		return reason, message
 	}
 	return "", ""
+}
+
+// podScheduledTransition returns the PodScheduled condition's
+// lastTransitionTime, zero when the condition or its time is absent.
+func podScheduledTransition(status map[string]interface{}) time.Time {
+	conditions, _ := status["conditions"].([]interface{})
+	for _, raw := range conditions {
+		c, _ := raw.(map[string]interface{})
+		if c == nil {
+			continue
+		}
+		if typ, _ := c["type"].(string); typ == "PodScheduled" {
+			return parseObjectTime(c["lastTransitionTime"])
+		}
+	}
+	return time.Time{}
+}
+
+// parseObjectTime reads a Kubernetes RFC 3339 timestamp from an untyped
+// object field, zero when it is absent or malformed.
+func parseObjectTime(v interface{}) time.Time {
+	raw, _ := v.(string)
+	if raw == "" {
+		return time.Time{}
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return at.UTC()
 }

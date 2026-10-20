@@ -54,48 +54,6 @@ func decodeQuery(t *testing.T, r *http.Request) capturedQuery {
 	return q
 }
 
-// The old client POSTed /api/logs/build/{name}, an endpoint no observer has
-// ever served, and read `totalCount` from a body that says `total`. Both are
-// fixed here: a build IS a workflow run, so it queries the workflow scope.
-func TestGetBuildLogs_UsesTheWorkflowScopeOnTheQueryEndpoint(t *testing.T) {
-	var gotPath string
-	var got capturedQuery
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, got = r.URL.Path, decodeQuery(t, r)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"logs": []interface{}{
-				map[string]interface{}{"timestamp": "2026-08-06T10:00:01Z", "log": "step 1", "level": "INFO"},
-			},
-			"total":  1,
-			"tookMs": 3,
-		})
-	}))
-	defer srv.Close()
-
-	logs, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "shop-web-1754476800000", time.Time{})
-	if err != nil {
-		t.Fatalf("GetBuildLogs: %v", err)
-	}
-	if gotPath != "/api/v1/logs/query" {
-		t.Fatalf("path = %q, want /api/v1/logs/query", gotPath)
-	}
-	if got.SearchScope.WorkflowRunName != "shop-web-1754476800000" || got.SearchScope.Namespace != "acme" {
-		t.Fatalf("unexpected scope: %+v", got.SearchScope)
-	}
-	if got.SearchScope.Component != "" || got.SearchScope.Project != "" {
-		t.Fatalf("a workflow scope must not carry component fields: %+v", got.SearchScope)
-	}
-	if got.SortOrder != "asc" || got.Limit != queryPageLimit {
-		t.Fatalf("unexpected paging: sortOrder=%q limit=%d", got.SortOrder, got.Limit)
-	}
-	if len(logs.Logs) != 1 || logs.Logs[0].Log != "step 1" {
-		t.Fatalf("unexpected logs: %+v", logs.Logs)
-	}
-	if logs.TotalCount != 1 {
-		t.Fatalf("TotalCount = %d, want 1 (read from `total`)", logs.TotalCount)
-	}
-}
-
 // OBSERVER_URL may carry a path prefix (Cloud's `…/wso2cloud-obs`), and an
 // operator may write it with a trailing slash. The join must not turn that
 // into `//api/…`, which the proxy's mux answers with a redirect or a 404.
@@ -107,83 +65,11 @@ func TestQuery_ATrailingSlashOnTheBaseURLIsNotDoubled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := NewClient(srv.URL+"/wso2cloud-obs/").GetBuildLogs(context.Background(), "a", "p", "c", "b", time.Time{}); err != nil {
-		t.Fatalf("GetBuildLogs: %v", err)
+	if _, _, err := NewClient(srv.URL+"/wso2cloud-obs/").QueryCycleLogs(context.Background(), componentQuery()); err != nil {
+		t.Fatalf("QueryCycleLogs: %v", err)
 	}
 	if gotPath != "/wso2cloud-obs/api/v1/logs/query" {
 		t.Fatalf("path = %q, want /wso2cloud-obs/api/v1/logs/query", gotPath)
-	}
-}
-
-func TestGetBuildLogs_SinceNarrowsTheWindow(t *testing.T) {
-	// RELATIVE to now, deliberately. This was a fixed calendar date, and it
-	// worked until real time drifted more than defaultLookback past it — after
-	// which the clamp below took over, startTime stopped being `since`, and the
-	// test failed for a reason that had nothing to do with the code. A date
-	// literal in a test about a rolling window is a time bomb with a fuse the
-	// length of that window.
-	since := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
-	var got capturedQuery
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = decodeQuery(t, r)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"logs": []interface{}{}, "total": 0})
-	}))
-	defer srv.Close()
-
-	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "run-1", since); err != nil {
-		t.Fatalf("GetBuildLogs: %v", err)
-	}
-	if got.StartTime != since.Format(time.RFC3339) {
-		t.Fatalf("startTime = %q, want %q", got.StartTime, since.Format(time.RFC3339))
-	}
-
-	// A since older than the lookback does not widen the window: the start is
-	// clamped to now-defaultLookback rather than honoured.
-	tooOld := since.Add(-2 * defaultLookback)
-	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "run-1", tooOld); err != nil {
-		t.Fatalf("GetBuildLogs: %v", err)
-	}
-	start, err := time.Parse(time.RFC3339, got.StartTime)
-	if err != nil {
-		t.Fatalf("startTime %q is not RFC3339: %v", got.StartTime, err)
-	}
-	if start.Before(tooOld.Add(defaultLookback)) || time.Since(start) > defaultLookback+time.Minute {
-		t.Fatalf("startTime = %q: an over-old since must be clamped to now-%s", got.StartTime, defaultLookback)
-	}
-}
-
-// The other half of the same rule, and the half nothing asserted: a `since`
-// OLDER than the lookback does NOT widen the window. Reading it as given would
-// let one caller ask the observability plane for an unbounded scan.
-func TestGetBuildLogs_SinceOlderThanTheLookbackIsClamped(t *testing.T) {
-	since := time.Now().UTC().Add(-2 * defaultLookback)
-	var got capturedQuery
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = decodeQuery(t, r)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"logs": []interface{}{}, "total": 0})
-	}))
-	defer srv.Close()
-
-	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "run-1", since); err != nil {
-		t.Fatalf("GetBuildLogs: %v", err)
-	}
-	start, err := time.Parse(time.RFC3339, got.StartTime)
-	if err != nil {
-		t.Fatalf("startTime %q does not parse: %v", got.StartTime, err)
-	}
-	if !start.After(since) {
-		t.Fatalf("startTime = %q, want the lookback floor — a since older than %s must not widen the window", got.StartTime, defaultLookback)
-	}
-}
-
-func TestGetBuildLogs_NonOKIsAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer srv.Close()
-
-	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "a", "p", "c", "b", time.Time{}); err == nil {
-		t.Fatal("a 403 must surface as an error")
 	}
 }
 

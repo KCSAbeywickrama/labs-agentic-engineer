@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -480,6 +481,12 @@ func (a runreadProjectBuilds) ListProjectBuildRuns(ctx context.Context, orgID, p
 		})
 	}
 	return out, nil
+}
+
+// BuildRetention is the builder workflow's ttlAfterCompletion: OpenChoreo's
+// retention for a build, and so the product's.
+func (a runreadProjectBuilds) BuildRetention(ctx context.Context) (time.Duration, error) {
+	return a.oc.ClusterWorkflowTTL(ctx, openchoreo.BuilderClusterWorkflow)
 }
 
 // valuesSavedNotifier bridges the provisioning feature's ValuesSavedNotifier

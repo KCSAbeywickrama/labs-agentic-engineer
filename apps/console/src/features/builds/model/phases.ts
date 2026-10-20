@@ -70,18 +70,18 @@ interface PlanEntry {
   end: number | null;
 }
 
-function lines(events: StampedRunEvent[]): string[] {
+function lines(events: readonly StampedRunEvent[]): string[] {
   return events.map((e) => formatEvent(e).text).filter(Boolean);
 }
 
-function span(events: StampedRunEvent[]): number | null {
+function span(events: readonly StampedRunEvent[]): number | null {
   const first = events[0];
   const last = events.at(-1);
   if (!first || !last) return null;
   return Date.parse(last.ts) - Date.parse(first.ts);
 }
 
-function planEntries(events: StampedRunEvent[]): PlanEntry[] {
+function planEntries(events: readonly StampedRunEvent[]): PlanEntry[] {
   const entries = new Map<string, PlanEntry>();
   events.forEach((e, i) => {
     if (e.kind !== "work_item" || e.source !== "plan" || !e.itemId) return;
@@ -103,7 +103,7 @@ function planEntries(events: StampedRunEvent[]): PlanEntry[] {
   return [...entries.values()].filter((e) => e.status !== "deleted");
 }
 
-function criteria(events: StampedRunEvent[]): { done: number; total: number } {
+function criteria(events: readonly StampedRunEvent[]): { done: number; total: number } {
   const status = new Map<string, string>();
   for (const e of events) {
     if (e.kind === "work_item" && e.source === "criterion" && e.itemId) status.set(e.itemId, e.itemStatus ?? "planned");
@@ -113,7 +113,7 @@ function criteria(events: StampedRunEvent[]): { done: number; total: number } {
 }
 
 /** The run's steps, from its record and the cycles its progress stream has sent so far. */
-export function runSteps(run: Pick<MilestoneRunView, "state"> | undefined, cycles: RunProgressCycle[]): RunSteps {
+export function runSteps(run: Pick<MilestoneRunView, "state"> | undefined, cycles: readonly RunProgressCycle[]): RunSteps {
   const coding = cycles.filter((c) => c.cycle.kind !== "validation");
   const validation = cycles.filter((c) => c.cycle.kind === "validation").at(-1);
   const events = coding.flatMap((c) => c.events);

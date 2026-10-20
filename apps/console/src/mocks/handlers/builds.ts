@@ -28,6 +28,7 @@ import type { components } from "../../generated/aep-api";
 import { addBuild, elapsed, mockBuilds, projectBuilds, scriptOf, type MockBuild } from "../buildsState";
 import { designView } from "../designState";
 import { framesUntil, runAt, snapshotAt, summaryAt } from "../fixtures/buildRun";
+import { mockStallMs } from "../fixtures/codingSession";
 import { specView } from "../specState";
 import { aeStudioReadRefusal } from "./aeStudio";
 
@@ -36,6 +37,20 @@ type BuildPreflight = components["schemas"]["BuildPreflight"];
 type BuildList = components["schemas"]["BuildList"];
 type SpecVersionList = components["schemas"]["SpecVersionList"];
 type BuildRunList = components["schemas"]["BuildRunList"];
+type CycleBuildList = components["schemas"]["CycleBuildList"];
+type BuildLogs = components["schemas"]["BuildLogs"];
+
+// A finished component build's log, served whole: the live tail and the
+// expired answers are the real API's, pinned in BuildLogs.test.tsx.
+const MOCK_BUILD_LOG = [
+  ">> Repository: https://github.com/acme/shop.git",
+  ">> Branch: main",
+  "#1 [build 1/4] FROM docker.io/library/node:22-alpine",
+  "#5 [build 4/4] RUN npm run build",
+  "#7 exporting to image",
+  ">> Image pushed",
+  ">> WorkflowRun annotated successfully (HTTP 200)",
+];
 type ApiError = components["schemas"]["Error"];
 
 // What each version built answers list-project-versions, off the builds the
@@ -95,6 +110,7 @@ function newRun(projectName: string, build: Omit<ProjectBuild, "status">, failin
       criteria: criteriaFor(projectName, build.features.map((f) => f.id)),
       failing,
       startedAt: Date.now(),
+      stallMs: mockStallMs(),
     },
   };
 }
@@ -125,38 +141,59 @@ function byTag(projectName: string, tag: string): MockBuild | undefined {
   return mockBuilds(projectName).find((b) => b.build.version === tag);
 }
 
-/** The run's progress stream: what has happened at once, then the rest as it happens, then `done`. */
+/** How long the stream may stay quiet before it sends a `tick` (the contract's 15 seconds). */
+const TICK_AFTER_MS = 15_000;
+
+/**
+ * The run's progress stream: what has happened at once, then the rest as it
+ * happens, then `done`. Every frame is stamped with the platform's clock as it
+ * is sent, and a stream quiet for 15s sends a `tick`, as aep-api does.
+ */
 function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<Uint8Array> {
   const script = scriptOf(build);
   const encoder = new TextEncoder();
   const timers: ReturnType<typeof setTimeout>[] = [];
+  let ticker: ReturnType<typeof setInterval> | undefined;
+  let closed = false;
+  // Everything that would write again, stopped: on the run's end, on an
+  // aborted request, and when the reader cancels, which aborts nothing.
+  const stop = () => {
+    closed = true;
+    timers.forEach(clearTimeout);
+    clearInterval(ticker);
+  };
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      let closed = false;
-      const send = (data: string) => {
-        if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      let lastSent = Date.now();
+      const write = (data: string) => {
+        if (closed || signal.aborted) return;
+        lastSent = Date.now();
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
+      const send = (frame: object) => write(JSON.stringify({ ...frame, serverTime: new Date().toISOString() }));
       const close = () => {
         if (closed) return;
-        closed = true;
-        timers.forEach(clearTimeout);
+        stop();
         controller.close();
       };
+      ticker = setInterval(() => {
+        if (Date.now() - lastSent >= TICK_AFTER_MS) send({ type: "tick" });
+      }, 1_000);
       signal.addEventListener("abort", close);
       const now = elapsed(build);
-      for (const { frame } of framesUntil(script, now)) send(JSON.stringify(frame));
+      for (const { frame } of framesUntil(script, now)) send(frame);
       for (const { at, frame } of script.frames.filter((f) => f.at > now)) {
-        timers.push(setTimeout(() => send(JSON.stringify(frame)), at - now));
+        timers.push(setTimeout(() => send(frame), at - now));
       }
       timers.push(
         setTimeout(() => {
-          send("[DONE]");
+          write("[DONE]");
           close();
         }, Math.max(0, script.end - now) + 10),
       );
     },
     cancel() {
-      timers.forEach(clearTimeout);
+      stop();
     },
   });
 }
@@ -203,6 +240,22 @@ export const buildsHandlers = [
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
     });
   }),
+
+  // The component builds a merged cycle started: one web build that finished.
+  http.get("*/api/v1/projects/:projectName/builds/:tag/cycles/:cycleId/builds", ({ params }) => {
+    const build = byTag(String(params.projectName), String(params.tag));
+    if (!build) return refuse(404, { code: "not_found", message: `No version named ${String(params.tag)}.` });
+    return HttpResponse.json<CycleBuildList>({
+      items: [{ component: "web", buildName: `${String(params.projectName)}-web-1`, status: "Succeeded", completed: true, attempt: 1 }],
+    });
+  }),
+
+  http.get("*/api/v1/projects/:projectName/components/:componentName/builds/:buildName/logs", () =>
+    HttpResponse.json<BuildLogs>({
+      complete: true,
+      logs: MOCK_BUILD_LOG.map((log, i) => ({ log, timestamp: new Date(Date.UTC(2026, 9, 19, 15, 24, 36 + i)).toISOString() })),
+    }),
+  ),
 
   http.get("*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report", ({ params }) => {
     const build = byTag(String(params.projectName), String(params.tag));

@@ -42,6 +42,7 @@ const criterion = (s: number, itemId: string, itemStatus: string) =>
 const cycle = (id: string, kind: "coding" | "validation", events: StampedRunEvent[], ended = false): RunProgressCycle => ({
   cycle: { id, kind, attempts: 1, createdAt: "2026-09-30T10:00:00Z", ...(ended ? { endedAt: "2026-09-30T10:05:00Z" } : {}) },
   events,
+  attempt: 1,
 });
 
 const planned = [

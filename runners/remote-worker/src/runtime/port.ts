@@ -404,7 +404,7 @@ export interface StallSignal {
  *     `tool_progress` a tool is still running; says nothing about the model
  *
  *   recorded and nothing else:
- *     `noise`         a message about the server, not about this run
+ *     `noise`         a message about the server or the account, not this run
  *
  *   translated AND activity:
  *     `turn_end`          one turn ended; input may end if nothing is live
@@ -438,10 +438,11 @@ export type MessageClass =
    * already reported. Recorded, and otherwise ignored — not translated, not
    * activity, and not proof of life.
    *
-   * Claude Code's stream has no such message (every SDK message is about the
-   * session). OpenCode's bus is the whole server's, and routing its keep-alives
-   * as `activity` would call `watchdog.observe([])`, which RESETS the idle clock
-   * — a stalled run would look busy for as long as the server stayed up.
+   * Claude Code's stream has one: a subscription window reporting it is still
+   * `allowed`, which is the account's quota, not the session doing anything.
+   * OpenCode's bus is the whole server's, and routing its keep-alives as
+   * `activity` would call `watchdog.observe([])`, which RESETS the idle clock —
+   * a stalled run would look busy for as long as the server stayed up.
    */
   | { kind: "noise" }
   | { kind: "activity" };

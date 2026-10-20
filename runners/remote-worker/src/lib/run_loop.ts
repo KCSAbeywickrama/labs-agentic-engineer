@@ -468,8 +468,9 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
       // to report. Only present under `debug` at all. They still produce a
       // rate-limited heartbeat below, which is bounded by construction.
       if (!(cls.kind === "model_wait" && cls.streaming)) record(message);
-      // A message about the server rather than the run (OpenCode's keep-alives,
-      // its plugin and catalog announcements). Recorded above and nothing else:
+      // A message about the server or the account rather than the run
+      // (OpenCode's keep-alives, its plugin and catalog announcements; Claude
+      // Code's rate-limit window reporting `allowed`). Recorded above and nothing else:
       // translating it would produce nothing, and observing that nothing would
       // reset the watchdog's idle clock — see `MessageClass`.
       if (cls.kind === "noise") continue;

@@ -16,10 +16,11 @@
  * under the License.
  */
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { Box, Button, CircularProgress, Link, Typography } from "@wso2/oxygen-ui";
 import { CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { visuallyHidden } from "../../../components/visuallyHidden";
+import { useStickToBottom } from "../../../lib/useStickToBottom";
 import { designQuestionsNote } from "../../design/model/chatNote";
 import { useDesignQuestions } from "../../design/useDesignQuestions";
 import { usePrototypeNotes } from "../../prototype/usePrototypeNotes";
@@ -154,40 +155,6 @@ function Centered({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Follow the conversation as it grows, as a chat does: while the reader is at
- * the bottom, new rows (streamed text, a card, the walk once the documents
- * are read) keep it there; once they scroll up to read, it stays put.
- */
-function useStickToBottom() {
-  const [node, setNode] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!node) return;
-    let atBottom = true;
-    const onScroll = () => {
-      atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
-    };
-    const follow = () => {
-      if (atBottom) node.scrollTop = node.scrollHeight;
-    };
-    follow();
-    node.addEventListener("scroll", onScroll);
-    const resized = new ResizeObserver(follow);
-    const added = new MutationObserver(() => {
-      follow();
-      for (const child of node.children) resized.observe(child);
-    });
-    for (const child of node.children) resized.observe(child);
-    added.observe(node, { childList: true, subtree: true, characterData: true });
-    return () => {
-      node.removeEventListener("scroll", onScroll);
-      resized.disconnect();
-      added.disconnect();
-    };
-  }, [node]);
-  return setNode;
-}
-
 /** A note's actions: Reopen only on the newest From Issues note, as it goes back to the one Issues chat. */
 function actionsFor(actions: NoteAction[] | undefined, newestReopen: boolean): NoteAction[] {
   return newestReopen ? (actions ?? []) : (actions ?? []).filter((a) => a.kind !== "open-issues");
@@ -226,6 +193,8 @@ export function Thread({
   const lastItem = items.at(-1);
   const waitingForOutput = running && (!lastItem || lastItem.kind === "user");
 
+  // Follows the conversation as it grows, as a chat does: streamed text, a
+  // card, the walk once the documents are read.
   const log = useStickToBottom();
 
   if (conversation.status === "loading" && items.length === 0) {
@@ -264,7 +233,7 @@ export function Thread({
   }
   return (
     <Box
-      ref={log}
+      ref={log.ref}
       role="log"
       aria-label="Conversation"
       sx={{

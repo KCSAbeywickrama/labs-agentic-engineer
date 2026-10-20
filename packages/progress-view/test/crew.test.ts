@@ -438,6 +438,17 @@ test("crew: an amber row always says what it is amber about", () => {
   );
   assert.equal(crew.lead.state, "stalled");
   assert.equal(crew.lead.caption, "waiting on Bash for 1m35s");
+
+  // An agent's phrase is what it set out to do, not why it went quiet: on an
+  // amber row the unanswered call outranks it.
+  const phrased = buildCrew(
+    [
+      { kind: "agent_progress", agentId: "lead", phrase: "Building the screens", ts: ts(0) },
+      { kind: "tool_use", agentId: "lead", tool: "Bash", summary: "pnpm build", toolUseId: "t1", ts: ts(1) },
+    ],
+    Date.parse(ts(1)) + 61_000,
+  );
+  assert.equal(phrased.lead.caption, "waiting on Bash for 1m1s");
 });
 
 test("crew: a failed agent is the only red — a stopped one was taken away, not broken", () => {

@@ -38,7 +38,7 @@ func (f fakeGuardrailOutcomes) GuardrailOutcomes(context.Context, string, string
 const guardrailTestEnv = "development"
 
 func guardrailService(outcomes GuardrailOutcomeReader) *componentService {
-	svc := NewComponentService(deploymentsOf(guardrailTestEnv), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, fakeSecretRefClient{}).(*componentService)
+	svc := NewComponentService(deploymentsOf(guardrailTestEnv), modelAccessStore(nil), nil, nil, fakeKeyResolver{}, fakeSecretRefClient{}).(*componentService)
 	svc.SetGuardrailOutcomes(outcomes)
 	return svc
 }

@@ -16,20 +16,30 @@
  * under the License.
  */
 
-import { useTaskLog } from "../hooks/useTaskLog";
+import { type TaskLogPhase, useTaskLog } from "../hooks/useTaskLog";
 import { taskLogLines } from "../model/run";
 import { LogLines } from "./CardSection";
+
+/** What an empty log says while its connection is open or reopening. */
+const EMPTY: Record<Exclude<TaskLogPhase, "ended">, string> = {
+  connecting: "Attaching to the task's log…",
+  live: "Attached. Nothing logged for this task yet.",
+  reconnecting: "Connection lost, reconnecting…",
+};
+
+/** Where a closed, empty task log's work is, by the task's kind. */
+const ENDED: Record<string, string> = {
+  development: "No log of its own: the coding agent's log has this task's work.",
+  bug: "No log of its own: the coding agent's log has this task's work.",
+  conflict: "No log of its own: the coding agent's log has this task's work.",
+  validation: "No log of its own: the version's validation has this task's work.",
+  provision: "No log: the platform resolves this gate itself.",
+};
 
 /** One task's live log, as the Build card's task row and the Issue card show it. */
 export function TaskLog({ projectName, issueNumber }: { projectName: string; issueNumber: number }) {
   const log = useTaskLog(projectName, issueNumber);
-  const lines = taskLogLines(log.lines);
-  const empty =
-    log.phase === "ended"
-      ? "No log of its own: the coding agent's log has this task's work."
-      : log.phase === "reconnecting"
-        ? "Connection lost, reconnecting…"
-        : "Attaching to the task's log…";
-  return <LogLines lines={lines} empty={empty} maxHeight={260} />;
+  const empty = log.phase === "ended" ? (ENDED[log.kind ?? ""] ?? "Nothing logged for this task.") : EMPTY[log.phase];
+  return <LogLines lines={taskLogLines(log.lines, log.executions)} empty={empty} maxHeight={260} />;
 }
 

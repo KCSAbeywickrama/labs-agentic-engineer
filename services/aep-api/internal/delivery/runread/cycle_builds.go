@@ -19,6 +19,8 @@ package runread
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -35,7 +37,9 @@ import (
 // Nothing here is stored. Per-component build state is derived from OpenChoreo
 // on read, always — the same rule the event plane's re-trigger budget follows,
 // and for the same reason: one source of truth that a redelivery or a crashed
-// handler cannot desynchronise.
+// handler cannot desynchronise. OpenChoreo's retention is therefore the
+// product's: once the builder workflow's ttlAfterCompletion deletes a merge's
+// runs, the list is empty and says the builds expired.
 type CycleBuilds struct {
 	runs   RunReader
 	cycles CycleReader
@@ -93,6 +97,9 @@ func (c *CycleBuilds) ForCycle(ctx context.Context, orgID, projectID, tag, cycle
 	}
 	matched := delivery.BuildsAtMerge(runsAtCluster, projectID, cycle.MergeSHA)
 	out := &gen.CycleBuildList{Items: make([]gen.CycleBuild, 0, len(matched))}
+	if len(matched) == 0 {
+		out.Expired = c.outlivedRetention(ctx, cycle)
+	}
 	for _, b := range matched {
 		out.Items = append(out.Items, gen.CycleBuild{
 			Component: b.Component,
@@ -104,6 +111,24 @@ func (c *CycleBuilds) ForCycle(ctx context.Context, orgID, projectID, tag, cycle
 		})
 	}
 	return out, nil
+}
+
+// outlivedRetention reports whether a merge is older than OpenChoreo keeps a
+// build, so an empty list means its builds are gone rather than not started.
+// The merge is when the cycle ended; every build of it completed after that, so
+// none can still be kept once the retention has passed since. An unreadable
+// retention answers false: "not reached the cluster yet" is the softer wrong
+// answer, and the next poll asks again.
+func (c *CycleBuilds) outlivedRetention(ctx context.Context, cycle *delivery.RunCycle) bool {
+	if cycle.EndedAt == nil {
+		return false
+	}
+	ttl, err := c.builds.BuildRetention(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "cycle builds: build retention unreadable", "cycle", cycle.ID, "err", err)
+		return false
+	}
+	return ttl > 0 && time.Since(*cycle.EndedAt) > ttl
 }
 
 // findCycle locates the cycle among the version's runs. Scanning the version's

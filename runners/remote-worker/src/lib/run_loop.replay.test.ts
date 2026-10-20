@@ -109,7 +109,8 @@ async function transcript(messages: unknown[], requestedSkills?: string[]): Prom
       },
     },
     {
-      translate: createClaudeAdapter({ taskKind: "implementation", now: () => (clock += 3000) }).translate,
+      // `homeDir: ""`: the machine running the test must not decide a golden.
+      translate: createClaudeAdapter({ taskKind: "implementation", now: () => (clock += 3000), homeDir: "" }).translate,
       classify: createClaudeClassifier(),
       watchdog,
       emit: (event) => log({ at: cursor, event }),

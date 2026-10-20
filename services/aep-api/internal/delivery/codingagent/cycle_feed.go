@@ -51,12 +51,15 @@ package codingagent
 // watcher's clock skew) is the previous attempt's leftover — the watcher's rule
 // (isLeftoverPod), stated on lines so both sources apply it identically.
 //
-// PLATFORM NOTICES take negative seqs that are stable for what they describe:
-// the dark-zone markers per pod state, a gap per hole start, "logs
-// unavailable" for a read that failed. The one positive seq the platform mints
-// is a cancelled run's closing `run_settled`, at the attempt's last seq + 1 —
-// and only once the index has had time to take the tail, or it would take a
-// real line's seq.
+// PLATFORM NOTICES are positional facts only: a gap per hole start, at a
+// negative seq fixed by where the hole starts. Platform STATE never rides the
+// feed, because a client folds events append-only and could never drop a state
+// once it had passed: the dark zone before the runner's first line is the
+// cycle's `boot` (cycle_boot.go), and a log the platform cannot read is the
+// cycle's `recording` (State). The one positive seq the platform mints is a
+// cancelled run's closing `run_settled`, at the attempt's last seq + 1 — and
+// only once the index has had time to take the tail, or it would take a real
+// line's seq.
 
 import (
 	"context"
@@ -110,6 +113,20 @@ const (
 	// bound.
 	feedReadTimeout = 30 * time.Second
 
+	// feedLiveWait is how long a LIVE cycle's viewer waits for a fresh read
+	// before it is served the latest completed one instead, the fresh read
+	// landing for a later poll. A read can take its whole feedReadTimeout (the
+	// OpenChoreo client retries a transient 5xx with backoff, an unreachable
+	// observer times out), and the run stream projects a cycle's record after
+	// its read, so without this one slow read would hold every change to the
+	// record (a startup wait, the boot, a pull request) for as long.
+	feedLiveWait = 500 * time.Millisecond
+
+	// feedLatestHold is how old the latest completed read may be and still be
+	// served in place of a slow fresh one: past it, nothing watched the cycle
+	// recently and the viewer waits for the fresh read.
+	feedLatestHold = feedReadTimeout + feedReadTTL
+
 	// feedLineCap drops a single line larger than this. No runner event is
 	// near it; a line that is would only be someone's blob.
 	feedLineCap = 1 << 20
@@ -128,10 +145,15 @@ type CycleFeed struct {
 	retention time.Duration
 	now       func() time.Time
 
-	reads    singleflight.Group
-	mu       sync.Mutex
+	reads singleflight.Group
+	mu    sync.Mutex
+	// memo is each cycle's latest completed read: served whole for
+	// feedReadTTL, and in place of a slow fresh read for feedLatestHold.
 	memo     map[string]feedRead
 	failures map[string]time.Time
+	// boots is each live cycle's startup state as its last read found it
+	// (cycle_boot.go).
+	boots map[string]cycleBoot
 }
 
 // NewCycleFeed wires the feed. obs may be nil (no observability plane): a
@@ -146,6 +168,7 @@ func NewCycleFeed(runtime openchoreo.RuntimeClient, obs cycleLogQuerier, targets
 		now:       time.Now,
 		memo:      map[string]feedRead{},
 		failures:  map[string]time.Time{},
+		boots:     map[string]cycleBoot{},
 	}
 }
 
@@ -156,6 +179,10 @@ type feedRead struct {
 	// pod is the cycle's newest pod; zero when there is none or the Component
 	// is gone.
 	pod openchoreo.RuntimePod
+	// podRead says the read learned the pod's state (pod, or that there is no
+	// pod), even when its LOG read then failed: the cycle's boot follows the
+	// pod, not the log source.
+	podRead bool
 	// lines are the raw log lines, in source order.
 	lines []feedLine
 	// expired: the platform no longer keeps this cycle's log.
@@ -182,8 +209,10 @@ type feedAttempt struct {
 // nothing new and a later one exists.
 //
 // run is the cycle's run row, read for its cancel stamp; nil is allowed. It
-// never returns an error: a failed read is a `logs unavailable` notice on the
-// feed and the cycle's state turns `unavailable`.
+// never returns an error, and a log it cannot serve adds nothing to the feed: a
+// failed read turns the cycle's state `unavailable` and an expired log reads
+// `expired` (State), which is where a reader learns it. The same read decides
+// the cycle's startup state (Boot).
 func (f *CycleFeed) Events(ctx context.Context, run *delivery.MilestoneRun, cycle *delivery.RunCycle, cursor string) ([]gen.RunEvent, int, string, error) {
 	if f == nil || cycle == nil || cycle.JobRef == "" {
 		return nil, 0, cursor, nil
@@ -193,13 +222,18 @@ func (f *CycleFeed) Events(ctx context.Context, run *delivery.MilestoneRun, cycl
 	switch {
 	case rd.err != nil:
 		f.noteFailure(cycle.ID, rd.at)
-		return []gen.RunEvent{logsUnavailableRunEvent(rd.at, "")}, current, cursor, nil
+		// The log is unreadable but the pod may not be: boot still follows it.
+		f.noteBootUnread(cycle, rd)
+		return nil, current, cursor, nil
 	case rd.expired:
 		f.clearFailure(cycle.ID)
-		return []gen.RunEvent{logsUnavailableRunEvent(rd.at, "it is older than the platform keeps agent logs")}, current, cursor, nil
+		f.forgetBoot(cycle.ID)
+		return nil, current, cursor, nil
 	}
 	f.clearFailure(cycle.ID)
-	evs, attempt, next := walkFeed(f.assemble(cycle, run, rd), cursor, current)
+	attempts := f.assemble(cycle, run, rd)
+	f.noteBoot(cycle, rd, attempts)
+	evs, attempt, next := walkFeed(attempts, cursor, current)
 	return evs, attempt, next, nil
 }
 
@@ -225,11 +259,18 @@ func (f *CycleFeed) State(cycle *delivery.RunCycle) gen.RunCycleViewRecording {
 
 // read returns the cycle's current read, from the memo or from one shared
 // load.
+//
+// A live cycle's viewer waits at most feedLiveWait for the load when an
+// earlier read is recent enough to stand in (feedLatestHold), and is served
+// that one meanwhile: one pass of the stream then shows the previous read's
+// feed beside a FRESH cycle record, and the load lands on a later pass. An
+// ended cycle always waits, because the stream of a finished run makes one pass
+// and closes, and that pass must carry the whole log.
 func (f *CycleFeed) read(ctx context.Context, cycle *delivery.RunCycle) feedRead {
 	if rd, ok := f.cached(cycle.ID); ok {
 		return rd
 	}
-	v, _, _ := f.reads.Do(cycle.ID, func() (any, error) {
+	fresh := f.reads.DoChan(cycle.ID, func() (any, error) {
 		if rd, ok := f.cached(cycle.ID); ok {
 			return rd, nil
 		}
@@ -243,7 +284,18 @@ func (f *CycleFeed) read(ctx context.Context, cycle *delivery.RunCycle) feedRead
 		f.store(cycle.ID, rd)
 		return rd, nil
 	})
-	return v.(feedRead)
+	latest, ok := f.latest(cycle.ID)
+	if !ok || !cycleLive(cycle) {
+		return (<-fresh).Val.(feedRead)
+	}
+	wait := time.NewTimer(feedLiveWait)
+	defer wait.Stop()
+	select {
+	case res := <-fresh:
+		return res.Val.(feedRead)
+	case <-wait.C:
+		return latest
+	}
 }
 
 // load reads the cycle's log from the pod while one exists, else from the
@@ -251,31 +303,37 @@ func (f *CycleFeed) read(ctx context.Context, cycle *delivery.RunCycle) feedRead
 func (f *CycleFeed) load(ctx context.Context, cycle *delivery.RunCycle) feedRead {
 	env, err := cycleEnvironment(ctx, f.targets, cycle)
 	if err != nil {
-		return f.failed(ctx, cycle, "environment", fmt.Errorf("cycle environment: %w", err))
+		return f.failed(ctx, cycle, "environment", fmt.Errorf("cycle environment: %w", err), feedRead{})
 	}
 	componentExists := true
-	var pod openchoreo.RuntimePod
+	// known is what this read has learned of the pod so far; every return
+	// past the snapshot carries it, a failed log read included.
+	var known feedRead
 	binding, err := f.runtime.ReleaseBindingName(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, env)
 	switch {
 	case errors.Is(err, openchoreo.ErrNotFound):
-		componentExists = false
+		componentExists, known.podRead = false, true
 	case err != nil:
-		return f.failed(ctx, cycle, "binding", err)
+		return f.failed(ctx, cycle, "binding", err, feedRead{})
 	default:
-		pod, err = f.runtime.PodSnapshot(ctx, cycle.OrgID, binding)
+		pod, err := f.runtime.PodSnapshot(ctx, cycle.OrgID, binding)
 		switch {
 		case errors.Is(err, openchoreo.ErrNotFound):
-			componentExists, pod = false, openchoreo.RuntimePod{}
+			componentExists, known.podRead = false, true
 		case err != nil:
-			return f.failed(ctx, cycle, "pod", err)
-		case pod.Found:
+			return f.failed(ctx, cycle, "pod", err, feedRead{})
+		default:
+			known.pod, known.podRead = pod, true
+		}
+		if pod := known.pod; pod.Found {
 			lines, err := f.runtime.PodLogs(ctx, cycle.OrgID, binding, pod.Name, 0)
 			if err == nil {
 				out := make([]feedLine, 0, len(lines))
 				for _, l := range lines {
 					out = append(out, feedLine{pod: pod.Name, at: l.Timestamp, log: l.Log})
 				}
-				return feedRead{pod: pod, lines: out}
+				known.lines = out
+				return known
 			}
 			if cycleLive(cycle) && podNeverRan(pod) {
 				// The pod has written nothing yet, so the index has nothing of
@@ -285,10 +343,10 @@ func (f *CycleFeed) load(ctx context.Context, cycle *delivery.RunCycle) feedRead
 					slog.DebugContext(ctx, "codingagent.CycleFeed: pending pod log not readable",
 						"cycle", cycle.ID, "error", err)
 				}
-				return feedRead{pod: pod}
+				return known
 			}
 			if !errors.Is(err, openchoreo.ErrNotFound) {
-				return f.failed(ctx, cycle, "pod_log", err)
+				return f.failed(ctx, cycle, "pod_log", err, known)
 			}
 			// The pod is listed and its log is not (a container not started,
 			// or one already reaped): whatever it wrote is the index's.
@@ -297,10 +355,12 @@ func (f *CycleFeed) load(ctx context.Context, cycle *delivery.RunCycle) feedRead
 	if cycle.ComponentUID == "" {
 		// Nothing to filter the index on. A closed cycle's log is gone for
 		// the platform; an open one is still in its dark zone.
-		return feedRead{pod: pod, expired: !cycleLive(cycle)}
+		known.expired = !cycleLive(cycle)
+		return known
 	}
 	if f.expired(cycle, f.clock()) {
-		return feedRead{pod: pod, expired: true}
+		known.expired = true
+		return known
 	}
 	from, to := cycleLogWindow(cycle, f.clock())
 	lines, err := readCycleObserver(ctx, f.obs, ArchiveScope{
@@ -314,30 +374,32 @@ func (f *CycleFeed) load(ctx context.Context, cycle *delivery.RunCycle) feedRead
 		To:            to,
 	}, componentExists)
 	if err != nil {
-		if cycleLive(cycle) && componentExists && !terminalPod(pod) {
+		if cycleLive(cycle) && componentExists && !terminalPod(known.pod) {
 			// An open cycle whose Component has no readable pod log is still
 			// in its dark zone (or between its pod's end and the close, where
 			// the next read catches up): narrate the pod state rather than
 			// call the log lost, as the v1 resolver does.
 			slog.WarnContext(ctx, "codingagent.CycleFeed: cycle log read failed, serving the dark zone",
 				"cycle", cycle.ID, "source", "observer", "error", err)
-			return feedRead{pod: pod}
+			return known
 		}
-		return f.failed(ctx, cycle, "observer", err)
+		return f.failed(ctx, cycle, "observer", err, known)
 	}
 	out := make([]feedLine, 0, len(lines))
 	for _, l := range lines {
 		out = append(out, feedLine{pod: l.PodName, at: l.Timestamp, log: l.Log})
 	}
-	return feedRead{pod: pod, lines: out}
+	known.lines = out
+	return known
 }
 
 // failed logs one failed read (at most once per cycle per feedReadTTL, since
-// reads are shared) and returns it.
-func (f *CycleFeed) failed(ctx context.Context, cycle *delivery.RunCycle, source string, err error) feedRead {
+// reads are shared) and returns it, keeping what the read had already learned
+// of the pod (known): a log that cannot be read says nothing about the pod.
+func (f *CycleFeed) failed(ctx context.Context, cycle *delivery.RunCycle, source string, err error, known feedRead) feedRead {
 	slog.WarnContext(ctx, "codingagent.CycleFeed: cycle log read failed",
 		"cycle", cycle.ID, "source", source, "error", err)
-	return feedRead{err: err}
+	return feedRead{err: err, pod: known.pod, podRead: known.podRead}
 }
 
 // assemble builds every attempt's feed from one read.
@@ -362,13 +424,6 @@ func (f *CycleFeed) assemble(cycle *delivery.RunCycle, run *delivery.MilestoneRu
 		if attempts[i].number == current {
 			idx = i
 		}
-	}
-	if idx < 0 && cycleLive(cycle) && !terminalPod(rd.pod) {
-		// The dark zone: the current attempt has said nothing and the pod is
-		// still coming up. Its own state is the only report there is.
-		boot := bootstrapRunEvent(rd.at, rd.pod.Found, rd.pod.Phase, rd.pod.WaitingReason, rd.pod.Message)
-		attempts = append(attempts, feedAttempt{number: current, events: []gen.RunEvent{boot}})
-		idx = len(attempts) - 1
 	}
 	if !rd.pod.Found && f.cancelledAndIndexed(cycle, run) {
 		if idx < 0 {
@@ -592,9 +647,7 @@ func walkFeed(attempts []feedAttempt, cursor string, current int) ([]gen.RunEven
 }
 
 // eventsAfter returns the events that follow the last producer event at or
-// before seq: a notice travels with the line after it, and the dark-zone
-// markers of an attempt that has said nothing are served on every poll (their
-// stable seqs dedup them).
+// before seq: a gap notice travels with the line after it.
 func eventsAfter(events []gen.RunEvent, seq int64) []gen.RunEvent {
 	cut := 0
 	for i, e := range events {
@@ -752,12 +805,26 @@ func (f *CycleFeed) cached(cycleID string) (feedRead, bool) {
 	return rd, true
 }
 
+// latest is the cycle's latest completed read while it is recent enough to
+// stand in for a slow fresh one (feedLatestHold).
+func (f *CycleFeed) latest(cycleID string) (feedRead, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rd, ok := f.memo[cycleID]
+	if !ok || f.clock().Sub(rd.at) >= feedLatestHold {
+		return feedRead{}, false
+	}
+	return rd, true
+}
+
+// store keeps the cycle's latest read: served whole for feedReadTTL (cached),
+// and in place of a slow fresh read for feedLatestHold (latest).
 func (f *CycleFeed) store(cycleID string, rd feedRead) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	now := f.clock()
 	for id, old := range f.memo {
-		if now.Sub(old.at) >= feedReadTTL {
+		if now.Sub(old.at) >= feedLatestHold {
 			delete(f.memo, id)
 		}
 	}

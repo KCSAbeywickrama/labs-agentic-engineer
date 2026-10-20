@@ -211,7 +211,15 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   as DNS-label slugs (`RequireSlug`) and 400 on malformed BEFORE the OC client / repo is reached.
 - **The wire quirks the contract-first cutover pinned stay pinned**: get-component-config returns a literal
   JSON `null` 200 when no row exists (not `{}`); get-component-openapi returns 409 *with* the componentType
-  body for a non-service component; build-logs 503s when the observability client is unwired.
+  body for a non-service component.
+- **Build logs are read live from OpenChoreo, as aep-api, and only for as long as OpenChoreo keeps the
+  build.** get-build-logs reads the WorkflowRun first — its state, and that it is the path's
+  project/component (404 otherwise; aep-api is the only access check, since it reads OpenChoreo with its
+  own identity) — then `workflowruns/{run}/logs` from the build's pods. The cursor is the newest line's
+  timestamp at full precision; tail reads ask OpenChoreo for a window reaching back past it and drop what
+  they re-read. A run OpenChoreo has deleted at the builder workflow's `ttlAfterCompletion` answers 410
+  `build_expired`: that retention is the product's, and nothing is stored to outlive it. An OpenChoreo
+  failure answers 503. The observer is not on this path.
 - **The Stage aggregate is one cheap poll (5s active / 30s idle), strict-join.** get-project-status runs
   four sources concurrently — spec from a fetch-free local-mirror snapshot, build from the newest
   `milestone_runs` row (a version's delivery IS its run), deploy from the project's `development`

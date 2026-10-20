@@ -241,7 +241,7 @@ function BuildBody({ projectName, version, data }: { projectName: string; versio
       {data.explanation && <ExplanationNotice projectName={projectName} explanation={data.explanation} />}
       <StartupWaitNotice cycle={data.current?.cycles.at(-1)} />
       <TasksSection projectName={projectName} data={data} />
-      <CardSection title="Coding agent's log" meta={agentMeta ?? "newest first"} defaultOpen={streaming}>
+      <CardSection title="Coding agent's log" meta={agentMeta} defaultOpen={streaming}>
         <AgentLog projectName={projectName} runs={data.runs} progress={data.progress} />
       </CardSection>
       <CardSection title="Build logs">

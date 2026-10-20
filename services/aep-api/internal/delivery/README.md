@@ -109,7 +109,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `BuildTerminalObserver` (root) | offers | the OpenChoreo watcher → the event plane: a settled build reported outwards, so watcher and event plane stay peer sub-packages |
 | `MilestoneDispatcher` (root, over `MilestoneDispatch`) | offers | the coding agent → the supervisor: launch one agent run at a milestone and answer with an `AgentLaunch` (its Job ref and the model host it runs on). The dispatch prompt is a milestone reference; the runner discovers its own working set. Satisfied by `*codingagent.CodingExecutor`, which writes no execution row — the cycle record is the supervisor's bookkeeping |
 | `ComponentEnsurer` | needs | `eventcore` → the projects component service + the runtime-config emitter. Provision a component's OpenChoreo CR immediately before its first build; see the invariant below |
-| `RunReader` · `CycleReader` · `CycleLogReader` · `ValidationRunReader` · `ValidationCycleReader` · `ValidationSnapshotReader` · `RunCanceller` · `Revalidator` | needs | `runread` → the root run/cycle repositories, `codingagent`'s cycle-log reader (the pod's log through the OC API while the pod exists, then the observer by the cycle's Component UID — component scope, then project scope once the Component is deleted), an app adapter over the Git port (`app.acceptanceCriteria`) for a report and its criteria AT ONE COMMIT, `*run.Supervisor` and the event plane. Six reads and two writes, which is the whole dependency surface of the read model. `Revalidator` is a port for the same reason `RunCanceller` is: deciding a revalidation needs GitHub (is there open work?) and the project repo (is there an oracle?), and this surface must stay free-to-poll |
+| `RunReader` · `CycleReader` · `CycleLogReader` · `ValidationRunReader` · `ValidationCycleReader` · `ValidationSnapshotReader` · `ProjectBuildLister` · `RunCanceller` · `Revalidator` | needs | `runread` → the root run/cycle repositories, `codingagent`'s cycle-log reader (the pod's log through the OC API while the pod exists, then the observer by the cycle's Component UID — component scope, then project scope once the Component is deleted), an app adapter over the Git port (`app.acceptanceCriteria`) for a report and its criteria AT ONE COMMIT, an app adapter over the OC client (`app.runreadProjectBuilds`) for a project's build WorkflowRuns and how long OpenChoreo keeps them (the builder workflow's `ttlAfterCompletion`, which tells an expired merge's empty build list from one not started), `*run.Supervisor` and the event plane. Seven reads and two writes, which is the whole dependency surface of the read model. `Revalidator` is a port for the same reason `RunCanceller` is: deciding a revalidation needs GitHub (is there open work?) and the project repo (is there an oracle?), and this surface must stay free-to-poll |
 | `Gates` · `Planner` | needs | `run` → `dependencies/provisioning` (through an app-root adapter) and `task`. Mint the version's dependency gates, then plan its build issue — the run's first phase. Declared here rather than imported for the same reason `build` declares its own: `task ⊥ run` is an import ban in both directions, and a port over root types satisfies it |
 | `Deployer` · `DeploymentReader` | needs | `run` → `projects.DeploymentService`. Promote a cycle's built components and read back whether they are serving. The supervisor owns the ORDER and the verdict; the projects domain owns the OpenChoreo writes, which is why `run` still names no cluster client |
 | `DeployIssueMinter` | needs | `run` → the event plane. The ONE recovery issue the plane cannot mint on its own initiative: every other one has a webhook behind it, and a ReleaseBinding that never becomes Ready delivers nothing. The supervisor observes it and asks; the plane still owns the write, the labels and the dedupe key |
@@ -752,9 +752,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   [`codingagent/design/cycle-status-and-logs.md`](codingagent/design/cycle-status-and-logs.md)).
   The v1 VERSION build-progress stream still derives per viewer from the pod, then the archive, then a
   synthetic "logs unavailable" marker (`CycleProgress`, resolved once by `resolveCycleLog`), and keeps its
-  200-event page cap. Every platform-minted marker that is re-derived per poll — the dark zone, a
-  truncation, a lost log — is a `notice` on a stable NEGATIVE seq, which is what makes it dedup to one
-  row, stamped with the instant the platform derived it. `CycleLogReader` serves both streams; `codingagent` owns it and writes no log text to Postgres. The one thing taken from
+  200-event page cap. There, every platform-minted marker that is re-derived per poll — the dark zone, a
+  truncation, a lost log — is a line on a stable NEGATIVE seq, which is what makes it dedup to one
+  row. The v2 run stream keeps FACTS and STATE apart: an `event` is append-only, its only platform
+  marker a positional `gap` notice, while a runner still starting (`boot`) and a log that cannot be read
+  (`recording`) ride the re-sent `cycle` frame; every frame carries `serverTime`, and a quiet stream sends
+  a `tick` frame after 15 s. `CycleLogReader` serves both streams; `codingagent` owns it and writes no log text to Postgres. The one thing taken from
   a terminal pod's log by the WATCHER is the runner's token-usage line — v2 `run_settled` or v1 `result`,
   always the LAST one, because the runtime reports usage cumulatively — stamped onto the cycle row:
   accounting, not logging. `coding_agent_logs` remains for legacy execution rows; milestone cycles never
@@ -773,7 +776,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it
   rides the shared agent-stream parser. The server buffers no history and keeps no cursor; the client
   dedups and a reconnect re-derives. It settles when the Task's ISSUE closes, because nothing further will
-  arrive on it. It is the per-ISSUE view; a run's own feed is `stream-run-progress` and a version's is
+  arrive on it, or at once for a Task with no log of its own and no execution rows (`hasOwnLog`: only a
+  provision gate still gains rows; coding work is logged on its run's feed), because none is coming. It is the per-ISSUE view; a run's own feed is `stream-run-progress` and a version's is
   `stream-build-progress`.
 - **`derivedStatus` is the issue's own state, and only that.** Two values — `pending` (open) and `merged`
   (closed) — both deliberately members of the retired ten-value vocabulary, because the console consumes

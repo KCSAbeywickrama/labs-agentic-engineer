@@ -51,7 +51,7 @@ func deploymentsOf(envs ...string) *ocmocks.ComponentClientMock {
 }
 
 func agentLinkService(client openchoreo.ComponentClient, bindings AIGatewayBindingReader, refs secretmanagersvc.OpenChoreoSecretReferenceClient) *componentService {
-	svc := NewComponentService(client, nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, refs).(*componentService)
+	svc := NewComponentService(client, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, refs).(*componentService)
 	svc.SetAIGatewayBindings(bindings)
 	svc.SetAgentRecordNamer(func(_, component string) string { return component + "-rec" })
 	return svc
@@ -118,7 +118,7 @@ func TestListDeployments_UngovernedNoLink(t *testing.T) {
 
 // Without a namer wired (an install with no Agent Manager), rows carry no link.
 func TestListDeployments_NoNamerNoLink(t *testing.T) {
-	svc := NewComponentService(deploymentsOf(testWriteTarget), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, &presentSecretRefClient{}).(*componentService)
+	svc := NewComponentService(deploymentsOf(testWriteTarget), modelAccessStore(nil), nil, nil, fakeKeyResolver{}, &presentSecretRefClient{}).(*componentService)
 	svc.SetAIGatewayBindings(consoleBindings{console: "http://console.amp.localhost:8080"})
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "checkout-agent")

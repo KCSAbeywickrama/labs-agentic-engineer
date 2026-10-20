@@ -278,6 +278,27 @@ test("notice names WHICH condition in words, and never renders a bare code as no
   assert.equal(formatEvent({ ...LEAD, kind: "notice", level: "error", code: "quota_exhausted" }).text, "✗ quota_exhausted");
 });
 
+// The contract raises `rate_limit` only at warn or error, when calls are held
+// back. An older runner also raised it at info for a window that was merely
+// being consumed, and "rate limited" on that row claimed a throttle that never
+// happened — so the label follows the level (`noticeSentence`, which a caption reads too).
+test("notice: rate_limit says throttled only at the levels that mean it", () => {
+  assert.equal(
+    formatEvent({ ...LEAD, kind: "notice", level: "warn", code: "rate_limit", detail: "[rate-limit] near the limit on the seven_day window at 82%" }).text,
+    "⚠ rate limited by the provider · [rate-limit] near the limit on the seven_day window at 82%",
+  );
+  assert.equal(
+    formatEvent({ ...LEAD, kind: "notice", level: "error", code: "rate_limit", detail: "[rate-limit] rejected on the seven_day window" }).text,
+    "✗ rate limited by the provider · [rate-limit] rejected on the seven_day window",
+  );
+  assert.equal(
+    formatEvent({ ...LEAD, kind: "notice", level: "info", code: "rate_limit", detail: "[rate-limit] allowed on the five_hour window" }).text,
+    "ℹ provider rate-limit status · [rate-limit] allowed on the five_hour window",
+  );
+  // No level reads as info, as the row's tone already does.
+  assert.equal(formatEvent({ ...LEAD, kind: "notice", code: "rate_limit" }).text, "ℹ provider rate-limit status");
+});
+
 test("notice: a code-less notice is its own prose, with nothing prefixed", () => {
   // The other notice shape, and it stays: a scrubbed line the run itself
   // printed, or the watchdog's sentence. No closed set could name it, so the

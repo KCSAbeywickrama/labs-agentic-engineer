@@ -19,6 +19,7 @@ package runread
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -149,6 +150,11 @@ type ValidationSnapshotReader interface {
 // not taken: see CycleBuilds.
 type ProjectBuildLister interface {
 	ListProjectBuildRuns(ctx context.Context, orgID, projectID string) ([]delivery.MergeBuild, error)
+	// BuildRetention is how long OpenChoreo keeps a build after it completes —
+	// the builder workflow's ttlAfterCompletion; zero when it keeps them. It is
+	// what tells a merge whose builds have EXPIRED from one whose builds have
+	// not started: both list no runs.
+	BuildRetention(ctx context.Context) (time.Duration, error)
 }
 
 // CycleLogReader is one cycle's agent activity. Satisfied by
@@ -177,8 +183,16 @@ type ProjectBuildLister interface {
 // The pair is deliberately on one port rather than two: they answer for the same
 // cycle, and splitting them would invite a boot where a cycle is readable on one
 // stream and silent on the other.
+//
+// CycleBoot is RunCycleView.boot, the startup state of the cycle's current
+// attempt as CycleEvents' last read of its pod found it (nil when there is
+// none). It reads nothing, so the run stream asks it right after CycleEvents,
+// and the cycle frame it projects then describes the read behind its feed. It
+// is on this port because it comes out of that read; the run reads, which read
+// no feed, leave boot absent.
 type CycleLogReader interface {
 	CycleEvents(ctx context.Context, run *delivery.MilestoneRun, cycle *delivery.RunCycle, cursor string) (events []gen.RunEvent, attempt int, next string, err error)
+	CycleBoot(cycle *delivery.RunCycle) *gen.RunCycleBoot
 	CycleProgress(ctx context.Context, cycle *delivery.RunCycle, sinceMillis int64) (*contracts.ProgressResponse, error)
 }
 

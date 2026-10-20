@@ -156,7 +156,8 @@ watchdog is told what decision 6 requires; only who decides moved.
   handled as `activity` plus the one step that is theirs.
 - **`noise` is recorded and nothing else** — not translated, not activity, not
   proof of life. A message about the server rather than the run would otherwise
-  reset the idle clock.
+  reset the idle clock. Claude Code's one is a rate-limit window reporting
+  `allowed`: the account's quota, which the contract keeps off the feed.
 - **The classifier is per session and may keep state** (Claude Code's rate-limit
   dedupe: a repeated sentence is `activity`, not a `stall_signal`).
 - **The live-task set is the loop's; which words open and close a task are the

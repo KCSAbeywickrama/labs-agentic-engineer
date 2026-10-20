@@ -37,9 +37,13 @@ import assert from "node:assert/strict";
 import { createClaudeAdapter, type ClaudeAdapterOptions } from "./translate.js";
 import type { RunEventInput, RunEventModelUsage, RunEventUsage } from "../../lib/progress/emitter.js";
 
-/** A fresh adapter per test: it is per-run state by design. */
+/**
+ * A fresh adapter per test: it is per-run state by design. No home directory
+ * unless a test names one, so the machine running the suite cannot shorten a
+ * fixture path behind a test's back.
+ */
 function adapter(opts?: ClaudeAdapterOptions) {
-  return createClaudeAdapter(opts);
+  return createClaudeAdapter({ homeDir: "", ...opts });
 }
 
 /** One message through a throwaway adapter, for the branches that need no history. */
@@ -789,6 +793,43 @@ test("adapter: a backgrounded command is a task of its own, owned by the agent t
   ]);
 });
 
+// Live (2026-10-12): a background row printed the RAW command — the absolute
+// pod path and every line of a heredoc — while the `tool_use` row for the same
+// call read `~ws/…` on one line. The contract's rule is that a task summarises
+// its command exactly as its launching row did, at both ends.
+test("adapter: a backgrounded command's task events say it as its row did, never raw", () => {
+  const a = inWorkspace();
+  const command = `cat > ${WORKSPACE}/notes.md <<'EOF'\n# Notes\nsee ${WORKSPACE}/specs\nEOF\nbal build ${WORKSPACE}/svc`;
+  const row = a.translate(assistant(null, toolUse("b1", "Bash", { command, run_in_background: true })));
+  const rowSummary = (row[0] as { summary: string }).summary;
+  assert.equal(rowSummary, "cat > ~ws/notes.md <<'EOF' # Notes see ~ws/specs EOF bal build ~ws/svc");
+
+  const started = a.translate({
+    type: "system",
+    subtype: "task_started",
+    task_id: "bo1",
+    tool_use_id: "b1",
+    description: "Write notes and build",
+    task_type: "local_bash",
+  });
+  const settled = a.translate({ type: "system", subtype: "task_notification", task_id: "bo1", status: "completed" });
+  for (const [name, events] of [["task_started", started], ["task_settled", settled]] as const) {
+    const summary = (events[0] as { summary: string }).summary;
+    assert.equal(summary, rowSummary, `${name} repeats the row's reader line`);
+    assert.ok(!summary.includes("\n") && !summary.includes(WORKSPACE), `${name} carries no raw command`);
+  }
+});
+
+// A row that judged the exact command enough on its own (a `gh` call with no
+// workspace path) carries it as `command`; the task still names it by the line
+// a renderer prints for that row.
+test("adapter: a backgrounded gh call's task is named by its row's printed line", () => {
+  const a = inWorkspace();
+  a.translate(assistant(null, toolUse("b2", "Bash", { command: "gh run watch 42", run_in_background: true })));
+  const started = a.translate({ type: "system", subtype: "task_started", task_id: "bo2", tool_use_id: "b2", task_type: "local_bash" });
+  assert.equal((started[0] as { summary: string }).summary, "gh run watch 42");
+});
+
 // ADR-0002's known limit, carried over: a runtime that does not name the call
 // leaves the description as the only thing the two messages share. Anything
 // less certain than a match is the lead's, because a guess between two agents
@@ -1208,15 +1249,90 @@ test("adapter: a path inside the workspace is said the way the workspace says it
   assert.equal(summaryOf(a, "Glob", { path: WORKSPACE }), ".");
 });
 
-test("adapter: a path OUTSIDE the workspace stays absolute — that is the interesting half", () => {
+test("adapter: a path OUTSIDE the workspace stays visibly outside — that is the interesting half", () => {
   const a = inWorkspace();
-  // The runtime's own session directory. Shortening it would hide that the read
-  // left the project at all.
-  const outside = "/home/aep/.claude/projects/-home-aep-aep-workspace/session.jsonl";
-  assert.equal(summaryOf(a, "Read", { file_path: outside }), outside);
   // A sibling checkout is not a child of the root: the match is on a path
   // boundary, not a string prefix.
   assert.equal(summaryOf(a, "Read", { file_path: `${WORKSPACE}-old/src/App.tsx` }), `${WORKSPACE}-old/src/App.tsx`);
+  assert.equal(summaryOf(a, "Read", { file_path: "/etc/hosts" }), "/etc/hosts");
+});
+
+// The runtime's own session directory sits under its home, and every read of
+// it spent `/home/aep/` on the row. `~/` shortens it the way the workspace is
+// shortened while still saying the read left the project — which is why it is
+// not stripped to a bare relative path.
+test("adapter: a path under the runtime's home reads as ~/…, the workspace inside it still wins", () => {
+  const a = inWorkspace();
+  const b = createClaudeAdapter({ homeDir: "/home/aep/" });
+  b.translate({ type: "system", subtype: "init", model: "claude-sonnet-5", cwd: WORKSPACE });
+  const session = "/home/aep/.claude/projects/-home-aep-aep-workspace/session.jsonl";
+  assert.equal(summaryOf(b, "Read", { file_path: session }), "~/.claude/projects/-home-aep-aep-workspace/session.jsonl");
+  assert.equal(summaryOf(b, "Read", { file_path: `${WORKSPACE}/specs/a.json` }), "specs/a.json", "the workspace is tried first");
+  assert.equal(summaryOf(b, "Read", { file_path: "/home/aep-old/x" }), "/home/aep-old/x", "a path boundary, not a prefix");
+  // With no home known, nothing is shortened against it.
+  assert.equal(summaryOf(a, "Read", { file_path: session }), session);
+});
+
+test("adapter: a command's home paths collapse to ~ only where they stand as whole paths", () => {
+  const a = createClaudeAdapter({ homeDir: "/home/aep" });
+  a.translate({ type: "system", subtype: "init", model: "claude-sonnet-5", cwd: WORKSPACE });
+  const command = `tail -6 /home/aep/.claude/projects/s.jsonl ${WORKSPACE}/log "/home/aep" /opt/home/aep /home/aep-old`;
+  const events = a.translate(assistant(null, toolUse("t1", "Bash", { command })));
+  assert.deepEqual(events[0], {
+    kind: "tool_use",
+    tool: "Bash",
+    summary: `tail -6 ~/.claude/projects/s.jsonl ~ws/log "~" /opt/home/aep /home/aep-old`,
+    command,
+    agentId: "lead",
+    toolUseId: "t1",
+  });
+});
+
+// Live (2026-10-12): a crew caption read "Running cd /home/aep/aep-workspace/
+// default/tiny-team-notes/… && …" — the SDK's task_progress description, which
+// quotes the agent's Bash command, passed through verbatim. Every line a reader
+// sees is in reader form, the runtime's own prose included: the same two roots
+// collapse, the text is one line and capped, and nothing else changes.
+test("adapter: the runtime's prose reaches the feed in reader form — phrase, label, report", () => {
+  const a = createClaudeAdapter({ homeDir: "/home/aep" });
+  a.translate({ type: "system", subtype: "init", model: "claude-sonnet-5", cwd: WORKSPACE });
+  a.translate(assistant(null, toolUse("toolu_spawn", "Agent", { description: `Build ${WORKSPACE}/api` })));
+  const [started] = a.translate(agentStarted("agent-1", "toolu_spawn", { description: `Build ${WORKSPACE}/api` }));
+  assert.equal((started as { label: string }).label, "Build ~ws/api");
+
+  const [progress] = a.translate({
+    type: "system",
+    subtype: "task_progress",
+    task_id: "agent-1",
+    description: `Running cd ${WORKSPACE}/api && cat > notes.md <<'EOF'\nhi\nEOF\ntail /home/aep/.cache/x.log`,
+  });
+  assert.equal((progress as { phrase: string }).phrase, "Running cd ~ws/api && cat > notes.md <<'EOF' hi EOF tail ~/.cache/x.log");
+
+  const [settled] = a.translate(notification("agent-1", { summary: `Done.\nREPORT: wrote ${WORKSPACE}/api/main.bal` }));
+  assert.equal((settled as { report: string }).report, "REPORT: wrote ~ws/api/main.bal");
+});
+
+// A failed call's diagnosis is a `summary`, and a compiler leads it with the
+// absolute path of the file it is about.
+test("adapter: a failed call's diagnosis names its file the way the row did", () => {
+  const a = inWorkspace();
+  a.translate(assistant(null, toolUse("t1", "Bash", { command: "npm run build" })));
+  const [result] = a.translate(toolResult(null, "t1", {
+    isError: true,
+    content: `Exit code 2\n> tsc\n${WORKSPACE}/src/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser'.`,
+  }));
+  assert.equal((result as { summary: string }).summary, "~ws/src/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser'.");
+});
+
+// Live: `$ ToolSearch {"query":"select:…","max_results":3}`. The raw arguments
+// are what the contract keeps off the feed; a known short field says it, and a
+// tool with none prints its name alone (the renderer's `$ <tool>`).
+test("adapter: an unknown tool's input never reaches the row as JSON", () => {
+  const a = inWorkspace();
+  assert.equal(summaryOf(a, "ToolSearch", { query: "select:TaskOutput", max_results: 1 }), "select:TaskOutput");
+  assert.equal(summaryOf(a, "TaskOutput", { task_id: "ac7f4459", block: true, timeout: 300000 }), "");
+  // A known field that is not text is passed over, not dumped.
+  assert.equal(summaryOf(a, "Odd", { path: 42, description: "the fallback words" }), "the fallback words");
 });
 
 test("adapter: with no init declared, a path is left exactly as the runtime gave it", () => {

@@ -25,8 +25,8 @@ import { componentBuildState, type ComponentBuildState } from "../model/run";
 import { LogLines } from "./CardSection";
 
 // The build logs: the component builds the version's merge fanned out to,
-// each with its outcome and, opened, its log. Copied from the old console's
-// build page (CycleBuilds, useBuildLog).
+// each with its outcome and, opened, its log. A build is kept only for a
+// while after it finishes; after that the list, or the log, says so.
 
 type CycleBuild = components["schemas"]["CycleBuild"];
 
@@ -38,16 +38,36 @@ const STATE: Record<ComponentBuildState, { colour: string; label: (b: CycleBuild
 };
 
 function BuildLog({ projectName, build }: { projectName: string; build: CycleBuild }) {
-  const log = useBuildLog(projectName, build.component, build.buildName);
-  if (log.error) return <LogLines lines={[]} empty={log.error} />;
-  if (log.loading) return <LogLines lines={[]} empty="Loading the build log…" />;
-  const lines = log.entries.map((e) => e.log);
-  return (
-    <LogLines
-      lines={log.complete ? lines : [...lines, "…tailing"]}
-      empty={log.complete ? "No log kept for this build; its outcome is above." : "This build has not written anything yet."}
-    />
-  );
+  const { log, retry } = useBuildLog(projectName, build.component, build.buildName);
+  switch (log.phase) {
+    case "loading":
+      return <LogLines lines={[]} empty="Loading the build log…" />;
+    case "expired":
+      return <LogLines lines={[]} empty="This build's log is no longer kept" />;
+    case "failed":
+      return (
+        <Box>
+          {log.entries.length > 0 && <LogLines lines={log.entries.map((e) => e.log)} empty="" />}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.75, py: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Couldn't load this build's log right now
+            </Typography>
+            <Button size="small" onClick={retry}>
+              Try again
+            </Button>
+          </Box>
+        </Box>
+      );
+    case "read": {
+      const lines = log.entries.map((e) => e.log);
+      return (
+        <LogLines
+          lines={log.complete ? lines : [...lines, "…tailing"]}
+          empty={log.complete ? "This build wrote nothing to its log" : "This build has not written anything yet."}
+        />
+      );
+    }
+  }
 }
 
 function BuildRow({ projectName, build }: { projectName: string; build: CycleBuild }) {
@@ -95,10 +115,11 @@ export function BuildLogs({ projectName, version, cycleId }: { projectName: stri
     );
   }
   if (!builds.data) return <Skeleton variant="rounded" height={48} sx={{ m: 1.5 }} />;
-  if (builds.data.length === 0) return say("The merge has not reached the cluster's builds yet.");
+  if (builds.data.expired) return say("These builds are no longer kept");
+  if (builds.data.items.length === 0) return say("The merge has not reached the cluster's builds yet.");
   return (
     <Box>
-      {builds.data.map((b) => (
+      {builds.data.items.map((b) => (
         <BuildRow key={b.buildName} projectName={projectName} build={b} />
       ))}
     </Box>

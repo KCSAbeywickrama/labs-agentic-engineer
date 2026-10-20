@@ -21,5 +21,16 @@ import "errors"
 var (
 	ErrComponentNotFound   = errors.New("component not found")
 	ErrComponentNotService = errors.New("component is not a service")
-	ErrLogsUnavailable     = errors.New("observability service not configured")
+
+	// ErrBuildExpired: OpenChoreo no longer has the build. It deletes a
+	// build's WorkflowRun, and the log with it, at the builder workflow's
+	// ttlAfterCompletion — retention is OpenChoreo's, by design.
+	ErrBuildExpired = errors.New("build is no longer kept")
+	// ErrBuildNotInComponent: the build exists but belongs to another project
+	// or component than the path names.
+	ErrBuildNotInComponent = errors.New("build does not belong to this component")
+	// ErrInvalidLogCursor: a cursor this service did not hand out.
+	ErrInvalidLogCursor = errors.New("invalid build log cursor")
+	// ErrLogSourceUnavailable: OpenChoreo could not serve the log right now.
+	ErrLogSourceUnavailable = errors.New("build log source unavailable")
 )

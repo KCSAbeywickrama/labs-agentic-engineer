@@ -345,6 +345,26 @@ function newVitals(): Vitals {
 }
 
 /**
+ * What one cycle's events say once folded, before any clock is applied.
+ *
+ * Everything here depends on the events alone, so a surface that re-reads the
+ * crew every second (its ages have to move while nothing arrives) folds the
+ * events once per change rather than once per tick: `crewAt` is the only part
+ * that takes `now`. Opaque to callers; build it with `foldCrew`.
+ */
+export interface CrewFold<E> {
+  /** The declared tree, from `groupByAgent`. */
+  tree: AgentSection<E>;
+  /** Each section's own steps and spawned sections, split once. */
+  parts: Map<string, { steps: E[]; children: AgentSection<E>[] }>;
+  vitals: Map<string, Vitals>;
+  planItems: Map<string, OwnedPlanItem>;
+  outcome?: string | undefined;
+  runSettledMs?: number | undefined;
+  lastMs?: number | undefined;
+}
+
+/**
  * One cycle's events → the crew.
  *
  * Built ON TOP of `groupByAgent` rather than beside it: the declared tree, the
@@ -364,6 +384,14 @@ export function buildCrew<E extends RunEventView>(
   now: number,
   endedWith?: string,
 ): Crew<E> {
+  return crewAt(foldCrew(events, endedWith), now);
+}
+
+/** The clock-free half of `buildCrew`: one walk over the events. */
+export function foldCrew<E extends RunEventView>(
+  events: readonly E[],
+  endedWith?: string,
+): CrewFold<E> {
   const tree = groupByAgent(events);
 
   const vitals = new Map<string, Vitals>();
@@ -501,12 +529,35 @@ export function buildCrew<E extends RunEventView>(
 
   outcome ??= endedWith;
 
+  // Each section's rows split once, so a tick re-reads arrays rather than
+  // re-walking every row — and a member's `steps` is the SAME array on every
+  // tick, which is what lets a surface memoise what it draws from it.
+  const parts = new Map<string, { steps: E[]; children: AgentSection<E>[] }>();
+  const split = (section: AgentSection<E>) => {
+    const steps: E[] = [];
+    const children: AgentSection<E>[] = [];
+    for (const r of section.rows) {
+      if (r.kind === "event") steps.push(r.event);
+      else children.push(r.section);
+    }
+    parts.set(section.id, { steps, children });
+    children.forEach(split);
+  };
+  split(tree);
+
+  return { tree, parts, vitals, planItems, outcome, runSettledMs, lastMs };
+}
+
+/** A fold read at one instant: the crew as it stands at `now`. Never mutates the fold. */
+export function crewAt<E extends RunEventView>(fold: CrewFold<E>, now: number): Crew<E> {
+  const { tree, parts, vitals, planItems, outcome, runSettledMs, lastMs } = fold;
   const members: CrewMember<E>[] = [];
 
   const build = (section: AgentSection<E>): CrewMember<E> => {
-    const v = vitalsFor(section.id);
-    const children = section.rows.flatMap((r) => (r.kind === "section" ? [build(r.section)] : []));
-    const steps = section.rows.flatMap((r) => (r.kind === "event" ? [r.event] : []));
+    const v = vitals.get(section.id) ?? newVitals();
+    const part = parts.get(section.id);
+    const children = (part?.children ?? []).map(build);
+    const steps = part?.steps ?? [];
 
     // A run that has settled has settled its agents too. The contract is explicit
     // that a missing `agent_settled` means the platform never learned how an
@@ -665,12 +716,13 @@ function captionOf<E>(
   }
   // A heartbeat or a retry speaks only while it is still the newest thing that
   // happened; after that the agent's own phrase is the truer line.
-  const live = v.transientAt > v.otherAt && v.transient ? v.transient : v.phrase;
-  if (state !== "stalled") return live;
-  // An amber row must always say what it is amber ABOUT. The recorded runs carry
-  // almost no heartbeats, so the unanswered call is usually the only witness —
-  // and it is a true one.
-  return live || waitingPhrase(v.inFlight.values().next().value ?? "a tool call", silentForMs);
+  const transient = v.transientAt > v.otherAt ? v.transient : "";
+  if (state !== "stalled") return transient || v.phrase;
+  // An amber row must always say what it is amber ABOUT. A phrase does not: it
+  // says what the agent set out to do, not why it has been silent for a minute.
+  // The recorded runs carry almost no heartbeats, so the unanswered call is
+  // usually the only witness — and it is a true one.
+  return transient || waitingPhrase(v.inFlight.values().next().value ?? "a tool call", silentForMs);
 }
 
 /** How long this member has been going. */

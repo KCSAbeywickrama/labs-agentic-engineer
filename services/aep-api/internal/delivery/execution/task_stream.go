@@ -20,7 +20,8 @@ package execution
 // /projects/{p}/tasks/{issueNumber}/log). One connection carries a Task's
 // ENTIRE live state: a `task` frame (the TaskView, upserted), one `execution`
 // frame per attempt (upserted), and a `line` frame per unified-timeline entry
-// (deduped), ending in `done` + `[DONE]` when the Task settles. Frame types are
+// (deduped), ending in `done` + `[DONE]` when the Task settles, or at once for
+// a Task that has no log of its own (hasOwnLog). Frame types are
 // carried INSIDE the JSON payload (`type` field), never as an SSE `event:` name
 // — the console's shared parser keeps only `data:` lines, so a self-describing
 // payload (like the agents turn stream) is what it can read.
@@ -60,11 +61,13 @@ const (
 )
 
 // TaskSnapshot is the `task` frame's payload (the full TaskView JSON, forwarded
-// verbatim — the stream never unmarshals it) plus the derived status the stream
-// uses to decide when the Task has settled.
+// verbatim — the stream never unmarshals it) plus the two facts the stream
+// decides on: the derived status, for when the Task has settled, and the
+// issue's label kind (delivery.KindOf), for whether it has a log of its own.
 type TaskSnapshot struct {
 	JSON          json.RawMessage
 	DerivedStatus string
+	Kind          string
 }
 
 // TaskSnapshotReader reads a Task's current snapshot. Wired at the composition
@@ -112,6 +115,14 @@ type streamFrame struct {
 	DerivedStatus string                   `json:"derivedStatus,omitempty"`
 }
 
+// execPass is what one read of a Task's execution rows found.
+type execPass struct {
+	// read is false when the rows could not be read: the pass says nothing.
+	read       bool
+	rows       int
+	anyRunning bool
+}
+
 // execView projects a delivery.Execution to the ExecutionView JSON shape the
 // console already holds (kept here so execution never imports feature/task).
 type execView struct {
@@ -157,6 +168,7 @@ func (s *TaskStreamService) run(ctx context.Context, w io.Writer, flush func(), 
 	codingCursor := map[string]int64{}            // execID → last emitted ts millis (coding tail)
 	seenBuildStep := map[string]map[string]bool{} // execID → step|status → emitted (build re-emits all steps each poll)
 	lastDerived := ""
+	kind := first.Kind
 
 	// deriveTask fetches the Task snapshot (a GitHub read) and emits the `task`
 	// frame on change. Returns alive (false ⇒ client gone). A transient read
@@ -169,7 +181,7 @@ func (s *TaskStreamService) run(ctx context.Context, w io.Writer, flush func(), 
 			}
 			snap = fresh
 		}
-		lastDerived = snap.DerivedStatus
+		lastDerived, kind = snap.DerivedStatus, snap.Kind
 		if !bytes.Equal(lastTaskJSON, snap.JSON) {
 			lastTaskJSON = snap.JSON
 			return writeFrame(&streamFrame{Type: "task", Task: snap.JSON})
@@ -178,13 +190,14 @@ func (s *TaskStreamService) run(ctx context.Context, w io.Writer, flush func(), 
 	}
 
 	// deriveExecs fetches the execution rows (DB) + their new lines (proxy/OC)
-	// and emits changed `execution` + new `line` frames. Returns (anyRunning,
-	// alive).
-	deriveExecs := func() (anyRunning bool, alive bool) {
+	// and emits changed `execution` + new `line` frames. Returns what the pass
+	// found and alive (false ⇒ client gone).
+	deriveExecs := func() (pass execPass, alive bool) {
 		execs, err := s.execs.ByIssue(ctx, orgID, projectID, issue)
 		if err != nil {
-			return false, true // keep the stream; retry
+			return execPass{}, true // keep the stream; retry
 		}
+		pass = execPass{read: true, rows: len(execs)}
 		for i := range execs {
 			e := &execs[i]
 			ev := toExecView(e)
@@ -192,31 +205,40 @@ func (s *TaskStreamService) run(ctx context.Context, w io.Writer, flush func(), 
 			if lastExecJSON[e.ID] != string(evJSON) {
 				lastExecJSON[e.ID] = string(evJSON)
 				if !writeFrame(&streamFrame{Type: "execution", Execution: ev}) {
-					return anyRunning, false
+					return pass, false
 				}
 			}
 			if !taskmeta.ExecutionStatus(e.Status).IsTerminal() {
-				anyRunning = true
+				pass.anyRunning = true
 			}
 			if !s.emitLines(ctx, orgID, e, codingCursor, seenBuildStep, writeFrame) {
-				return anyRunning, false
+				return pass, false
 			}
 		}
-		return anyRunning, true
+		return pass, true
+	}
+
+	// ends reports whether this pass closes the stream: the Task settled with
+	// nothing still running, or the Task has no log of its own to wait for.
+	ends := func(pass execPass) bool {
+		if isTaskSettled(lastDerived) && !pass.anyRunning {
+			return true
+		}
+		return pass.read && pass.rows == 0 && !hasOwnLog(kind)
 	}
 
 	// refresh re-derives (optionally the GitHub task snapshot) and closes the
-	// stream with `done` when the Task has settled. Returns false when the loop
-	// must stop — either the Task settled (done written) or the client is gone.
+	// stream with `done` when it ends. Returns false when the loop must stop —
+	// either the stream ended (done written) or the client is gone.
 	refresh := func(withTask bool) bool {
 		if withTask && !deriveTask(nil) {
 			return false
 		}
-		anyRunning, alive := deriveExecs()
+		pass, alive := deriveExecs()
 		if !alive {
 			return false
 		}
-		if isTaskSettled(lastDerived) && !anyRunning {
+		if ends(pass) {
 			writeDone(lastDerived)
 			return false
 		}
@@ -227,11 +249,11 @@ func (s *TaskStreamService) run(ctx context.Context, w io.Writer, flush func(), 
 	if !deriveTask(first) {
 		return
 	}
-	anyRunning, alive := deriveExecs()
+	pass, alive := deriveExecs()
 	if !alive {
 		return
 	}
-	if isTaskSettled(lastDerived) && !anyRunning {
+	if ends(pass) {
 		writeDone(lastDerived)
 		return
 	}
@@ -322,6 +344,19 @@ func toExecView(e *delivery.Execution) *execView {
 		StartedAt: e.StartedAt,
 		EndedAt:   e.EndedAt,
 	}
+}
+
+// hasOwnLog reports whether a Task of this label kind can have a log of its
+// own, which is whether anything still writes execution rows for it. Only a
+// provision gate does: the provisioning service admits one row per gate run,
+// possibly after the stream opened, so a gate with no row yet is waited for.
+// Coding work (development, bug, conflict) is dispatched into a milestone run's
+// cycles, whose log is the run's, and a validation or a kindless ledger issue
+// is worked by nobody here. For those, a Task with no rows will never gain one
+// (rows written before the run model are still read and streamed), so the
+// stream ends at once rather than wait on a log that is never coming.
+func hasOwnLog(kind string) bool {
+	return kind == delivery.KindProvision
 }
 
 // isTaskSettled reports when the stream may send `done` and close: the Task's

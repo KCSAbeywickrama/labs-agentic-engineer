@@ -43,7 +43,7 @@ vi.mock("../../../api/client", () => ({
   },
 }));
 
-import { runEventKey, useRunProgress } from "./useRunProgress";
+import { useRunProgress } from "./useRunProgress";
 
 function frames(...events: unknown[]): string {
   return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
@@ -242,29 +242,7 @@ describe("useRunProgress", () => {
   });
 });
 
-describe("runEventKey", () => {
-  const base = {
-    v: 2 as const,
-    ts: "2026-07-10T09:01:00Z",
-    agentId: "lead",
-    kind: "tool_use" as const,
-    cycleId: "c1",
-    attempt: 1,
-    seq: 7,
-  };
-
-  it("keys an event on its cycle, attempt and sequence", () => {
-    expect(runEventKey(base)).toBe("c1:1:7");
-  });
-
-  it("keeps seq 0 distinct rather than treating it as unsequenced", () => {
-    // v1 read a 0 as "the BFF wrapped raw stdout" and fell back to a timestamp.
-    // v2 requires seq of every event, so 0 is simply an attempt's FIRST event —
-    // and a fallback here would key two attempts' first events the same.
-    expect(runEventKey({ ...base, seq: 0 })).toBe("c1:1:0");
-    expect(runEventKey({ ...base, seq: 0, attempt: 2 })).toBe("c1:2:0");
-  });
-
+describe("reconnect", () => {
   // "Try again" on an unavailable log: attach afresh now rather than waiting
   // for a drop. The stream replays idempotently, so the cycle comes back with
   // whatever recording state the server now reports.

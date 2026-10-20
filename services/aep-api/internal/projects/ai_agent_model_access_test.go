@@ -141,7 +141,7 @@ func TestModelAccessEnvVars_ReturnsTheConnectionsModelVars(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewComponentService(
-				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 				fakeKeyResolver{
 					triplet: organization.SecretRefTriplet{Name: "model-default", KVPath: "user-app-secrets/acme/model", Property: "api-key"},
 					conn:    tc.conn,
@@ -197,7 +197,7 @@ func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
 	for _, governed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "direct", true: "governed"}[governed], func(t *testing.T) {
 			svc := NewComponentService(
-				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 				noKeyResolver{}, &presentSecretRefClient{},
 			).(*componentService)
 			if governed {
@@ -223,7 +223,7 @@ func TestModelAccessEnvVars_UnreadableConnectionFailsTheDeploy(t *testing.T) {
 	for _, governed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "direct", true: "governed"}[governed], func(t *testing.T) {
 			svc := NewComponentService(
-				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 				failingKeyResolver{}, &presentSecretRefClient{},
 			).(*componentService)
 			if governed {
@@ -270,7 +270,7 @@ func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *test
 		spec.DesignRootFile:                  "# Overview\n",
 		"components/hotel-agent/design.json": agentDesignJSON("hotel-agent"),
 	}
-	svc := NewComponentService(&ocmocks.ComponentClientMock{}, nil, modelAccessStore(files), nil, nil,
+	svc := NewComponentService(&ocmocks.ComponentClientMock{}, modelAccessStore(files), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
 			// The vault path's org segment is DELIBERATELY different from the
 			// control-plane namespace here — that difference is the bug.
@@ -366,7 +366,7 @@ func (p *presentSecretRefClient) GetSecretReference(_ context.Context, _ string,
 func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	sr := &presentSecretRefClient{}
 	svc := NewComponentService(
-		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
 			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
 		}},
@@ -423,7 +423,7 @@ func TestModelAccessEnvVars_GovernedCarriesTheConnectionsModelAndFormat(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewComponentService(
-				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 				fakeKeyResolver{
 					triplet: organization.SecretRefTriplet{Name: "model-default", KVPath: "user-app-secrets/acme/model", Property: "api-key"},
 					conn:    tc.conn,
@@ -512,7 +512,7 @@ func TestModelAccessEnvVars_FallsBackToTheOrgKey(t *testing.T) {
 
 func newModelAccessSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *componentService {
 	return NewComponentService(
-		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
 			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
 		}},
@@ -541,7 +541,7 @@ func (s *selectiveSecretRefClient) GetSecretReference(_ context.Context, _ strin
 
 func tracingSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *componentService {
 	svc := NewComponentService(
-		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		&ocmocks.ComponentClientMock{}, modelAccessStore(nil), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
 			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
 		}},

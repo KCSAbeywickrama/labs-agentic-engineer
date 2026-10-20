@@ -63,6 +63,30 @@ export {
   type CrewTask,
 } from "./crew.js";
 
+// The run feed — one run's progress stream folded once, as frames arrive, and
+// what a surface reads off it. Facts (events) append; state (the cycle record,
+// its startup `boot`) replaces; the clock is the surface's. The console and the
+// playground read the same selectors, so one run cannot read two ways.
+export {
+  eventKey,
+  RunFeed,
+  type BootView,
+  type CycleFeed,
+  type FeedCycleView,
+  type FeedFrame,
+  type RunFeedSnapshot,
+  type StampedEvent,
+} from "./feed.js";
+export {
+  attemptEvents,
+  bootSentence,
+  connectionQuietMs,
+  cycleCrew,
+  feedNow,
+  stepRows,
+  type StepRow,
+} from "./select.js";
+
 // One agent's stretch of the axis. The span ALGEBRA stays behind the module —
 // the crew is the only thing that computes lanes, and a surface only draws them.
 export { type LaneSpan } from "./lane.js";

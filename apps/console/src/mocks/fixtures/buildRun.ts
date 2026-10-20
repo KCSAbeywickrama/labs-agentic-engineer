@@ -18,6 +18,7 @@
 
 import { featureScenarios, parseFeatureFile } from "@aep/ui-acceptance-view";
 import type { components } from "../../generated/aep-api";
+import { codingSession, MODEL, type EventBody, type Session } from "./codingSession";
 
 // One build's run, scripted: what today's platform would say about it, frame
 // by frame, compressed into about 25 seconds. A run is scheduled, not
@@ -27,10 +28,12 @@ import type { components } from "../../generated/aep-api";
 // the middle of it and reattaches.
 //
 // The shape follows the old console's fixtures (classic-console tag, src/mocks/fixtures/
-// run-progress.ts and validation.ts): a coding cycle whose lead agent reads
-// the spec, writes its plan (`work_item`, source plan) and works it entry by
-// entry; then a validation cycle that judges each criterion and commits
-// report.json (schemaVersion 2) against the acceptance files the design wrote.
+// run-progress.ts and validation.ts): a coding cycle (codingSession.ts: the
+// runner's startup, then a lead that plans, builds the foundation and fans the
+// features out to agents); then a validation cycle that judges each criterion
+// and commits report.json (schemaVersion 2) against the acceptance files the
+// design wrote. Every frame of the stream is stamped with the platform's
+// clock by the handler as it sends it.
 
 type RunProgressEvent = components["schemas"]["RunProgressEvent"];
 type RunEvent = components["schemas"]["RunEvent"];
@@ -52,6 +55,8 @@ export interface RunInput {
   /** The story whose scenarios fail validation; null when every one passes. */
   failing: string | null;
   startedAt: number;
+  /** How long the stalled call is held (codingSession.ts); absent or 0 for none. */
+  stallMs?: number;
 }
 
 interface TimedFrame {
@@ -64,6 +69,9 @@ interface CycleSpan {
   kind: RunCycleView["kind"];
   created: number;
   ended: number;
+  /** The runner's startup states and when its first event ends them; none for a cycle scripted without one. */
+  boot?: Session["boot"];
+  spoke?: number;
 }
 
 export interface RunScript {
@@ -75,76 +83,8 @@ export interface RunScript {
   end: number;
 }
 
-type EventBody = Omit<RunEvent, "v" | "seq" | "ts" | "agentId"> & { agentId?: string };
-
-const MODEL = "claude-opus-4";
 const PLANNING_MS = 800;
-const PLAN_MS = 2_000;
-const ENTRY_MS = 2_500;
-const FIX_ENTRY_MS = 2_500;
 const SCENARIO_MS = 550;
-
-function slug(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function pascal(text: string): string {
-  return text.replace(/(^|[^a-zA-Z0-9]+)([a-zA-Z0-9])/g, (_, __, c: string) => c.toUpperCase());
-}
-
-interface Entry {
-  id: string;
-  title: string;
-  work: EventBody[];
-}
-
-const write = (path: string): EventBody => ({ kind: "tool_use", tool: "Write", summary: path });
-const edit = (path: string): EventBody => ({ kind: "tool_use", tool: "Edit", summary: path });
-const test = (command: string, passed: number): EventBody[] => [
-  { kind: "tool_use", tool: "Bash", summary: command, toolUseId: command },
-  { kind: "tool_result", tool: "Bash", ok: true, exitCode: 0, durationMs: 6_000 + passed * 200, summary: `${passed} passed`, toolUseId: command },
-];
-
-function buildEntries(features: RunInput["features"]): Entry[] {
-  const foundation: Entry = {
-    id: "foundation",
-    title: "Foundation · API",
-    work: [
-      write("api/src/app.ts"),
-      write("api/src/auth/sso.ts"),
-      write("api/src/audit/log.ts"),
-      write("api/src/jobs/retention.ts"),
-      ...test("pnpm --filter api test", 18),
-    ],
-  };
-  const perFeature = features.flatMap((f): Entry[] => {
-    const s = slug(f.name);
-    return [
-      {
-        id: `${f.id}-api`,
-        title: `${f.id} ${f.name} · API`,
-        work: [write(`api/src/${s}/routes.ts`), write(`api/src/${s}/store.ts`), write(`api/src/${s}/rules.ts`), ...test(`pnpm --filter api test -- ${s}`, 21)],
-      },
-      {
-        id: `${f.id}-web`,
-        title: `${f.id} ${f.name} · Web app`,
-        work: [write(`web/src/pages/${pascal(f.name)}.tsx`), write(`web/src/api/${s}.ts`), ...test(`pnpm --filter web test -- ${s}`, 9)],
-      },
-    ];
-  });
-  return [foundation, ...perFeature];
-}
-
-function fixEntries(features: RunInput["features"], stories: string[]): Entry[] {
-  const ids = new Set(stories.map((s) => s.split(".")[0]));
-  return features
-    .filter((f) => ids.has(f.id))
-    .map((f) => ({
-      id: `${f.id}-api-fix`,
-      title: `${f.id} ${f.name} · API fix`,
-      work: [edit(`api/src/${slug(f.name)}/queue.ts`), write(`api/src/${slug(f.name)}/queue.test.ts`), ...test(`pnpm --filter api test -- ${slug(f.name)}`, 22)],
-    }));
-}
 
 interface Scenario {
   feature: string;
@@ -232,68 +172,45 @@ export function runScript(input: RunInput): RunScript {
   const frames: TimedFrame[] = [];
   const codingId = `${input.runId}-c1`;
   const validationId = `${input.runId}-c2`;
-  let seq = 0;
-  let cycleId = codingId;
-  const push = (at: number, body: EventBody) => {
+  const push = (at: number, cycleId: string, body: EventBody) => {
     const { agentId = "lead", ...rest } = body;
-    const event = { v: 2, seq: seq++, ts: new Date(input.startedAt + at).toISOString(), agentId, ...rest } as RunEvent;
+    // Numbered once the frames are in time order, below.
+    const event = { v: 2, seq: 0, ts: new Date(input.startedAt + at).toISOString(), agentId, ...rest } as RunEvent;
     frames.push({ at, frame: { type: "event", cycleId, attempt: 1, event } });
   };
-  const spread = (start: number, span: number, bodies: EventBody[]) =>
-    bodies.forEach((b, i) => push(start + Math.round(((i + 1) * span) / (bodies.length + 1)), b));
+  const record = (span: CycleSpan, at: number) => frames.push({ at, frame: { type: "cycle", cycle: cycleRecord(input, span, at) } });
 
-  // The coding cycle: the plan, then its entries one after another.
-  const entries = input.repair ? fixEntries(input.features, input.repair.stories) : buildEntries(input.features);
-  const codingStart = PLANNING_MS;
-  frames.push({ at: codingStart, frame: { type: "cycle", cycle: cycleRecord(input, { id: codingId, kind: input.repair ? "fix" : "coding", created: codingStart, ended: Infinity }, 0) } });
-  const reads: EventBody[] = input.repair
-    ? [
-        { kind: "tool_use", tool: "Read", summary: "tests/acceptance/report.json" },
-        ...input.criteria.map((c): EventBody => ({ kind: "tool_use", tool: "Read", summary: c.path })),
-      ]
-    : [
-        { kind: "tool_use", tool: "Read", summary: "specs/requirements/prd.md" },
-        { kind: "tool_use", tool: "Read", summary: "specs/requirements/product-wide.md" },
-        ...input.features.map((f): EventBody => ({ kind: "tool_use", tool: "Read", summary: `specs/requirements/features/${f.id}-${slug(f.name)}.md` })),
-        { kind: "tool_use", tool: "Read", summary: "specs/design/architecture.cell" },
-      ];
-  spread(codingStart, PLAN_MS * 0.7, [
-    { kind: "run_started", taskKind: "implementation", runtime: "claude-code", model: MODEL },
-    ...reads,
-    { kind: "agent_progress", phrase: `Planning ${input.version}` },
-  ]);
-  // The plan is written in one go, as the agent's task list is.
-  for (const e of entries) {
-    push(codingStart + PLAN_MS * 0.75, { kind: "work_item", source: "plan", itemId: e.id, title: e.title, itemStatus: "pending" });
-  }
-  const entryMs = input.repair ? FIX_ENTRY_MS : ENTRY_MS;
-  let at = codingStart + PLAN_MS;
-  for (const entry of entries) {
-    push(at, { kind: "work_item", source: "plan", itemId: entry.id, title: entry.title, itemStatus: "in_progress" });
-    spread(at, entryMs - 100, entry.work);
-    push(at + entryMs - 50, { kind: "work_item", source: "plan", itemId: entry.id, title: entry.title, itemStatus: "completed" });
-    at += entryMs;
-  }
-  push(at + 100, { kind: "git_commit", sha: "4f2a9c1e", files: entries.length * 3 });
-  push(at + 200, { kind: "git_push", branch: `aep/${input.version}` });
-  const coding: CycleSpan = { id: codingId, kind: input.repair ? "fix" : "coding", created: codingStart, ended: at + 400 };
-  frames.push({ at: coding.ended, frame: { type: "cycle", cycle: cycleRecord(input, coding, coding.ended) } });
+  // The coding cycle. Its record is re-sent at each startup state, when the
+  // runner first speaks (which ends the startup) and when it ends: the cycle
+  // frame is state, sent whole whenever it changes.
+  const session = codingSession(input, PLANNING_MS);
+  const coding: CycleSpan = {
+    id: codingId,
+    kind: input.repair ? "fix" : "coding",
+    created: PLANNING_MS,
+    ended: session.ended,
+    boot: session.boot,
+    spoke: session.spoke,
+  };
+  for (const b of session.boot) record(coding, b.at);
+  record(coding, session.spoke);
+  for (const e of session.events) push(e.at, codingId, e.body);
+  record(coding, coding.ended);
 
   // The validation cycle: every criterion planned, then judged one by one.
   const scenarios = scenariosOf(input.criteria);
   const vStart = coding.ended + 300;
   const validation: CycleSpan = { id: validationId, kind: "validation", created: vStart, ended: vStart + 600 + scenarios.length * SCENARIO_MS + 300 };
-  frames.push({ at: vStart, frame: { type: "cycle", cycle: cycleRecord(input, { ...validation, ended: Infinity }, vStart) } });
-  cycleId = validationId;
-  push(vStart + 100, { kind: "run_started", taskKind: "validation", runtime: "claude-code", model: MODEL });
-  scenarios.forEach((_, i) => push(vStart + 300, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: "planned" }));
+  record(validation, vStart);
+  push(vStart + 100, validationId, { kind: "run_started", taskKind: "validation", runtime: "claude-code", model: MODEL });
+  scenarios.forEach((_, i) => push(vStart + 300, validationId, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: "planned" }));
   scenarios.forEach((s, i) => {
     const t = vStart + 600 + i * SCENARIO_MS;
     const fails = s.story !== null && s.story === input.failing;
     const id = `v${i}`;
-    push(t, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: "running" });
-    push(t + 100, { kind: "tool_use", tool: "Bash", summary: `validate @story-${s.story ?? "?"} ${s.name}`, toolUseId: id });
-    push(t + SCENARIO_MS - 100, {
+    push(t, validationId, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: "running" });
+    push(t + 100, validationId, { kind: "tool_use", tool: "Bash", summary: `validate @story-${s.story ?? "?"} ${s.name}`, toolUseId: id });
+    push(t + SCENARIO_MS - 100, validationId, {
       kind: "tool_result",
       tool: "Bash",
       ok: !fails,
@@ -302,13 +219,23 @@ export function runScript(input: RunInput): RunScript {
       ...(fails ? { error: "expected step failed" } : {}),
       toolUseId: id,
     });
-    push(t + SCENARIO_MS - 50, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: fails ? "fail" : "pass" });
+    push(t + SCENARIO_MS - 50, validationId, { kind: "work_item", source: "criterion", itemId: `AC-${i + 1}`, itemStatus: fails ? "fail" : "pass" });
   });
-  push(validation.ended - 200, { kind: "git_commit", sha: "9b1d07aa", files: 1 });
-  frames.push({ at: validation.ended, frame: { type: "cycle", cycle: cycleRecord(input, validation, validation.ended) } });
+  push(validation.ended - 200, validationId, { kind: "git_commit", sha: "9b1d07aa", files: 1 });
+  record(validation, validation.ended);
   const end = validation.ended + 200;
   frames.push({ at: end, frame: { type: "done", state: "succeeded" } });
+
+  // Time order (a stable sort keeps same-instant frames as scripted), then each
+  // cycle's events numbered from 0: `seq` is monotonic within an attempt.
   frames.sort((a, b) => a.at - b.at);
+  const seqs = new Map<string, number>();
+  for (const { frame } of frames) {
+    if (frame.type !== "event" || !frame.event || !frame.cycleId) continue;
+    const seq = seqs.get(frame.cycleId) ?? 0;
+    frame.event.seq = seq;
+    seqs.set(frame.cycleId, seq + 1);
+  }
   return { input, frames, coding, validation, end };
 }
 
@@ -316,9 +243,17 @@ function iso(input: RunInput, at: number): string {
   return new Date(input.startedAt + at).toISOString();
 }
 
+/** Where the cycle's runner is in starting up at `now`; undefined once it has spoken. */
+function bootAt(input: RunInput, span: CycleSpan, now: number): RunCycleView["boot"] {
+  if (span.spoke === undefined || now >= span.spoke) return undefined;
+  const stage = span.boot?.filter((b) => b.at <= now).at(-1);
+  return stage ? { attempt: 1, code: stage.code, since: iso(input, stage.at) } : undefined;
+}
+
 function cycleRecord(input: RunInput, span: CycleSpan, now: number): RunCycleView {
   const ended = now >= span.ended;
   const verdict = input.failing ? "failed" : "passed";
+  const boot = ended ? undefined : bootAt(input, span, now);
   return {
     id: span.id,
     kind: span.kind,
@@ -326,6 +261,7 @@ function cycleRecord(input: RunInput, span: CycleSpan, now: number): RunCycleVie
     createdAt: iso(input, span.created),
     endedAt: ended ? iso(input, span.ended) : null,
     recording: ended ? "kept" : "live",
+    ...(boot ? { boot } : {}),
     ...(ended ? { mergeSha: `${span.id}-merge`, prNumber: span.kind === "validation" ? 12 : 11 } : {}),
     ...(ended && span.kind === "validation" ? { validationVerdict: verdict } : {}),
   };

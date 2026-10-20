@@ -23,33 +23,9 @@ package projects_test
 
 import (
 	"context"
-	"time"
 
 	"github.com/wso2/aep/aep-api/internal/projects"
-
-	"github.com/wso2/aep/aep-api/internal/gen"
-
-	"github.com/wso2/aep/aep-api/internal/clients/observability"
 )
-
-// --- observability.Client -----------------------------------------------------
-
-type extObservClient struct {
-	GetBuildLogsFunc func(ctx context.Context, orgName, projectName, componentName, buildName string, since time.Time) (*gen.BuildLogs, error)
-}
-
-var _ observability.Client = (*extObservClient)(nil)
-
-func (s *extObservClient) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string, since time.Time) (*gen.BuildLogs, error) {
-	if s.GetBuildLogsFunc == nil {
-		panic("extObservClient: GetBuildLogs not set")
-	}
-	return s.GetBuildLogsFunc(ctx, orgName, projectName, componentName, buildName, since)
-}
-
-func (s *extObservClient) QueryCycleLogs(context.Context, observability.CycleLogQuery) ([]observability.LogLine, observability.CycleLogStats, error) {
-	panic("extObservClient: QueryCycleLogs not expected")
-}
 
 // --- projects.ConfigRepository --------------------------------------------
 

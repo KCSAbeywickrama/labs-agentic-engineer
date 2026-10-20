@@ -215,7 +215,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (through the observer below) history for as long as the component lives.
 	runtimeClient := openchoreo.NewRuntimeClient(ocConfig)
 
-	// Observability client (optional — build logs disabled when URL not set)
+	// Observability client (optional — a finished coding cycle's log cannot be
+	// read back when OBSERVER_URL is unset). Build logs never use it: they are
+	// read live from OpenChoreo for as long as OpenChoreo keeps the build.
 	var observClient observability.Client
 	if cfg.Observability.BaseURL != "" {
 		observClient = observability.NewClient(cfg.Observability.BaseURL)
@@ -421,7 +423,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// modelConnections already satisfies projects.ModelKeyResolver
 	// structurally (KeyPathRef has the exact same signature) — no adapter
 	// needed, unlike buildStager above.
-	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, modelConnections, modelAccessSecretRefClient)
+	componentService := projects.NewComponentService(componentClient, artifactStore, repoService, buildStager, modelConnections, modelAccessSecretRefClient)
 	// deploymentService is built below, so the converger is attached after
 	// construction — an env-var edit pushes onto the live binding through the one
 	// writer rather than patching a field of it.
@@ -1642,7 +1644,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 // Assemble, and one assembly test enumerates the whole degraded-mode matrix off
 // Degradations() — no capability/Profile abstraction.
 type Degradation struct {
-	Capability string // stable slug (e.g. "build-logs", "coding-dispatch-oc")
+	Capability string // stable slug (e.g. "cycle-log-archive", "coding-dispatch-oc")
 	Reason     string // which config is missing and what it turns off
 }
 
@@ -1659,7 +1661,6 @@ func computeDegradations(cfg config.Config, secretsDelivery bool) []Degradation 
 		off("m2m-service-auth", "SERVICE_AUTH_TOKEN_URL / SERVICE_AUTH_CLIENT_ID not set — OC calls carry no M2M token")
 	}
 	if cfg.Observability.BaseURL == "" {
-		off("build-logs", "OBSERVABILITY_API_URL not set — build logs disabled")
 		off("cycle-log-archive", "OBSERVER_URL not set — a finished cycle's agent log cannot be read back")
 	}
 	if !secretsDelivery {

@@ -54,6 +54,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,7 +65,6 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
-	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/edge"
@@ -81,7 +81,6 @@ const compProjectPrefix = "/api/v1/projects/web/components"
 
 type compFakes struct {
 	oc         *ocmocks.ComponentClientMock // component OC client (defaulted when nil)
-	observ     observability.Client         // nil ⇒ build-logs takes the not-configured 503 path
 	store      *spec.ArtifactStore          // for the openapi read; nil is fine unless hit
 	configRepo projects.ConfigRepository
 }
@@ -96,14 +95,14 @@ func newHarness(t *testing.T, f compFakes) *componenttest.Harness {
 		f.oc = &ocmocks.ComponentClientMock{}
 	}
 	if f.oc.GetWorkflowRunFunc == nil {
-		// Build-logs reads the run's terminal state before its log, so every
-		// build-logs path touches this. Default to a terminal run; a test that
-		// cares about the live case programs its own.
+		// Build-logs reads the run before its log — its state and whose it is —
+		// so every build-logs path touches this. Default to a terminal run of the
+		// harness's own component; a test that cares programs its own.
 		f.oc.GetWorkflowRunFunc = func(_ context.Context, _, runName string) (*gen.WorkflowRun, error) {
-			return &gen.WorkflowRun{Name: runName, Completed: true}, nil
+			return &gen.WorkflowRun{Name: runName, ProjectName: "web", ComponentName: "hello-api", Completed: true}, nil
 		}
 	}
-	compSvc := projects.NewComponentService(f.oc, f.observ, f.store, nil, nil, nil, nil)
+	compSvc := projects.NewComponentService(f.oc, f.store, nil, nil, nil, nil)
 	var cfgSvc projects.ConfigService
 	if f.configRepo != nil {
 		// The env-var mirror onto OC is unit-tested; disable it here (nil).
@@ -392,50 +391,96 @@ func TestComponentComponent_TriggerBuild_HappyAndError(t *testing.T) {
 
 // --- build logs ----------------------------------------------------------------
 
-func TestComponentComponent_BuildLogs_HarvestedError500(t *testing.T) {
+func TestComponentComponent_BuildLogs_ReadsTheLiveLog(t *testing.T) {
 	t.Parallel()
-	// Reproduces the harvested golden (get_component_build_logs.json): the
-	// observability client is configured but its fetch fails → the service wraps
-	// the error → mapComponentError's default 500 with detail "failed to get build logs".
-	observ := &extObservClient{GetBuildLogsFunc: func(context.Context, string, string, string, string, time.Time) (*gen.BuildLogs, error) {
-		return nil, errors.New("observability service 500")
-	}}
-	h := newHarness(t, compFakes{observ: observ})
+	oc := &ocmocks.ComponentClientMock{
+		GetWorkflowRunLogsFunc: func(_ context.Context, org, run string, _ time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
+			if org != "acme" || run != "run-1" {
+				t.Errorf("live log read for %s/%s", org, run)
+			}
+			return []openchoreo.WorkflowRunLogLine{
+				{Timestamp: time.Date(2026, 10, 12, 16, 47, 20, 835000001, time.UTC), Log: ">> Branch: main"},
+			}, nil
+		},
+	}
+	h := newHarness(t, compFakes{oc: oc})
 	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs")
-	if resp.Code != 500 {
-		t.Fatalf("build logs error: want 500, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 200 {
+		t.Fatalf("want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	// The golden is the harvested RFC-9457 problem; on the contract-first edge
-	// its status is the response code and its detail is the envelope message
-	// (title disappeared with the dialect).
-	got := componenttest.DecodeEnvelope(t, resp.Body.String())
-	// The harvested golden is an RFC-9457 problem — decode just the two
-	// fields the dialect mapping preserves (status → code, detail → message).
-	var golden struct {
-		Status int    `json:"status"`
-		Detail string `json:"detail"`
+	var got gen.BuildLogs
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if err := json.Unmarshal(readGolden(t, "get_component_build_logs.json"), &golden); err != nil {
-		t.Fatalf("decode golden: %v", err)
-	}
-	if resp.Code != golden.Status || got.Message != golden.Detail {
-		t.Fatalf("build-logs 500 drifted from golden:\n got code=%d %+v\nwant %+v", resp.Code, got, golden)
-	}
-	if strings.Contains(resp.Body.String(), "observability service 500") {
-		t.Fatalf("500 body leaks internals: %s", resp.Body.String())
+	if !got.Complete || len(got.Logs) != 1 || got.Logs[0].Log != ">> Branch: main" || got.NextCursor != "2026-10-12T16:47:20.835000001Z" {
+		t.Fatalf("body = %+v", got)
 	}
 }
 
-func TestComponentComponent_BuildLogs_NotConfigured503(t *testing.T) {
+// OpenChoreo deletes a build at its workflow's TTL; that is the product's
+// retention, so the answer is a typed 410, not a failure.
+func TestComponentComponent_BuildLogs_ExpiredBuildIs410(t *testing.T) {
 	t.Parallel()
-	// nil observability client ⇒ ErrLogsUnavailable ⇒ the handler's 503 branch.
-	h := newHarness(t, compFakes{observ: nil})
+	oc := &ocmocks.ComponentClientMock{
+		GetWorkflowRunFunc: func(context.Context, string, string) (*gen.WorkflowRun, error) {
+			return nil, fmt.Errorf("%w: WorkflowRun not found", openchoreo.ErrNotFound)
+		},
+	}
+	h := newHarness(t, compFakes{oc: oc})
+	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs")
+	if resp.Code != 410 {
+		t.Fatalf("want 410, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Code != "build_expired" {
+		t.Fatalf("410 code: got %q", e.Code)
+	}
+}
+
+// aep-api reads OpenChoreo as itself, so it is the only check that the build
+// is the path's component's.
+func TestComponentComponent_BuildLogs_AnotherComponentsBuildIs404(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ComponentClientMock{
+		GetWorkflowRunFunc: func(_ context.Context, _, runName string) (*gen.WorkflowRun, error) {
+			return &gen.WorkflowRun{Name: runName, ProjectName: "other", ComponentName: "hello-api", Completed: true}, nil
+		},
+	}
+	h := newHarness(t, compFakes{oc: oc})
+	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs")
+	if resp.Code != 404 {
+		t.Fatalf("want 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(oc.GetWorkflowRunLogsCalls()) != 0 {
+		t.Fatal("the log was read before the build was checked")
+	}
+}
+
+func TestComponentComponent_BuildLogs_SourceFailureIs503(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ComponentClientMock{
+		GetWorkflowRunLogsFunc: func(context.Context, string, string, time.Time) ([]openchoreo.WorkflowRunLogLine, error) {
+			return nil, fmt.Errorf("%w: gateway down", openchoreo.ErrInternalServerError)
+		},
+	}
+	h := newHarness(t, compFakes{oc: oc})
 	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs")
 	if resp.Code != 503 {
-		t.Fatalf("build logs not-configured: want 503, got %d body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("want 503, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Message != "build logs service not available" {
-		t.Fatalf("503 message: got %q", e.Message)
+	if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Code != "log_source_unavailable" {
+		t.Fatalf("503 code: got %q", e.Code)
+	}
+	if strings.Contains(resp.Body.String(), "gateway down") {
+		t.Fatalf("503 body leaks internals: %s", resp.Body.String())
+	}
+}
+
+func TestComponentComponent_BuildLogs_ForeignCursorIs400(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, compFakes{})
+	resp := h.AsOrg("acme").Get(compProjectPrefix + "/hello-api/builds/run-1/logs?cursor=1754476800000")
+	if resp.Code != 400 {
+		t.Fatalf("want 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

@@ -17,11 +17,14 @@
 package edge
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +72,38 @@ func TestWriteResponseError_ClassifiesAEStudio(t *testing.T) {
 				t.Fatalf("got %d %s Retry-After=%q, want %d %s %q", status, code, ra, tc.status, tc.code, tc.retryAfter)
 			}
 		})
+	}
+}
+
+// A typed 5xx hides its cause from the caller, so the log is the only place it
+// is seen. Without this line a build-log read that failed at OpenChoreo left
+// nothing behind but the console's "failed to get build logs".
+//
+// Not parallel: it swaps the process logger.
+func TestWriteResponseError_LogsTheCauseOfATyped5xx(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	cause := errors.New("observability: unexpected status 403")
+	status, _, _ := writeFor(t, apierr.WithCause(apierr.ServiceUnavailable("the build log could not be read"), cause))
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", status)
+	}
+	if !strings.Contains(buf.String(), "unexpected status 403") {
+		t.Fatalf("the cause was not logged: %q", buf.String())
+	}
+
+	buf.Reset()
+	writeFor(t, apierr.Internal("internal error"))
+	if !strings.Contains(buf.String(), "status=500") {
+		t.Fatalf("a typed 5xx with no cause must still be logged: %q", buf.String())
+	}
+
+	buf.Reset()
+	writeFor(t, apierr.WithCause(apierr.NotFound("no such build"), cause))
+	if buf.Len() != 0 {
+		t.Fatalf("a 4xx verdict must not log as a server error: %q", buf.String())
 	}
 }

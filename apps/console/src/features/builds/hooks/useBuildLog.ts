@@ -16,62 +16,67 @@
  * under the License.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client } from "../../../api/client";
-import { apiErrorMessage } from "../../../api/errors";
+import { apiErrorCode } from "../../../api/errors";
 import type { components } from "../../../generated/aep-api";
 
-// One component build's log, read through the server's cursor, copied from
-// the old console (features/builds/hooks/useBuildLog.ts). A finished build
-// answers complete on the first read; a running one answers incomplete, and
-// each later read starts from the cursor the last one returned. Read only
-// while its row is open, so a page of closed logs costs nothing.
+// One component build's log, read live through the server's cursor. A finished
+// build answers complete on the first read; a running one answers incomplete,
+// and each later read starts from the cursor the last one returned. A build the
+// platform no longer keeps answers `build_expired`, and says so for good; any
+// other failure stops the tail and can be retried from where it stopped. Read
+// only while its row is open, so a page of closed logs costs nothing.
 
 type BuildLogEntry = components["schemas"]["BuildLogEntry"];
 
 const TAIL_POLL_MS = 2_000;
 
-export interface BuildLogState {
-  entries: BuildLogEntry[];
-  /** The build is over and the log will not grow. */
-  complete: boolean;
-  loading: boolean;
-  error: string | undefined;
-}
+export type BuildLogState =
+  | { phase: "loading" }
+  /** The build is no longer kept, so there is no log to read. */
+  | { phase: "expired" }
+  /** A read failed; `entries` are the lines read before it. */
+  | { phase: "failed"; entries: BuildLogEntry[] }
+  /** `complete`: the build is over and the log will not grow. */
+  | { phase: "read"; entries: BuildLogEntry[]; complete: boolean };
 
-export function useBuildLog(projectName: string, componentName: string, buildName: string): BuildLogState {
-  const [state, setState] = useState<BuildLogState>({ entries: [], complete: false, loading: true, error: undefined });
-  const cursor = useRef<number | undefined>(undefined);
+export function useBuildLog(projectName: string, componentName: string, buildName: string): { log: BuildLogState; retry: () => void } {
+  const [log, setLog] = useState<BuildLogState>({ phase: "loading" });
+  const resume = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    cursor.current = undefined;
-    setState({ entries: [], complete: false, loading: true, error: undefined });
+    let cursor: string | undefined;
+    let entries: BuildLogEntry[] = [];
+    setLog({ phase: "loading" });
 
     const read = async () => {
       const { data, error } = await client.GET("/projects/{projectName}/components/{componentName}/builds/{buildName}/logs", {
         params: {
           path: { projectName, componentName, buildName },
-          query: cursor.current ? { since: cursor.current } : {},
+          query: cursor ? { cursor } : {},
         },
       });
       if (cancelled) return;
-      if (error || data === undefined) {
-        // A failing read keeps failing: stop rather than poll it.
-        setState((prev) => ({ ...prev, loading: false, error: apiErrorMessage(error, "Failed to load the build log") }));
+      if (apiErrorCode(error) === "build_expired") {
+        setLog({ phase: "expired" });
         return;
       }
-      if (data.nextCursor) cursor.current = data.nextCursor;
-      setState((prev) => ({
-        entries: [...prev.entries, ...(data.logs ?? [])],
-        complete: data.complete,
-        loading: false,
-        error: undefined,
-      }));
+      if (error || data === undefined) {
+        setLog({ phase: "failed", entries });
+        return;
+      }
+      if (data.nextCursor) cursor = data.nextCursor;
+      entries = [...entries, ...(data.logs ?? [])];
+      setLog({ phase: "read", entries, complete: data.complete });
       if (!data.complete) timer = setTimeout(() => void read(), TAIL_POLL_MS);
     };
 
+    resume.current = () => {
+      if (!cancelled) void read();
+    };
     void read();
     return () => {
       cancelled = true;
@@ -79,5 +84,6 @@ export function useBuildLog(projectName: string, componentName: string, buildNam
     };
   }, [projectName, componentName, buildName]);
 
-  return state;
+  const retry = useCallback(() => resume.current(), []);
+  return { log, retry };
 }
