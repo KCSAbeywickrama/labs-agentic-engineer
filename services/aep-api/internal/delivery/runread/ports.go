@@ -19,6 +19,7 @@ package runread
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -149,6 +150,11 @@ type ValidationSnapshotReader interface {
 // not taken: see CycleBuilds.
 type ProjectBuildLister interface {
 	ListProjectBuildRuns(ctx context.Context, orgID, projectID string) ([]delivery.MergeBuild, error)
+	// BuildRetention is how long OpenChoreo keeps a build after it completes —
+	// the builder workflow's ttlAfterCompletion; zero when it keeps them. It is
+	// what tells a merge whose builds have EXPIRED from one whose builds have
+	// not started: both list no runs.
+	BuildRetention(ctx context.Context) (time.Duration, error)
 }
 
 // CycleLogReader is one cycle's agent activity. Satisfied by

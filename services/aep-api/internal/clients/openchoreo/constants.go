@@ -26,6 +26,10 @@ const (
 	AnnotationKeyValidation  = "aep.wso2.com/validation"
 )
 
+// BuilderClusterWorkflow is the ClusterWorkflow every AEP component builds
+// with. Its ttlAfterCompletion is how long a build — and its log — is kept.
+const BuilderClusterWorkflow = "dockerfile-builder"
+
 // LabelKeys is a typed-string alias for the `openchoreo.dev/*` label set we
 // stamp on CRs. Matches agent-manager's pattern — typed string lets the
 // label catalog stay a single source of truth and prevents stringly-typed

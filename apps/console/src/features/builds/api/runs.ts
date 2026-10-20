@@ -145,7 +145,9 @@ const CYCLE_BUILDS_POLL_MS = 10_000;
 /**
  * The component builds one cycle's merge fanned out to. Read only for a cycle
  * that merged: before the merge there is nothing to have built. An empty list
- * on a merged cycle means the fan-out has not reached the cluster yet.
+ * on a merged cycle means the fan-out has not reached the cluster yet, unless
+ * `expired` says OpenChoreo has already deleted the merge's builds: it keeps a
+ * build only for its builder workflow's TTL.
  */
 export function useCycleBuilds(projectName: string, tag: string, cycleId: string | undefined) {
   return useQuery({
@@ -156,12 +158,14 @@ export function useCycleBuilds(projectName: string, tag: string, cycleId: string
         params: { path: { projectName, tag, cycleId: cycleId ?? "" } },
       });
       if (error || data === undefined) throw new Error(apiErrorMessage(error, "Failed to load the component builds"));
-      return data.items ?? [];
+      return { items: data.items ?? [], expired: data.expired ?? false };
     },
     refetchInterval: (query) => {
       const builds = query.state.data;
-      if (!builds || builds.length === 0) return CYCLE_BUILDS_POLL_MS;
-      return builds.every((b) => b.completed) ? false : CYCLE_BUILDS_POLL_MS;
+      if (!builds) return CYCLE_BUILDS_POLL_MS;
+      if (builds.expired) return false;
+      if (builds.items.length === 0) return CYCLE_BUILDS_POLL_MS;
+      return builds.items.every((b) => b.completed) ? false : CYCLE_BUILDS_POLL_MS;
     },
   });
 }

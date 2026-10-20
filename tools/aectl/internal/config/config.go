@@ -101,8 +101,8 @@ var keyRegistry = map[string]configKeyMeta{
 	"tryit.public_url":   {required: false, kind: kindURL},
 	"oc.api_url":         {required: true, kind: kindURL},
 	// In-cluster URL of the OpenChoreo Observer. Empty leaves the chart's own
-	// default (see values.yaml's observer.baseURL) — build-log reading and
-	// coding-cycle log archiving degrade gracefully when neither is reachable.
+	// default (see values.yaml's observer.baseURL) — coding-cycle log
+	// archiving degrades gracefully when neither is reachable.
 	"oc.observability_api_url": {required: false, kind: kindURL},
 	"oc.system_namespace":      {required: true, kind: kindString},
 	// The k8s namespace of the one org AEP ships with — AEP is single-org

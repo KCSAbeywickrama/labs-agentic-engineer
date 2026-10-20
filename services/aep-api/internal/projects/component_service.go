@@ -18,13 +18,13 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
-	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
@@ -75,11 +75,13 @@ type ComponentService interface {
 	// Build (workflow runs)
 	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*gen.WorkflowRun, error)
 	ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error)
-	// GetBuildLogs reads one build's log from `sinceMillis` onward (0 = from the
-	// beginning). The response says whether it is COMPLETE — the build is
-	// terminal and there will never be more — so a caller tailing a live build
-	// knows when to stop asking.
-	GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string, sinceMillis int64) (*gen.BuildLogs, error)
+	// GetBuildLogs reads one build's log live from OpenChoreo, after `cursor`
+	// ("" = from the beginning). The response says whether it is COMPLETE —
+	// the build is terminal and there will never be more — so a caller tailing
+	// a live build knows when to stop asking. ErrBuildExpired once OpenChoreo
+	// no longer keeps the build; ErrBuildNotInComponent when the build is not
+	// the named component's.
+	GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName, cursor string) (*gen.BuildLogs, error)
 }
 
 // BuildSecretStager returns the secretRef the build WorkflowRun consumes: the
@@ -191,7 +193,6 @@ const (
 
 type componentService struct {
 	client        openchoreo.ComponentClient
-	observClient  observability.Client
 	artifactStore *spec.ArtifactStore
 	// repoSvc + buildCredSvc are used by TriggerBuild to resolve the org's
 	// github-pat SecretReference the build references. Optional — nil means
@@ -242,10 +243,9 @@ func (s *componentService) SetAutoRCAEnabled(enabled bool) {
 // flows; production wiring passes all four so TriggerBuild can name the org's
 // github-pat SecretReference and ModelAccessEnvVars can compose MODEL_*
 // for ai-agent components.
-func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver ModelKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
+func NewComponentService(client openchoreo.ComponentClient, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver ModelKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
 	return &componentService{
 		client:           client,
-		observClient:     observClient,
 		artifactStore:    artifactStore,
 		repoSvc:          repoSvc,
 		buildCredSvc:     buildCredSvc,
@@ -379,7 +379,7 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 		AutoDeploy:  desiredSpec.AutoDeploy,
 		Workflow: &openchoreo.ComponentWorkflowSpec{
 			Kind: "ClusterWorkflow",
-			Name: "dockerfile-builder",
+			Name: openchoreo.BuilderClusterWorkflow,
 			Parameters: &openchoreo.ComponentWorkflowParameters{
 				Repository: &openchoreo.WorkflowRepository{
 					URL:       repo.RepoURL,
@@ -512,94 +512,88 @@ func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName,
 	return list, nil
 }
 
-// GetBuildLogs reads one build's log from a cursor, and reports whether that
-// read is the whole of it.
+// logCursorOverlap widens each tail read past the cursor. The cursor is the
+// node's clock and sinceSeconds is measured on it too, but the gap between them
+// is computed on ours; the overlap absorbs skew and whole-second rounding, and
+// the cursor filter drops what it re-reads.
+const logCursorOverlap = 30 * time.Second
+
+// GetBuildLogs reads one build's log live from OpenChoreo, after a cursor, and
+// reports whether that read is the whole of it.
 //
-// The build's terminal state is read BEFORE the log, deliberately. A build that
-// finishes between the two reads is then reported as still running, and the
-// caller polls once more and gets the tail — whereas reading the status last
-// could declare a log complete while the lines written in between were never
-// returned. One wasted poll is the right side of that trade.
-func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string, sinceMillis int64) (*gen.BuildLogs, error) {
-	if s.observClient == nil {
-		return nil, ErrLogsUnavailable
-	}
-	completed := s.buildIsTerminal(ctx, orgName, buildName)
-
-	var since time.Time
-	if sinceMillis > 0 {
-		since = time.UnixMilli(sinceMillis)
-	}
-	logs, err := s.observClient.GetBuildLogs(ctx, orgName, projectName, componentName, buildName, since)
+// The build's state is read BEFORE the log, deliberately. A build that finishes
+// between the two reads is then reported as still running, and the caller polls
+// once more and gets the tail — whereas reading the state last could declare a
+// log complete while the lines written in between were never returned. The same
+// read is the access check: the run must be the path's component's.
+func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName, cursor string) (*gen.BuildLogs, error) {
+	after, err := parseLogCursor(cursor)
 	if err != nil {
-		return nil, fmt.Errorf("get build logs: %w", err)
-	}
-	if logs == nil {
-		logs = &gen.BuildLogs{}
-	}
-	logs.Logs = entriesAfter(logs.Logs, sinceMillis)
-	logs.Complete = completed
-	if next, ok := newestEntryMillis(logs.Logs); ok {
-		logs.NextCursor = next
-	}
-	return logs, nil
-}
-
-// buildIsTerminal reports whether the build's WorkflowRun has completed. An
-// unreadable run is reported as NOT terminal: the caller then keeps polling,
-// which is recoverable, where a wrong "complete" would silently truncate the
-// log at whatever had been written.
-func (s *componentService) buildIsTerminal(ctx context.Context, orgName, buildName string) bool {
-	if s.client == nil {
-		return false
+		return nil, err
 	}
 	run, err := s.client.GetWorkflowRun(ctx, orgName, buildName)
-	if err != nil || run == nil {
-		return false
+	if errors.Is(err, openchoreo.ErrNotFound) {
+		return nil, ErrBuildExpired
 	}
-	return run.Completed
-}
-
-// entriesAfter drops entries at or before the cursor. The observability query
-// window is inclusive of its start, so without this the entry the cursor names
-// would be re-emitted on every poll.
-func entriesAfter(entries []gen.BuildLogEntry, sinceMillis int64) []gen.BuildLogEntry {
-	if sinceMillis <= 0 || len(entries) == 0 {
-		return entries
-	}
-	out := make([]gen.BuildLogEntry, 0, len(entries))
-	for _, e := range entries {
-		ms, ok := entryMillis(e)
-		// An unparseable timestamp is kept: a duplicated line is a smaller harm
-		// than a dropped one, and it cannot be ordered against the cursor.
-		if !ok || ms > sinceMillis {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// newestEntryMillis is the cursor to hand back — the newest timestamp in this
-// page. Entries arrive ascending, but the max is taken rather than the last so
-// an out-of-order page cannot rewind the cursor and replay the log.
-func newestEntryMillis(entries []gen.BuildLogEntry) (int64, bool) {
-	var newest int64
-	var found bool
-	for _, e := range entries {
-		if ms, ok := entryMillis(e); ok && ms > newest {
-			newest, found = ms, true
-		}
-	}
-	return newest, found
-}
-
-func entryMillis(e gen.BuildLogEntry) (int64, bool) {
-	if e.Timestamp == "" {
-		return 0, false
-	}
-	t, err := time.Parse(time.RFC3339Nano, e.Timestamp)
 	if err != nil {
-		return 0, false
+		return nil, fmt.Errorf("%w: read build: %w", ErrLogSourceUnavailable, err)
 	}
-	return t.UnixMilli(), true
+	if run.ProjectName != projectName || run.ComponentName != componentName {
+		return nil, ErrBuildNotInComponent
+	}
+
+	var sinceSeconds int64
+	if !after.IsZero() {
+		sinceSeconds = int64((max(time.Since(after), 0) + logCursorOverlap) / time.Second)
+	}
+	lines, err := s.client.GetWorkflowRunLogs(ctx, orgName, buildName, sinceSeconds)
+	switch {
+	case errors.Is(err, openchoreo.ErrNotFound) && run.Completed:
+		// Deleted between the two reads: past its TTL.
+		return nil, ErrBuildExpired
+	case errors.Is(err, openchoreo.ErrNotFound):
+		// Created, but its Argo workflow is not there yet: nothing written.
+		lines = nil
+	case err != nil:
+		return nil, fmt.Errorf("%w: read build log: %w", ErrLogSourceUnavailable, err)
+	}
+
+	out := &gen.BuildLogs{Logs: []gen.BuildLogEntry{}, Complete: run.Completed}
+	var newest time.Time
+	for _, l := range lines {
+		if l.Timestamp.IsZero() {
+			// Unordered against the cursor; kept on the first read only, or every
+			// tail read would repeat it.
+			if after.IsZero() {
+				out.Logs = append(out.Logs, gen.BuildLogEntry{Log: l.Log})
+			}
+			continue
+		}
+		if !l.Timestamp.After(after) {
+			continue
+		}
+		out.Logs = append(out.Logs, gen.BuildLogEntry{Log: l.Log, Timestamp: l.Timestamp.UTC().Format(time.RFC3339Nano)})
+		if l.Timestamp.After(newest) {
+			newest = l.Timestamp
+		}
+	}
+	if !newest.IsZero() {
+		out.NextCursor = formatLogCursor(newest)
+	}
+	return out, nil
+}
+
+// The cursor is the newest line's timestamp at full precision. Opaque on the
+// wire; a client carries back what it was handed.
+func formatLogCursor(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+func parseLogCursor(cursor string) (time.Time, error) {
+	if cursor == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, cursor)
+	if err != nil {
+		return time.Time{}, ErrInvalidLogCursor
+	}
+	return t, nil
 }

@@ -25,8 +25,9 @@ import { componentBuildState, type ComponentBuildState } from "../model/run";
 import { LogLines } from "./CardSection";
 
 // The build logs: the component builds the version's merge fanned out to,
-// each with its outcome and, opened, its log. Copied from the old console's
-// build page (CycleBuilds, useBuildLog).
+// each with its outcome and, opened, its log. Both are read live from
+// OpenChoreo, which keeps a build only for its builder workflow's TTL; after
+// that the list says the builds are no longer kept.
 
 type CycleBuild = components["schemas"]["CycleBuild"];
 
@@ -41,11 +42,12 @@ function BuildLog({ projectName, build }: { projectName: string; build: CycleBui
   const log = useBuildLog(projectName, build.component, build.buildName);
   if (log.error) return <LogLines lines={[]} empty={log.error} />;
   if (log.loading) return <LogLines lines={[]} empty="Loading the build log…" />;
+  if (log.expired) return <LogLines lines={[]} empty="This build is no longer kept, so its log is gone. Its outcome is above." />;
   const lines = log.entries.map((e) => e.log);
   return (
     <LogLines
       lines={log.complete ? lines : [...lines, "…tailing"]}
-      empty={log.complete ? "No log kept for this build; its outcome is above." : "This build has not written anything yet."}
+      empty={log.complete ? "This build wrote no log; its outcome is above." : "This build has not written anything yet."}
     />
   );
 }
@@ -95,10 +97,11 @@ export function BuildLogs({ projectName, version, cycleId }: { projectName: stri
     );
   }
   if (!builds.data) return <Skeleton variant="rounded" height={48} sx={{ m: 1.5 }} />;
-  if (builds.data.length === 0) return say("The merge has not reached the cluster's builds yet.");
+  if (builds.data.expired) return say("This merge's builds are no longer kept: OpenChoreo removes a build a while after it finishes.");
+  if (builds.data.items.length === 0) return say("The merge has not reached the cluster's builds yet.");
   return (
     <Box>
-      {builds.data.map((b) => (
+      {builds.data.items.map((b) => (
         <BuildRow key={b.buildName} projectName={projectName} build={b} />
       ))}
     </Box>

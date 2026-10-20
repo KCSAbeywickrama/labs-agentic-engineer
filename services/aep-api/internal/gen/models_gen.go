@@ -1518,15 +1518,14 @@ type BuildLogEntry struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
-// BuildLogs One read of a build's log. A build that is still running returns an incomplete response and the client re-reads from `nextCursor`; a terminal build returns everything it has in one call. A complete response carrying no entries is the honest "nothing retained" answer, not an error.
+// BuildLogs One read of a build's log, live from the build's pods on the workflow plane. A build that is still running returns an incomplete response and the client re-reads from `nextCursor`; a terminal build returns everything it has in one call.
 type BuildLogs struct {
 	// Complete True when the build is terminal and this response carries everything there will ever be — the client stops polling. False means re-read from `nextCursor`.
 	Complete bool            `json:"complete"`
 	Logs     []BuildLogEntry `json:"logs"`
 
-	// NextCursor Epoch millis of the newest entry returned; pass back as `since`. Absent when nothing was returned, in which case the previous cursor stands.
-	NextCursor int64 `json:"nextCursor,omitempty"`
-	TotalCount int64 `json:"totalCount,omitempty"`
+	// NextCursor Pass back as `cursor` on the next read. Absent when nothing was returned, in which case the previous cursor stands.
+	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 // BuildPreflight defines model for BuildPreflight.
@@ -1810,7 +1809,9 @@ type CycleBuild struct {
 
 // CycleBuildList defines model for CycleBuildList.
 type CycleBuildList struct {
-	Items []CycleBuild `json:"items"`
+	// Expired True when the merge's builds are no longer kept — no WorkflowRun of the merge is left and the merge is older than the builder workflow's `ttlAfterCompletion`. An empty list without it means the merge has not reached the cluster's builds yet.
+	Expired bool         `json:"expired,omitempty"`
+	Items   []CycleBuild `json:"items"`
 }
 
 // Dependency A component's unified, kind-discriminated dependency entry. status/reason/flags are read-time computed by spec.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them). An external dependency is HYDRATED from its own file, specs/design/dependencies/<name>/dependency.json — one dependency, one definition, holding a full `resource` block (a copy from the org registry when resourceRef is set, else one the project defined). style, contractAssumed and contractDerived are COMPUTED from the contract's type and origin; nothing here is stored as such.
@@ -3661,8 +3662,8 @@ type ListProjectsParams struct {
 
 // GetBuildLogsParams defines parameters for GetBuildLogs.
 type GetBuildLogsParams struct {
-	// Since Return only entries stamped AFTER this epoch-millis cursor — feed back the previous response's `nextCursor`. Absent reads from the beginning. Millis rather than a line offset because the cursor must survive the hand-over from a live pod tail to the captured snapshot, where a line count is meaningless but a timestamp still orders correctly.
-	Since int64 `form:"since,omitempty" json:"since,omitempty"`
+	// Cursor Return only entries stamped AFTER this cursor — feed back the previous response's `nextCursor` verbatim. Absent reads from the beginning. Opaque to the client.
+	Cursor string `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
 // GetDependencyStatusParams defines parameters for GetDependencyStatus.

@@ -18,11 +18,11 @@ package observability
 
 // client.go — the OpenChoreo Observer's log query.
 //
-// ONE endpoint serves both readers: `POST /api/v1/logs/query`, whose
-// `searchScope` is either a WORKFLOW scope (a build's WorkflowRun) or a
-// COMPONENT scope (namespace + project + environment, and optionally one
-// component). A coding cycle is read by the second shape — see cycle_logs.go
-// for how its paging works on an API with no cursor.
+// `POST /api/v1/logs/query` with a COMPONENT scope (namespace + project +
+// environment, and optionally one component) is how a finished coding cycle's
+// pod lines are read back — see cycle_logs.go for how its paging works on an
+// API with no cursor. Build logs are not read here: they are read live from
+// OpenChoreo for as long as OpenChoreo keeps the build.
 //
 // This is telemetry, not a log system of record: the observer's retention is
 // the dataplane's, not ours.
@@ -36,8 +36,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/gen"
-
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
@@ -45,16 +43,8 @@ import (
 // so a page this long is the "there may be another page" signal.
 const queryPageLimit = 1000
 
-// defaultLookback is how far back a build-log read starts.
-const defaultLookback = 30 * 24 * time.Hour
-
 // Client reads logs from the observability plane.
 type Client interface {
-	// GetBuildLogs reads one build's log. `since` narrows the window to entries
-	// after that instant — the tail read behind the console's log cursor; a zero
-	// `since` reads the whole retention window.
-	GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string, since time.Time) (*gen.BuildLogs, error)
-
 	// QueryCycleLogs reads one coding cycle's pod lines across the cycle's
 	// window: every line the Component with q.ComponentUID wrote, each once, in
 	// index order. It reads the Component scope while the Component exists
@@ -114,20 +104,15 @@ func NewClient(baseURL string) Client {
 	}
 }
 
-// componentScope / workflowScope are the two shapes of the request's
-// `searchScope`. They are separate structs because the observer REJECTS a body
-// that mixes workflowRunName with component fields, and `omitempty` on one
-// struct would be one forgotten field away from sending exactly that.
+// componentScope is the request's `searchScope` for a component's (or a
+// project's) pod lines. The observer's other shape, a workflow scope, is
+// deliberately absent: it REJECTS a body that mixes workflowRunName with
+// component fields, so the two never share a struct.
 type componentScope struct {
 	Namespace   string `json:"namespace"`
 	Project     string `json:"project,omitempty"`
 	Component   string `json:"component,omitempty"`
 	Environment string `json:"environment,omitempty"`
-}
-
-type workflowScope struct {
-	Namespace       string `json:"namespace"`
-	WorkflowRunName string `json:"workflowRunName"`
 }
 
 type logsQueryRequest struct {
@@ -170,43 +155,6 @@ func (r *logsQueryResponse) total() (int, bool) {
 		return *r.TotalCount, true
 	}
 	return 0, false
-}
-
-func (c *observabilityClient) GetBuildLogs(ctx context.Context, orgName, projectName, componentName, buildName string, since time.Time) (*gen.BuildLogs, error) {
-	now := time.Now().UTC()
-	start := now.Add(-defaultLookback)
-	if !since.IsZero() && since.After(start) {
-		start = since.UTC()
-	}
-	// A build IS a WorkflowRun, and the run name is unique within the namespace,
-	// so the project and component are not part of its scope. They stay on the
-	// signature because they are the caller's tenancy fence, checked before the
-	// call ever reaches here.
-	resp, err := c.query(ctx, logsQueryRequest{
-		SearchScope: workflowScope{Namespace: orgName, WorkflowRunName: buildName},
-		StartTime:   start.Format(time.RFC3339),
-		EndTime:     now.Format(time.RFC3339),
-		Limit:       queryPageLimit,
-		SortOrder:   "asc",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	logs := &gen.BuildLogs{Logs: []gen.BuildLogEntry{}}
-	if total, ok := resp.total(); ok {
-		logs.TotalCount = int64(total)
-	}
-	for _, e := range resp.Logs {
-		entry := gen.BuildLogEntry{Log: e.Log, Level: e.Level}
-		if ts, perr := time.Parse(time.RFC3339, e.Timestamp); perr == nil {
-			entry.Timestamp = ts.UTC().Format(time.RFC3339)
-		} else {
-			entry.Timestamp = e.Timestamp
-		}
-		logs.Logs = append(logs.Logs, entry)
-	}
-	return logs, nil
 }
 
 // query issues one POST /api/v1/logs/query. The caller's bearer is forwarded:

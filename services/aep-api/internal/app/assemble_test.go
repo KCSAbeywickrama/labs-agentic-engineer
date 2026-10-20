@@ -158,7 +158,7 @@ func TestAssemble_Degradations(t *testing.T) {
 		// Every optional capability is off, including no working coding-dispatch
 		// path (AGENT_RUNNER_IMAGE unset and no secrets provider).
 		for _, want := range []string{
-			"m2m-service-auth", "build-logs", "secrets-delivery",
+			"m2m-service-auth", "cycle-log-archive", "secrets-delivery",
 			"idp-mutations",
 			"coding-dispatch-oc", "run-temporal", "ae-studio-tools",
 		} {
@@ -215,7 +215,7 @@ func TestAssemble_Degradations(t *testing.T) {
 			t.Fatalf("Assemble = %v", err)
 		}
 		degs := app.Degradations()
-		for _, gone := range []string{"build-logs", "cycle-log-archive"} {
+		for _, gone := range []string{"cycle-log-archive"} {
 			if hasCapability(degs, gone) {
 				t.Errorf("with OBSERVER_URL set, %q must not be degraded, got %+v", gone, degs)
 			}

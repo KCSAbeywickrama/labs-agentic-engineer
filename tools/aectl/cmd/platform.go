@@ -319,7 +319,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initSkipOCVersionCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
 	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config)")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
-	initCmd.Flags().String("oc-observability-api-url", "", "In-cluster URL of the OpenChoreo Observer, for build logs and coding-cycle log archiving (overrides config; empty leaves the chart default)")
+	initCmd.Flags().String("oc-observability-api-url", "", "In-cluster URL of the OpenChoreo Observer, for coding-cycle log archiving (overrides config; empty leaves the chart default)")
 	_ = viper.BindPFlag("oc.observability_api_url", initCmd.Flags().Lookup("oc-observability-api-url"))
 	initCmd.Flags().Bool("data-plane-gateway-tls", false, "Whether the data-plane gateway terminates TLS (overrides config; false is correct for aectl's own plain-HTTP gateway setup, set true only against a gateway that genuinely fronts TLS)")
 	_ = viper.BindPFlag("oc.data_plane_gateway_tls", initCmd.Flags().Lookup("data-plane-gateway-tls"))

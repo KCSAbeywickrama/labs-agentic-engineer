@@ -1046,17 +1046,14 @@ paths:
         schema:
           description: Build WorkflowRun name (DNS-label slug)
           type: string
-      - description: Return only entries stamped AFTER this epoch-millis cursor — feed back the
-          previous response's `nextCursor`. Absent reads from the beginning. Millis rather than a line
-          offset because the cursor must survive the hand-over from a live pod tail to the captured
-          snapshot, where a line count is meaningless but a timestamp still orders correctly.
+      - description: Return only entries stamped AFTER this cursor — feed back the previous
+          response's `nextCursor` verbatim. Absent reads from the beginning. Opaque to the client.
         in: query
-        name: since
+        name: cursor
         required: false
         schema:
-          description: Epoch-millis cursor
-          format: int64
-          type: integer
+          description: Opaque cursor from a previous response's `nextCursor`
+          type: string
       responses:
         '200':
           content:
@@ -1064,6 +1061,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/BuildLogs'
           description: OK
+        '410':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The build is no longer kept. OpenChoreo deletes a build's WorkflowRun, and its
+            log with it, a while after the build finishes (the builder workflow's
+            `ttlAfterCompletion`); code `build_expired`.
         default:
           content:
             application/json:
@@ -3246,10 +3251,9 @@ components:
       type: object
     BuildLogs:
       additionalProperties: false
-      description: One read of a build's log. A build that is still running returns an incomplete
-        response and the client re-reads from `nextCursor`; a terminal build returns everything it has
-        in one call. A complete response carrying no entries is the honest "nothing retained" answer,
-        not an error.
+      description: One read of a build's log, live from the build's pods on the workflow plane. A
+        build that is still running returns an incomplete response and the client re-reads from
+        `nextCursor`; a terminal build returns everything it has in one call.
       properties:
         complete:
           description: True when the build is terminal and this response carries everything there
@@ -3261,13 +3265,9 @@ components:
           type: array
           nullable: true
         nextCursor:
-          description: Epoch millis of the newest entry returned; pass back as `since`. Absent when
-            nothing was returned, in which case the previous cursor stands.
-          format: int64
-          type: integer
-        totalCount:
-          format: int64
-          type: integer
+          description: Pass back as `cursor` on the next read. Absent when nothing was returned, in
+            which case the previous cursor stands.
+          type: string
       required:
       - logs
       - complete
@@ -4329,6 +4329,11 @@ components:
     CycleBuildList:
       additionalProperties: false
       properties:
+        expired:
+          description: True when the merge's builds are no longer kept — no WorkflowRun of the merge is
+            left and the merge is older than the builder workflow's `ttlAfterCompletion`. An empty list
+            without it means the merge has not reached the cluster's builds yet.
+          type: boolean
         items:
           items:
             $ref: '#/components/schemas/CycleBuild'

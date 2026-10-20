@@ -6,6 +6,7 @@ package mocks
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -26,6 +27,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			},
 //			ApplyReleaseBindingFunc: func(ctx context.Context, orgName string, projectName string, in openchoreo.ReleaseBindingDesired) error {
 //				panic("mock out the ApplyReleaseBinding method")
+//			},
+//			ClusterWorkflowTTLFunc: func(ctx context.Context, name string) (time.Duration, error) {
+//				panic("mock out the ClusterWorkflowTTL method")
 //			},
 //			CreateComponentFunc: func(ctx context.Context, orgName string, projectName string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 //				panic("mock out the CreateComponent method")
@@ -53,6 +57,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			},
 //			GetWorkflowRunFunc: func(ctx context.Context, orgName string, runName string) (*gen.WorkflowRun, error) {
 //				panic("mock out the GetWorkflowRun method")
+//			},
+//			GetWorkflowRunLogsFunc: func(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error) {
+//				panic("mock out the GetWorkflowRunLogs method")
 //			},
 //			ListBuildRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) ([]openchoreo.BuildRunSummary, error) {
 //				panic("mock out the ListBuildRuns method")
@@ -100,6 +107,9 @@ type ComponentClientMock struct {
 	// ApplyReleaseBindingFunc mocks the ApplyReleaseBinding method.
 	ApplyReleaseBindingFunc func(ctx context.Context, orgName string, projectName string, in openchoreo.ReleaseBindingDesired) error
 
+	// ClusterWorkflowTTLFunc mocks the ClusterWorkflowTTL method.
+	ClusterWorkflowTTLFunc func(ctx context.Context, name string) (time.Duration, error)
+
 	// CreateComponentFunc mocks the CreateComponent method.
 	CreateComponentFunc func(ctx context.Context, orgName string, projectName string, req *openchoreo.CreateComponentRequest) (*gen.Component, error)
 
@@ -126,6 +136,9 @@ type ComponentClientMock struct {
 
 	// GetWorkflowRunFunc mocks the GetWorkflowRun method.
 	GetWorkflowRunFunc func(ctx context.Context, orgName string, runName string) (*gen.WorkflowRun, error)
+
+	// GetWorkflowRunLogsFunc mocks the GetWorkflowRunLogs method.
+	GetWorkflowRunLogsFunc func(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error)
 
 	// ListBuildRunsFunc mocks the ListBuildRuns method.
 	ListBuildRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string) ([]openchoreo.BuildRunSummary, error)
@@ -185,6 +198,13 @@ type ComponentClientMock struct {
 			ProjectName string
 			// In is the in argument value.
 			In openchoreo.ReleaseBindingDesired
+		}
+		// ClusterWorkflowTTL holds details about calls to the ClusterWorkflowTTL method.
+		ClusterWorkflowTTL []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Name is the name argument value.
+			Name string
 		}
 		// CreateComponent holds details about calls to the CreateComponent method.
 		CreateComponent []struct {
@@ -288,6 +308,17 @@ type ComponentClientMock struct {
 			OrgName string
 			// RunName is the runName argument value.
 			RunName string
+		}
+		// GetWorkflowRunLogs holds details about calls to the GetWorkflowRunLogs method.
+		GetWorkflowRunLogs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgName is the orgName argument value.
+			OrgName string
+			// RunName is the runName argument value.
+			RunName string
+			// SinceSeconds is the sinceSeconds argument value.
+			SinceSeconds int64
 		}
 		// ListBuildRuns holds details about calls to the ListBuildRuns method.
 		ListBuildRuns []struct {
@@ -435,6 +466,7 @@ type ComponentClientMock struct {
 	}
 	lockApplyComponentSpec                     sync.RWMutex
 	lockApplyReleaseBinding                    sync.RWMutex
+	lockClusterWorkflowTTL                     sync.RWMutex
 	lockCreateComponent                        sync.RWMutex
 	lockDeleteComponent                        sync.RWMutex
 	lockEnsureComponentType                    sync.RWMutex
@@ -444,6 +476,7 @@ type ComponentClientMock struct {
 	lockGetComponent                           sync.RWMutex
 	lockGetReleaseBindingStatus                sync.RWMutex
 	lockGetWorkflowRun                         sync.RWMutex
+	lockGetWorkflowRunLogs                     sync.RWMutex
 	lockListBuildRuns                          sync.RWMutex
 	lockListComponents                         sync.RWMutex
 	lockListDeployments                        sync.RWMutex
@@ -546,6 +579,42 @@ func (mock *ComponentClientMock) ApplyReleaseBindingCalls() []struct {
 	mock.lockApplyReleaseBinding.RLock()
 	calls = mock.calls.ApplyReleaseBinding
 	mock.lockApplyReleaseBinding.RUnlock()
+	return calls
+}
+
+// ClusterWorkflowTTL calls ClusterWorkflowTTLFunc.
+func (mock *ComponentClientMock) ClusterWorkflowTTL(ctx context.Context, name string) (time.Duration, error) {
+	if mock.ClusterWorkflowTTLFunc == nil {
+		panic("ComponentClientMock.ClusterWorkflowTTLFunc: method is nil but ComponentClient.ClusterWorkflowTTL was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		Name string
+	}{
+		Ctx:  ctx,
+		Name: name,
+	}
+	mock.lockClusterWorkflowTTL.Lock()
+	mock.calls.ClusterWorkflowTTL = append(mock.calls.ClusterWorkflowTTL, callInfo)
+	mock.lockClusterWorkflowTTL.Unlock()
+	return mock.ClusterWorkflowTTLFunc(ctx, name)
+}
+
+// ClusterWorkflowTTLCalls gets all the calls that were made to ClusterWorkflowTTL.
+// Check the length with:
+//
+//	len(mockedComponentClient.ClusterWorkflowTTLCalls())
+func (mock *ComponentClientMock) ClusterWorkflowTTLCalls() []struct {
+	Ctx  context.Context
+	Name string
+} {
+	var calls []struct {
+		Ctx  context.Context
+		Name string
+	}
+	mock.lockClusterWorkflowTTL.RLock()
+	calls = mock.calls.ClusterWorkflowTTL
+	mock.lockClusterWorkflowTTL.RUnlock()
 	return calls
 }
 
@@ -950,6 +1019,50 @@ func (mock *ComponentClientMock) GetWorkflowRunCalls() []struct {
 	mock.lockGetWorkflowRun.RLock()
 	calls = mock.calls.GetWorkflowRun
 	mock.lockGetWorkflowRun.RUnlock()
+	return calls
+}
+
+// GetWorkflowRunLogs calls GetWorkflowRunLogsFunc.
+func (mock *ComponentClientMock) GetWorkflowRunLogs(ctx context.Context, orgName string, runName string, sinceSeconds int64) ([]openchoreo.WorkflowRunLogLine, error) {
+	if mock.GetWorkflowRunLogsFunc == nil {
+		panic("ComponentClientMock.GetWorkflowRunLogsFunc: method is nil but ComponentClient.GetWorkflowRunLogs was just called")
+	}
+	callInfo := struct {
+		Ctx          context.Context
+		OrgName      string
+		RunName      string
+		SinceSeconds int64
+	}{
+		Ctx:          ctx,
+		OrgName:      orgName,
+		RunName:      runName,
+		SinceSeconds: sinceSeconds,
+	}
+	mock.lockGetWorkflowRunLogs.Lock()
+	mock.calls.GetWorkflowRunLogs = append(mock.calls.GetWorkflowRunLogs, callInfo)
+	mock.lockGetWorkflowRunLogs.Unlock()
+	return mock.GetWorkflowRunLogsFunc(ctx, orgName, runName, sinceSeconds)
+}
+
+// GetWorkflowRunLogsCalls gets all the calls that were made to GetWorkflowRunLogs.
+// Check the length with:
+//
+//	len(mockedComponentClient.GetWorkflowRunLogsCalls())
+func (mock *ComponentClientMock) GetWorkflowRunLogsCalls() []struct {
+	Ctx          context.Context
+	OrgName      string
+	RunName      string
+	SinceSeconds int64
+} {
+	var calls []struct {
+		Ctx          context.Context
+		OrgName      string
+		RunName      string
+		SinceSeconds int64
+	}
+	mock.lockGetWorkflowRunLogs.RLock()
+	calls = mock.calls.GetWorkflowRunLogs
+	mock.lockGetWorkflowRunLogs.RUnlock()
 	return calls
 }
 

@@ -19,12 +19,16 @@ package componentbuild
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/internal/projects"
 )
+
+// codeBuildExpired is get-build-logs' 410: OpenChoreo no longer keeps the build.
+const codeBuildExpired = "build_expired"
 
 // Handler serves the component build + deploy read feature on the strict
 // interface. Every operation is org-scoped: the deny-by-default tenant gate
@@ -73,12 +77,18 @@ func (h *Handler) GetBuildLogs(ctx context.Context, request gen.GetBuildLogsRequ
 	if err := projects.RequireSlug("buildName", request.BuildName); err != nil {
 		return nil, err
 	}
-	// An absent ?since decodes to 0, which is exactly "read from the beginning".
-	logs, err := h.comp.GetBuildLogs(ctx, org, request.ProjectName, request.ComponentName, request.BuildName, request.Params.Since)
-	if err != nil {
-		if errors.Is(err, projects.ErrLogsUnavailable) {
-			return nil, apierr.ServiceUnavailable("build logs service not available")
-		}
+	// An absent ?cursor decodes to "", which is exactly "read from the beginning".
+	logs, err := h.comp.GetBuildLogs(ctx, org, request.ProjectName, request.ComponentName, request.BuildName, request.Params.Cursor)
+	switch {
+	case errors.Is(err, projects.ErrBuildExpired):
+		return nil, apierr.New(http.StatusGone, codeBuildExpired, "this build is no longer kept", nil)
+	case errors.Is(err, projects.ErrBuildNotInComponent):
+		return nil, apierr.NotFound("no such build for this component")
+	case errors.Is(err, projects.ErrInvalidLogCursor):
+		return nil, apierr.BadRequest("invalid cursor")
+	case errors.Is(err, projects.ErrLogSourceUnavailable):
+		return nil, apierr.WithCause(apierr.ServiceUnavailable("the build log could not be read from OpenChoreo"), err)
+	case err != nil:
 		return nil, projects.MapComponentError(err, "failed to get build logs")
 	}
 	return gen.GetBuildLogs200JSONResponse(*logs), nil

@@ -83,7 +83,7 @@ func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 		},
 	})
 	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
-	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
+	svc := NewComponentService(oc, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "order-service"); err != nil {
 		t.Fatalf("EnsureComponent: %v", err)
@@ -161,7 +161,7 @@ func TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint(t *testing.T) {
 		},
 	})
 	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
-	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
+	svc := NewComponentService(oc, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "web-ui"); err != nil {
 		t.Fatalf("EnsureComponent: %v", err)
@@ -187,7 +187,7 @@ func TestEnsureComponent_DesignMissingComponent_Errors(t *testing.T) {
 			return files, nil
 		},
 	})
-	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: &sourcecontrol.GitRepository{RepoURL: "u"}}, nil, nil, nil)
+	svc := NewComponentService(oc, store, ensureRepoSvc{repo: &sourcecontrol.GitRepository{RepoURL: "u"}}, nil, nil, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "ghost"); err == nil {
 		t.Fatal("a component absent from the design must error (no CR to build)")
@@ -197,7 +197,7 @@ func TestEnsureComponent_DesignMissingComponent_Errors(t *testing.T) {
 func TestEnsureComponent_NoStoreOrRepo_Errors(t *testing.T) {
 	oc := &ocmocks.ComponentClientMock{}
 	// No artifact store.
-	if err := NewComponentService(oc, nil, nil, ensureRepoSvc{}, nil, nil, nil).
+	if err := NewComponentService(oc, nil, ensureRepoSvc{}, nil, nil, nil).
 		EnsureComponent(context.Background(), "a", "p", "c"); err == nil {
 		t.Error("nil artifact store must error")
 	}
@@ -207,7 +207,7 @@ func TestEnsureComponent_NoStoreOrRepo_Errors(t *testing.T) {
 			return map[string]string{spec.DesignRootFile: "# O\n"}, nil
 		},
 	})
-	if err := NewComponentService(oc, nil, store, nil, nil, nil, nil).
+	if err := NewComponentService(oc, store, nil, nil, nil, nil).
 		EnsureComponent(context.Background(), "a", "p", "c"); err == nil {
 		t.Error("nil repo service must error")
 	}
@@ -237,7 +237,7 @@ func TestEnsureComponent_AutoRCAAlertRuleFollowsTheDeploymentSwitch(t *testing.T
 			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) { return files, nil },
 		})
 		repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
-		svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
+		svc := NewComponentService(oc, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
 		switcher, ok := svc.(AutoRCASwitch)
 		if !ok {
 			t.Fatal("the component service must take the deployment's auto-RCA switch (AutoRCASwitch)")

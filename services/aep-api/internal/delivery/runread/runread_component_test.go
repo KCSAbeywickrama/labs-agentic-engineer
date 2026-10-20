@@ -199,12 +199,17 @@ func event(seq int64, kind gen.RunEventKind, agentID string) gen.RunEvent {
 // modelling the real contract, where the runs themselves ARE the record and the
 // read recovers a merge's fan-out by filtering them.
 type fakeProjectBuilds struct {
-	runs []delivery.MergeBuild
-	err  error
+	runs      []delivery.MergeBuild
+	err       error
+	retention time.Duration
 }
 
 func (f fakeProjectBuilds) ListProjectBuildRuns(_ context.Context, _, _ string) ([]delivery.MergeBuild, error) {
 	return f.runs, f.err
+}
+
+func (f fakeProjectBuilds) BuildRetention(context.Context) (time.Duration, error) {
+	return f.retention, nil
 }
 
 // newHarness wires the real runread services behind componenttest.
@@ -668,6 +673,37 @@ func TestListCycleBuilds_DerivesTheFanOutFromTheMergeSHA(t *testing.T) {
 		// The name is the client's key into get-build-logs; it must be handed back
 		// verbatim so nothing client-side reconstructs it.
 		t.Errorf("buildName = %q, want the WorkflowRun's own name", got.Items[0].BuildName)
+	}
+}
+
+// OpenChoreo deletes a build at its workflow's TTL. A merge older than that
+// with no runs left has EXPIRED builds; a recent one has builds not started.
+func TestListCycleBuilds_EmptyListSaysWhetherTheBuildsExpired(t *testing.T) {
+	read := func(endedAgo time.Duration) gen.CycleBuildList {
+		t.Helper()
+		c := mergedCycle("c1", "4a91c2f8ab3199ff")
+		ended := time.Now().Add(-endedAgo)
+		c.EndedAt = &ended
+		h := newHarnessWithBuilds(t,
+			[]delivery.MilestoneRun{specRun("r1", delivery.RunStateRunning)},
+			map[string][]delivery.RunCycle{"r1": {c}},
+			nil, nil,
+			fakeProjectBuilds{retention: 24 * time.Hour})
+		rec := h.AsOrg("acme").Get("/api/v1/projects/widgets/builds/v3/cycles/c1/builds")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("code %d (%s)", rec.Code, rec.Body.String())
+		}
+		var got gen.CycleBuildList
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+	if got := read(25 * time.Hour); !got.Expired || len(got.Items) != 0 {
+		t.Errorf("merged 25h ago under a 1d TTL: %+v, want expired", got)
+	}
+	if got := read(2 * time.Minute); got.Expired {
+		t.Errorf("merged 2m ago: %+v, want not expired (builds not started yet)", got)
 	}
 }
 

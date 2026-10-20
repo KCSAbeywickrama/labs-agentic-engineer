@@ -74,7 +74,8 @@ func writeErrorEnvelope(w http.ResponseWriter, status int, code, msg string, det
 // Before either, an AE Studio answer anywhere in the chain speaks for itself
 // (classifyAEStudio) — unless a slice already gave the request a 4xx verdict
 // of its own, which stands. A slice's 5xx fallback carries its cause
-// (apierr.WithCause), so "internal error" never hides a 503 or a 409.
+// (apierr.WithCause), so "internal error" never hides a 503 or a 409, and that
+// cause is logged: a typed 5xx is otherwise invisible server-side.
 func writeResponseError(w http.ResponseWriter, r *http.Request, err error) {
 	var ae *apiError
 	typed := errors.As(err, &ae)
@@ -86,6 +87,11 @@ func writeResponseError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 	}
 	if typed {
+		if ae.Status >= http.StatusInternalServerError && ae.Cause != nil {
+			// The envelope hides the cause from the caller; the log is the only
+			// place it is ever seen.
+			slog.ErrorContext(r.Context(), "handler error", "path", r.URL.Path, "status", ae.Status, "code", ae.Code, "cause", ae.Cause)
+		}
 		writeAPIError(w, ae)
 		return
 	}
