@@ -250,6 +250,29 @@ describe("ProjectCreate: seeding from a spec bundle (ADR-0053)", () => {
     expect(seedProject.mutate).toHaveBeenCalledTimes(2);
     expect(createProject.mutate).toHaveBeenCalledTimes(1);
   });
+
+  it("a failed seed offers to replace the bundle and never the kickoff: the replacement rides Retry seed", () => {
+    seedProject.mutate.mockImplementation(() => {});
+    seedProject.isError = true;
+    seedProject.error = new Error("manifest.json: format \"aespecs/2\" is not \"aespecs/1\"");
+    render(<ProjectCreate />);
+    attachAll(["allocations.aespecs", "prd.md"]);
+    typePrompt();
+    toDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    // Going on without the bundle would release the kickoff and interview a
+    // product that exists as code, so that door is not offered here.
+    expect(screen.queryByRole("button", { name: "Continue without documents" })).toBeNull();
+    expect(releaseKickoff).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Replace the bundle"), {
+      target: { files: [new File(["content"], "allocations-v2.aespecs")] },
+    });
+    expect(seedProject.reset).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry seed" }));
+    expect(seedProject.mutate).toHaveBeenCalledTimes(2);
+    expect(seedProject.mutate.mock.calls[1]?.[0].bundle.name).toBe("allocations-v2.aespecs");
+  });
 });
 
 // The journey starts itself (#562): the platform fires `/start` server-side,

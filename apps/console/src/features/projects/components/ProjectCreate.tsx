@@ -36,7 +36,7 @@ import { BasePage } from "../../shell/components/BasePage";
 import { PHONE } from "../../shell/layout";
 import { useCreateProject, useGithubOrg, useSeedProject, useUploadReferences } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../projectName";
-import { bundleProductName, referenceTypeLabel, splitAttachments } from "../referenceFiles";
+import { BUNDLE_EXTENSION, bundleProductName, referenceTypeLabel, splitAttachments } from "../referenceFiles";
 import { PromptComposer } from "./PromptComposer";
 
 // The examples are the fastest answer a newcomer gets to "what does enough
@@ -417,7 +417,27 @@ export function ProjectCreate() {
                   has happened yet. */}
               {createdName ? (seedFailed ? "Retry seed" : "Retry upload") : pending ? "Creating your project…" : "Create project"}
             </Button>
-            {uploadFailed || seedFailed ? (
+            {seedFailed ? (
+              // A refused bundle is fixed, not skipped: going on without it
+              // would release the kickoff and interview a product that exists
+              // as code. The replacement rides the same Retry seed.
+              <Button component="label" variant="outlined" disabled={pending}>
+                Replace the bundle
+                <input
+                  type="file"
+                  accept={`.${BUNDLE_EXTENSION}`}
+                  hidden
+                  onChange={(e) => {
+                    const next = e.target.files?.[0];
+                    if (next) {
+                      setFiles([...documents, next]);
+                      seedProject.reset();
+                    }
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+            ) : uploadFailed ? (
               // The explicit escape: go to the project without the documents,
               // releasing the kickoff the platform held for them (unless the
               // bundle was seeded, which holds it for good).
