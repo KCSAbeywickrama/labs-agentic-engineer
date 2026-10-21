@@ -189,6 +189,38 @@ func TestSeed_AChangedBundleOverwritesTheEarlierSeed(t *testing.T) {
 	}
 }
 
+func TestSeed_AChangedBundleDropsTheFilesItNoLongerHolds(t *testing.T) {
+	pod, s := newSeedRig(t, seedLedger{})
+	if err := s.Seed(context.Background(), "default", "p", bundleOf(t, seedTree())); err != nil {
+		t.Fatal(err)
+	}
+	// The second pass renamed the feature file: the old name must not linger
+	// beside the new one, or the requirements would carry its stories twice.
+	tree := seedTree()
+	const was, now = "specs/requirements/features/F1-engagements.md", "specs/requirements/features/F1-customer-engagements.md"
+	feature := tree[was]
+	delete(tree, was)
+	tree[now] = feature
+	tree["specs/requirements/prd.md"] = strings.Replace(tree["specs/requirements/prd.md"], "F1-engagements.md", "F1-customer-engagements.md", 1)
+	tree[specbundle.ManifestPath] = strings.Replace(seedManifest, "d14b825", "e25c936", 1)
+	if err := s.Seed(context.Background(), "default", "p", bundleOf(t, tree)); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+	if n := len(commitCalls(pod)); n != 2 {
+		t.Fatalf("commits = %d, want two", n)
+	}
+	if got := tipFile(t, pod, now); got != feature {
+		t.Errorf("the renamed file is not at the tip: %q", got)
+	}
+	if _, _, err := pod.ReadFile(context.Background(), descriptorRef, "", was); err == nil {
+		t.Error("the earlier seed's file lingers at the tip")
+	}
+	// What the seed never wrote stays: the descriptor's companions are not the bundle's.
+	if got := tipFile(t, pod, SpecIgnorePath); got != SpecIgnoreContent {
+		t.Errorf("the ignore file moved: %q", got)
+	}
+}
+
 func TestSeed_RefusedOnceTheProjectRanATurn(t *testing.T) {
 	pod, s := newSeedRig(t, seedLedger{newest: &AgentTurn{ID: "t1"}})
 	err := s.Seed(context.Background(), "default", "p", bundleOf(t, seedTree()))

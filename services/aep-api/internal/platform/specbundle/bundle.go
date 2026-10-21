@@ -125,6 +125,14 @@ const (
 	dependenciesPrefix = "specs/design/dependencies/"
 )
 
+// Admits reports whether the format allows path, a cleaned, slash-separated
+// repository path. The seed asks it on a re-seed: an admitted path at the tip
+// that the new bundle no longer holds was the earlier seed's, and goes.
+func Admits(path string) bool {
+	ok, _ := admitted(path)
+	return ok && path != ManifestPath
+}
+
 // admitted reports whether a cleaned, slash-separated path is one the format
 // allows, with the rule's name for a refusal.
 func admitted(p string) (bool, string) {

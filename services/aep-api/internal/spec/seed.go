@@ -82,9 +82,13 @@ func NewSeedService(git sourcecontrol.Git, repos sourcecontrol.ProjectRepoRows, 
 	return &SeedService{git: git, repos: repos, ledger: ledger, now: time.Now}
 }
 
-// Seed validates archive and commits it. Errors: ErrProjectAlreadyStarted,
-// specbundle.ErrRejected (the archive), *SeedRejectedError (its content),
-// sourcecontrol.ErrRepoNotFound, else the pod's.
+// Seed validates archive and commits it. Before any turn a project may be
+// seeded again: the files the new bundle holds are written where they differ,
+// and the files of the earlier seed it no longer holds are deleted in the same
+// commit, so a renamed or dropped requirement does not linger. Errors:
+// ErrProjectAlreadyStarted, specbundle.ErrRejected (the archive),
+// *SeedRejectedError (its content), sourcecontrol.ErrRepoNotFound, else the
+// pod's.
 func (s *SeedService) Seed(ctx context.Context, orgID, projectID string, archive []byte) error {
 	newest, err := s.ledger.Newest(ctx, orgID, projectID)
 	if err != nil {
@@ -135,7 +139,16 @@ func (s *SeedService) Seed(ctx context.Context, orgID, projectID string, archive
 			}
 			req.Writes = append(req.Writes, sourcecontrol.FileWrite{Path: p, Content: content, BaseSHA: shas[p]})
 		}
-		if len(req.Writes) == 0 && descriptor.Recreate != nil && sameSeed(*descriptor.Recreate, provenance) {
+		if descriptor.Recreate != nil {
+			// A re-seed: what the earlier seed put under the bundle's paths and
+			// the new bundle no longer holds goes with it.
+			for _, p := range slices.Sorted(maps.Keys(shas)) {
+				if _, held := b.Files[p]; !held && specbundle.Admits(p) {
+					req.Deletes = append(req.Deletes, sourcecontrol.FileDelete{Path: p, BaseSHA: shas[p]})
+				}
+			}
+		}
+		if len(req.Writes) == 0 && len(req.Deletes) == 0 && descriptor.Recreate != nil && sameSeed(*descriptor.Recreate, provenance) {
 			return sourcecontrol.CommitRequest{}, nil // the same bundle again: nothing to commit
 		}
 		descriptor.Recreate = &provenance

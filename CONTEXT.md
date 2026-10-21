@@ -590,7 +590,8 @@ Committing a spec bundle into a project's repository in one commit, together
 with a `[recreate]` table in the project descriptor. A seeded project never
 runs the `/start` kickoff: the descriptor table is what the kickoff reads to
 stay held, and what the status poll surfaces as `spec.recreate`. Seeding again
-before any turn overwrites the seeded files; after a turn it is refused.
+before any turn overwrites the seeded files and drops those the new bundle no
+longer holds; after a turn it is refused.
 _Avoid_: import (the platform imports nothing it does not validate), migration.
 
 **Recreate**:

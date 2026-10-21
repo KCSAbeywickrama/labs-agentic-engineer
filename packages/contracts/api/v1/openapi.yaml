@@ -1864,7 +1864,8 @@ paths:
         then commits the files and the bundle's provenance (a `[recreate]` table in the project
         descriptor) in ONE commit through the org's AE Studio. A seeded project never runs the
         `/start` kickoff: its first design is `/recreate`, started from the console. Seeding again
-        before any turn ran overwrites the seeded files; after a turn it is refused.
+        before any turn ran overwrites the seeded files and drops those the new bundle no longer
+        holds; after a turn it is refused.
       operationId: seed-project
       parameters:
       - description: Project name (DNS-label slug)
