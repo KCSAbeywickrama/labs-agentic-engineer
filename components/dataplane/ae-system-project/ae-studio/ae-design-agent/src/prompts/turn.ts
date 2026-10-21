@@ -242,6 +242,21 @@ const COMMAND_FLOWS: Record<string, CommandFlow> = {
  */
 const DESIGN_SYSTEM = Symbol("the org's design system");
 
+/**
+ * The design lineup, in the order the `design` skill walks it; `/design`
+ * inlines it, and so does the flow that walks it over a seeded tree.
+ */
+const DESIGN_LINEUP: (string | typeof DESIGN_SYSTEM)[] = [
+  "cell-design",
+  "architecture",
+  "security-design",
+  "prototype",
+  DESIGN_SYSTEM,
+  "openapi-conventions",
+  "agent-building",
+  "acceptance-criteria",
+];
+
 const FLOW_SUPPORTING_SKILLS: Record<string, (string | typeof DESIGN_SYSTEM)[]> = {
   // The interview mechanics both playbooks defer to, plus the shape of the
   // document they both write. `prd-contract` is a sibling skill rather than a
@@ -278,16 +293,12 @@ const FLOW_SUPPORTING_SKILLS: Record<string, (string | typeof DESIGN_SYSTEM)[]> 
   // screens are composed. `acceptance-criteria` writes the Gherkin features a
   // validation run drives (ADR-0029), last, from the requirements and the
   // prototypes.
-  design: [
-    "cell-design",
-    "architecture",
-    "security-design",
-    "prototype",
-    DESIGN_SYSTEM,
-    "openapi-conventions",
-    "agent-building",
-    "acceptance-criteria",
-  ],
+  design: DESIGN_LINEUP,
+  // `/recreate` is the first design of a product recreated from its code
+  // (ADR-0053): the `recreate` skill states what the seeded tree holds and
+  // that its dependency definitions are givens, then walks the design
+  // lineup — so the lineup rides along, after the flow's own skill.
+  recreate: ["design", ...DESIGN_LINEUP],
   // `/prototype` writes the prototypes on their own, from a design that has
   // its cell, data model and roles: it reads the cell and the roles. The
   // org's design-system skill says how a screen is composed from the kit's

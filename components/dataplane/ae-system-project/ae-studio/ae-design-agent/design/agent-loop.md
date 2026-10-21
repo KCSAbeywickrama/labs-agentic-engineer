@@ -255,7 +255,10 @@ first check (pod-memory-bounds.md).
 
 `/design` and `/address-comments` resolve to the `design` skill (the second as
 a `COMMAND_FLOWS` branch with its own brief), so both inline the same lineup,
-byte for byte, and share the cached prefix. A design turn and a `/prototype`
+byte for byte, and share the cached prefix. `/recreate`, the first design of
+a product recreated from its code (ADR-0053), inlines its own skill first and
+then the `design` skill with the same lineup (`DESIGN_LINEUP`), so its prefix
+is its own. A design turn and a `/prototype`
 turn need the organization's design system, and the lineup holds a place for it
 (`DESIGN_SYSTEM` in `FLOW_SUPPORTING_SKILLS`). `eagerSkillsFor` fills that place
 with the skill named on the first line of the `## UI design system` section of

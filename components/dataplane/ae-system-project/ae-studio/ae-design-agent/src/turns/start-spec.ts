@@ -112,14 +112,15 @@ export function designFeaturesOf(spec: TurnSpec): string[] {
 
 /**
  * The flows whose completed runs design features (aep-api's
- * `DesignRunFlows`): `/design`, and Address comments, which designs again
- * the features its own requirement edits reach. Such a run saves its Room
+ * `DesignRunFlows`): `/design`, Address comments, which designs again
+ * the features its own requirement edits reach, and `/recreate`, the first
+ * design of a product recreated from its code. Such a run saves its Room
  * work when it ends and reports the commit (the usage record's `endRef`), so
  * its own edits to the requirements are its features' basis, not a change
  * since (L30).
  */
 export function savesItsEnd(flow: string): boolean {
-  return flow === "design" || flow === "address-comments";
+  return flow === "design" || flow === "address-comments" || flow === "recreate";
 }
 
 /**

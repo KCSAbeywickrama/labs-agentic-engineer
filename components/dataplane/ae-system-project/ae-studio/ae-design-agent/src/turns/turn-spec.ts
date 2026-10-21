@@ -39,8 +39,15 @@ export interface TurnGateInputs {
  * fail exact-name resolution at build.
  */
 export function designOrRoomTurn(turn: TurnGateInputs): boolean {
-  return turn.flow === "design" || turn.roomScoped;
+  return DESIGN_FLOWS.has(turn.flow) || turn.roomScoped;
 }
+
+/**
+ * The flows that design: `/design`, and `/recreate`, the first design of a
+ * product recreated from its code (ADR-0053). Named here so a Room-less
+ * runner (the playground) gates them alike.
+ */
+const DESIGN_FLOWS: ReadonlySet<string> = new Set(["design", "recreate"]);
 
 /**
  * The requirements flows: the kickoff, the per-feature interview
