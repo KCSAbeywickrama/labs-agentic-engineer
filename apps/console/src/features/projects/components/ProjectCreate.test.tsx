@@ -51,7 +51,11 @@ const uploadReferences = {
 // The seed (ADR-0053) succeeds instantly unless a test says otherwise.
 const seedProject = {
   mutate: vi.fn((_body: { projectName: string; bundle: File }, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.()),
-  reset: vi.fn(),
+  // As the real mutation's reset: the failure is gone once the bundle is replaced.
+  reset: vi.fn(() => {
+    seedProject.isError = false;
+    seedProject.error = null;
+  }),
   isPending: false,
   isError: false,
   error: null as Error | null,
@@ -269,6 +273,10 @@ describe("ProjectCreate: seeding from a spec bundle (ADR-0053)", () => {
       target: { files: [new File(["content"], "allocations-v2.aespecs")] },
     });
     expect(seedProject.reset).toHaveBeenCalled();
+    // The failure is cleared, but the bundle is still unseeded: the retry keeps
+    // its name and the replace control stays, so a second swap is possible.
+    expect(screen.queryByText(/seeding its specs from the bundle failed/i)).toBeNull();
+    expect(screen.getByLabelText("Replace the bundle")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry seed" }));
     expect(seedProject.mutate).toHaveBeenCalledTimes(2);
     expect(seedProject.mutate.mock.calls[1]?.[0].bundle.name).toBe("allocations-v2.aespecs");

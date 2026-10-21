@@ -257,6 +257,11 @@ export function ProjectCreate() {
   const pending = createProject.isPending || seedProject.isPending || uploadReferences.isPending;
   const seedFailed = createdName !== null && seedProject.isError;
   const uploadFailed = createdName !== null && uploadReferences.isError;
+  // The project exists and its bundle has not landed: the next Create seeds,
+  // whether the last seed failed or the bundle was just replaced (which clears
+  // the failure), so the retry's name and the replace control follow this, not
+  // the mutation's error.
+  const bundleUnseeded = createdName !== null && bundle !== null && seededName !== createdName;
 
   if (step === "prompt") {
     return (
@@ -415,9 +420,9 @@ export function ProjectCreate() {
               {/* Most specific first: the project exists and only the upload
                   failed (#383), the create is in flight (#561), or nothing
                   has happened yet. */}
-              {createdName ? (seedFailed ? "Retry seed" : "Retry upload") : pending ? "Creating your project…" : "Create project"}
+              {createdName ? (bundleUnseeded ? "Retry seed" : "Retry upload") : pending ? "Creating your project…" : "Create project"}
             </Button>
-            {seedFailed ? (
+            {bundleUnseeded ? (
               // A refused bundle is fixed, not skipped: going on without it
               // would release the kickoff and interview a product that exists
               // as code. The replacement rides the same Retry seed.
