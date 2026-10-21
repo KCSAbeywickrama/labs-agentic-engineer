@@ -27,7 +27,9 @@ that tree, with three facts about the tree that `design` cannot know.
   each line pointing at the requirement it landed on or saying why it was set
   aside. They describe the product as it is built today. Read them for the
   as-is shape when a decision needs it; they are context, never requirements,
-  and a rule that lives only there does not reach the build.
+  and a rule that lives only there does not reach the build. The requirements
+  may have been edited since the seed: a coverage line that points at a story
+  now gone or reworded is stale, never a reason to bring the story back.
 - `specs/design/domain-model.md`: the data model from the code's own types.
   Converge it as the lineup's step 3 says.
 - `specs/design/dependencies/<name>/`: one definition per upstream the recreate
