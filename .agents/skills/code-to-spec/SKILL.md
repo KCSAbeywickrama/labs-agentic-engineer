@@ -19,8 +19,8 @@ is run from a developer's terminal.
 
 ## Read the contracts first
 
-Two files beside this one govern every line you write. Read both now; this
-skill restates neither, and a rule remembered instead of read drifts.
+Three files beside this one govern every line you write. Read all three now;
+this skill restates none of them, and a rule remembered instead of read drifts.
 
 - `references/prd-contract.md` — every requirements file, the line grammar,
   the IDs, the `sources/` coverage file, what the requirements exclude.

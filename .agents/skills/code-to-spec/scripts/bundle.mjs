@@ -11,8 +11,9 @@
 // Writes <out dir>/<product-slug>.aespecs and prints its path.
 
 import { crc32 } from "node:zlib";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const FORMAT = "aespecs/1";
 const PRODUCER = "code-to-spec";
@@ -159,4 +160,4 @@ function main() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

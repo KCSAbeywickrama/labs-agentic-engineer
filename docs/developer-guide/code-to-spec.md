@@ -30,7 +30,7 @@ only in a coverage file does not reach the build.
 
 ## Installing and running it
 
-The skill directory is self-contained: it carries the two platform contracts
+The skill directory is self-contained: it carries the three platform contracts
 it follows under `references/`, so it needs no checkout of this repository.
 Copy it to where Claude Code looks for personal skills and run it from any
 directory:
@@ -92,9 +92,11 @@ create to the Deploy page's values, are in
 
 ## Keeping the bundled contracts current
 
-`references/prd-contract.md` and `references/domain-model-shape.md` are
-generated copies of `skills/prd-contract/SKILL.md` and step 3 of
-`skills/design/SKILL.md`. When either platform skill changes, re-run
+`references/prd-contract.md`, `references/domain-model-shape.md` and
+`references/dependency-shape.md` are generated copies of
+`skills/prd-contract/SKILL.md`, step 3 of `skills/design/SKILL.md` and the
+dependency-definition section of `skills/architecture/SKILL.md`. When any of
+the three platform skills changes, re-run
 
 ```bash
 node .agents/skills/code-to-spec/scripts/sync-references.mjs

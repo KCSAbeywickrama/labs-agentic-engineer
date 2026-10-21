@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Bundles the two platform contracts the code-to-spec skill follows into
+// Bundles the three platform contracts the code-to-spec skill follows into
 // its own references/, so a copy of the skill directory works outside this
 // repository. The copies are verbatim and pinned by sync-references.test.mjs,
 // which fails when either platform file changes without a re-run of this
