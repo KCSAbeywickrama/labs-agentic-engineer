@@ -64,6 +64,12 @@ legacy code itself; the reading stays on the developer's machine.
   and no credentials on the platform: values are collected on the Deploy page
   after the design, as for any project external, and Promote to organization
   shares a definition.
+- The create dialog's prompt is not lost. `/start` would have consumed it;
+  on a seeded project the pod appends it to the first `/recreate` as the
+  owner's note, the way it appends the idea to `/start`, and the recreate
+  skill writes what is requirement-shaped into the requirements before
+  designing. With a bundle attached the prompt is optional, and the project
+  name is suggested from the bundle's name.
 - The legacy code is read where it lives. A server-side run that executes
   `code-to-spec` on the coding runner stays open as the next step.
 - The playground's snapshot filter admits dependency definitions so the

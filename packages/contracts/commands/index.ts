@@ -99,9 +99,15 @@ export function parseDesignCommand(line: string): { featureIds: string[] } | nul
  */
 export const RECREATE_COMMAND = "/recreate";
 
-/** Whether a line is the recreate command. */
-export function parseRecreateCommand(line: string): boolean {
-  return line.trim() === RECREATE_COMMAND;
+/**
+ * The recreate command, bare or with the owner's note after it (what the
+ * recreate keeps, drops or changes); null for any other line. The console
+ * sends it bare and the pod appends the project's idea as the note, the way
+ * it appends the idea to `/start`, so a journal line may carry one.
+ */
+export function parseRecreateCommand(line: string): { note: string } | null {
+  const m = /^\/recreate(?:\s+([\s\S]+))?$/.exec(line.trim());
+  return m ? { note: (m[1] ?? "").trim() } : null;
 }
 
 /**

@@ -112,7 +112,11 @@ before any design. Its first design is `/recreate`: while the project is
 seeded and no design exists, the card's primary reads **Recreate** and
 `useDesignTurns` sends that command instead of `/design F1 F2`. The run
 shows as a design of every feature (`runOf`, `isDesignRun`), and from the
-next run on the card sends `/design` as for any project.
+next run on the card sends `/design` as for any project. The create dialog's
+prompt rides that first turn as the owner's note: the pod appends it to the
+bare command as it appends the idea to `/start`, so the chat line reads
+"Recreate the product from its specs: <note>". With a bundle attached the
+prompt is optional and the project name is suggested from the bundle's name.
 
 ## The Overview
 

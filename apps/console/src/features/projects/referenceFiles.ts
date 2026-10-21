@@ -70,6 +70,11 @@ export function isSpecBundle(file: File): boolean {
 }
 
 /** The attachments as the create flow sends them: the documents, and the bundle if one is attached. */
+/** The product a bundle names, by the writer's convention `<product-slug>.aespecs`: the name suggestion when no prompt describes the product. */
+export function bundleProductName(bundle: File): string {
+  return bundle.name.slice(0, -(BUNDLE_EXTENSION.length + 1));
+}
+
 export function splitAttachments(files: File[]): { documents: File[]; bundle: File | null } {
   return {
     documents: files.filter((f) => !isSpecBundle(f)),

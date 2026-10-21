@@ -36,7 +36,7 @@ import { BasePage } from "../../shell/components/BasePage";
 import { PHONE } from "../../shell/layout";
 import { useCreateProject, useGithubOrg, useSeedProject, useUploadReferences } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../projectName";
-import { referenceTypeLabel, splitAttachments } from "../referenceFiles";
+import { bundleProductName, referenceTypeLabel, splitAttachments } from "../referenceFiles";
 import { PromptComposer } from "./PromptComposer";
 
 // The examples are the fastest answer a newcomer gets to "what does enough
@@ -139,7 +139,8 @@ export function ProjectCreate() {
   };
 
   const toDetails = () => {
-    const suggested = suggestProjectName(prompt.trim());
+    // With a bundle the prompt is a note, not the product: the bundle's name is.
+    const suggested = suggestProjectName(bundle ? bundleProductName(bundle) : prompt.trim());
     setPrompt(prompt.trim());
     setName(suggested);
     setRepoName(suggested);
@@ -239,8 +240,9 @@ export function ProjectCreate() {
       {
         onSuccess: (project) => {
           // No client-side copy of the prompt: the platform persists it into
-          // the project's descriptor on create, and `/start` reads it back
-          // from there, so the idea survives another browser or teammate.
+          // the project's descriptor on create, and `/start`, or `/recreate` on
+          // a seeded project, reads it back from there, so the idea survives
+          // another browser or teammate.
           if (files.length === 0) {
             goToProject(project.name);
             return;
@@ -313,19 +315,28 @@ export function ProjectCreate() {
                 has no maxLength, and unclamped this echo could push Create
                 project off the fold. The full text is on the title, and Back
                 returns to the textarea still holding it. */}
-            <Typography variant="body2" color="text.secondary" noWrap title={prompt}>
+            <Typography variant="body2" color="text.secondary" noWrap title={bundle ? bundle.name : prompt}>
               <Box component="b" sx={{ color: "text.primary", fontWeight: 600 }}>
-                Prompt:
+                {bundle ? "Bundle:" : "Prompt:"}
               </Box>{" "}
-              {prompt}
+              {bundle ? bundle.name : prompt}
             </Typography>
+            {/* With a bundle the prompt is the owner's note for the first design, shown as such. */}
+            {bundle && prompt && (
+              <Typography variant="body2" color="text.secondary" noWrap title={prompt}>
+                <Box component="b" sx={{ color: "text.primary", fontWeight: 600 }}>
+                  Note:
+                </Box>{" "}
+                {prompt}
+              </Typography>
+            )}
           </Box>
           <TextField
             label="Project name"
             value={name}
             onChange={(e) => changeName(e.target.value)}
             error={Boolean(nameError)}
-            helperText={nameError ?? "Suggested from your prompt. Change it if you like."}
+            helperText={nameError ?? (bundle ? "Suggested from the bundle's name. Change it if you like." : "Suggested from your prompt. Change it if you like.")}
             fullWidth
           />
           <TextField

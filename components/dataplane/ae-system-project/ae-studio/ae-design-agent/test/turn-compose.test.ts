@@ -447,6 +447,14 @@ test("the design flow inlines its whole lineup, in lineup order", () => {
 // The first design of a product recreated from its code (ADR-0053): its own
 // skill leads, and the design lineup follows it unchanged, so the run walks
 // the same steps over the seeded tree.
+test("recreate frames its text as the owner's note, and appends nothing without one", () => {
+  const noted = composeInstruction({ kind: "flow", skill: "recreate", text: "keep the partner roster" });
+  assert.match(noted, /^Load the recreate skill and follow it\./);
+  assert.match(noted, /The owner's note on the recreate: keep the partner roster/);
+  assert.equal(composeInstruction({ kind: "flow", skill: "recreate" }), composeInstruction({ kind: "flow", skill: "recreate", text: "  " }));
+  assert.doesNotMatch(composeInstruction({ kind: "flow", skill: "recreate" }), /owner's note/);
+});
+
 test("the recreate flow inlines its skill, then the design skill and its lineup", () => {
   const design = eagerSkillsFor({ kind: "flow", skill: "design" }, undefined, "oxygen-ui-design-system");
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "recreate" }, undefined, "oxygen-ui-design-system"), [

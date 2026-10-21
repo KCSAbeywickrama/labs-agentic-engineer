@@ -203,11 +203,22 @@ describe("ProjectCreate: seeding from a spec bundle (ADR-0053)", () => {
 
     expect(createProject.mutate).toHaveBeenCalledWith(expect.objectContaining({ referencesPending: true }), expect.anything());
     expect(seedProject.mutate).toHaveBeenCalledTimes(1);
-    expect(seedProject.mutate.mock.calls[0]?.[0]).toMatchObject({ projectName: "todo" });
+    expect(seedProject.mutate.mock.calls[0]?.[0]).toMatchObject({ projectName: "allocations" });
     expect(seedProject.mutate.mock.calls[0]?.[0].bundle.name).toBe("allocations.aespecs");
     expect(uploadReferences.mutate).toHaveBeenCalledTimes(1);
     expect(uploadReferences.mutate.mock.calls[0]?.[0].files.map((f: File) => f.name)).toEqual(["prd.md"]);
     expect(seedProject.mutate.mock.invocationCallOrder[0]).toBeLessThan(uploadReferences.mutate.mock.invocationCallOrder[0]!);
+  });
+
+  it("a bundle needs no prompt: the name comes from the bundle and the prompt goes up empty", () => {
+    render(<ProjectCreate />);
+    attach("allocations.aespecs");
+    toDetails();
+    expect((screen.getByLabelText("Project name") as HTMLInputElement).value).toBe("allocations");
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(createProject.mutate).toHaveBeenCalledWith(expect.objectContaining({ name: "allocations", prompt: "" }), expect.anything());
+    expect(seedProject.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("a bundle alone seeds and lands on the project with no upload and no kickoff", () => {

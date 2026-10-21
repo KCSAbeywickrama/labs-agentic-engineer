@@ -7,8 +7,10 @@ it beside the reference documents, the platform seeds the project's repository f
 commit, and the project's first design is `/recreate`. Nothing is interviewed, pushed by hand or
 registered beforehand.
 
-1. **Create the project** in the console with the product's name and a one-line idea, and attach
-   `<out>/<product>.aespecs` as a document. Attach the product's README or any brief too if you
+1. **Create the project** in the console and attach `<out>/<product>.aespecs` as a document; the
+   project name is suggested from the bundle's name. The prompt is optional with a bundle attached:
+   the bundle describes the product, and whatever is typed rides the first design as the owner's
+   note, what the recreate should keep, drop or change. Attach the product's README or any brief too if you
    want the first design to read them. Create.
 2. **The platform seeds the project.** It opens the bundle under its bounds, holds every file to its
    own readers, commits the files with the bundle's provenance, and uploads the documents. A

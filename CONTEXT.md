@@ -600,7 +600,10 @@ which walks the `design` lineup with the seeded dependency definitions as
 givens — referenced, never rewritten — and the coverage files as the as-is
 context. The console offers it on the design card while the project is seeded
 and no design has run; afterwards the project iterates with `/design` like any
-other.
+other. The create dialog's prompt, which `/start` would have consumed, rides the
+first `/recreate` as the **owner's note**, what the recreate keeps, drops or
+changes; the skill writes what is requirement-shaped into the requirements
+before designing.
 _Avoid_: migrate (a database word), import, brownfield design.
 
 ## Spec collaboration

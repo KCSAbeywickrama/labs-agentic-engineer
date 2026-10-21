@@ -37,6 +37,16 @@ that tree, with three facts about the tree that `design` cannot know.
   the product's client code, and an `assumptions.md` naming what that
   derivation relies on. These are the givens below.
 
+## The owner's note
+
+The text after `/recreate`, when there is one, is the owner's note: what
+the recreate should keep, drop or change, typed when the project was created
+or with the command. It steers this run and is not itself a requirement:
+where it changes what the product does, write it into the requirements
+first, as a Decision or an Open Question in the owner's words on the feature
+it touches, so every later `/design` sees it; then design from the files. No
+note means the product as the tree describes it.
+
 ## The definitions are givens
 
 Every definition on disk is settled before this run: reference it by its

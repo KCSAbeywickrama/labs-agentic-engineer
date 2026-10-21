@@ -359,7 +359,8 @@ export function userLineText(text: string): string {
   if (interview) return `Interview ${interview.featureId}.`;
   const design = parseDesignCommand(trimmed);
   if (design) return design.featureIds.length > 0 ? `Design ${design.featureIds.join(", ")}.` : "Design the features.";
-  if (parseRecreateCommand(trimmed)) return "Recreate the product from its specs.";
+  const recreate = parseRecreateCommand(trimmed);
+  if (recreate) return recreate.note ? `Recreate the product from its specs: ${recreate.note}` : "Recreate the product from its specs.";
   const prototype = parsePrototypeCommand(trimmed);
   if (prototype) return prototype.component ? `Prototype ${prototype.component}.` : "Make the prototypes.";
   return text;

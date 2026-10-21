@@ -42,7 +42,7 @@ function runOf(instruction: string | undefined): DesignRun | null {
   if (!instruction) return null;
   if (instruction.trim() === ADDRESS_COMMENTS_COMMAND) return { kind: "address", features: [] };
   // A recreate is a design run over every feature; the card shows it as one.
-  if (parseRecreateCommand(instruction)) return { kind: "design", features: [] };
+  if (parseRecreateCommand(instruction) !== null) return { kind: "design", features: [] };
   const design = parseDesignCommand(instruction);
   return design ? { kind: "design", features: design.featureIds } : null;
 }

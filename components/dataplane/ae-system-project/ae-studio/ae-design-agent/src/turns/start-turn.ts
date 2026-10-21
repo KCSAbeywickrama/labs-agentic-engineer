@@ -85,7 +85,7 @@ import { projectSnapshotDir, skillsSnapshotDir } from "../shared/snapshot-path.j
 import type { ConversationStore } from "../store/conversation-store.js";
 import { ToolsSocketError, type ProjectSnapshot, type ToolsSocket } from "../tools-socket/client.js";
 import { removeIssueThread } from "./issue-thread-removal.js";
-import { designFeaturesOf, savesItsEnd, startTurnSummary, turnSpecFor } from "./start-spec.js";
+import { designFeaturesOf, savesItsEnd, turnSpecFor, turnSummary } from "./start-spec.js";
 import {
   DeskClosedError,
   errorClassOf,
@@ -569,7 +569,7 @@ export class TurnStarter {
     const turnId = l.turnId ?? randomUUID();
     // A one-shot conversation has no earlier turn of its own to report on.
     const last = l.throwaway ? null : desk.lastTerminal(l.scope);
-    const summary = startTurnSummary(l.input.instruction, l.spec);
+    const summary = turnSummary(l.input.instruction, l.spec);
     const author = authorOf(l.credit);
     const meta: TurnMeta = {
       conversationId: l.conversationId,

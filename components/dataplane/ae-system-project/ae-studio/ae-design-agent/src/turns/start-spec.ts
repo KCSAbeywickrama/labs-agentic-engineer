@@ -25,8 +25,9 @@
  * `/start` carries state the agent cannot read itself: the idea captured in
  * `specs/.agentic-engineer.toml`, whose dot-led segment keeps it out of the
  * agent's snapshot reads. The project lookup reads it in ae-studio-tools and
- * answers it as `idea`. The idea only rides the first `/start` turn; after
- * that it is in the conversation history.
+ * answers it as `idea`. The idea rides the first `/start` turn, and on a
+ * seeded project (ADR-0053), which never starts, the first `/recreate` turn
+ * as the owner's note; after that it is in the conversation history.
  *
  * Flows are not a conversation-identity dimension: a flow runs an interview
  * whose answers are ordinary chat turns in the same conversation.
@@ -37,6 +38,9 @@ import { REFERENCES_PREFIX } from "../conversation/load-workspace.js";
 
 /** The one token carrying lookup state beyond the token. */
 const START_COMMAND = "/start";
+
+/** The seeded project's first design, whose text is the owner's note: the idea when none is typed. */
+const RECREATE_TOKEN = "recreate";
 
 /**
  * Deliberately narrow so real chat is never eaten: a single leading `/`, a
@@ -76,6 +80,15 @@ export function turnSpecFor(raw: string, lookup: TurnLookupInputs): { spec: Turn
     const idea = (rest !== "" ? rest : (lookup.idea ?? "")).trim();
     return {
       spec: { kind: "start", ...(idea !== "" ? { idea } : {}), ...(references ? { references } : {}) },
+      flow: token,
+    };
+  }
+  if (token === RECREATE_TOKEN) {
+    // The create dialog's prompt would have been the kickoff's idea; a seeded
+    // project never starts, so it rides the first design as the owner's note.
+    const note = (rest !== "" ? rest : (lookup.idea ?? "")).trim();
+    return {
+      spec: { kind: "flow", skill: token, ...(note !== "" ? { text: note } : {}), ...(references ? { references } : {}) },
       flow: token,
     };
   }
@@ -125,15 +138,19 @@ export function savesItsEnd(flow: string): boolean {
 
 /**
  * What a turn's display record says: the instruction verbatim for every turn
- * but a bare `/start` that resolved an idea. The platform fires that kickoff
- * at project creation, so nobody typed the idea; a transcript opening on
- * `/start` alone would show the user a command they never issued, so the
- * resolved idea is appended. Only the idea the same turn resolved is
- * appended, so the line never claims something the agent did not receive.
+ * but a bare `/start` or `/recreate` that resolved the project's idea. The
+ * platform fires the kickoff at project creation and the console sends the
+ * recreate command bare, so nobody typed the idea; a transcript opening on
+ * the bare command would show the user a line they never issued, so the
+ * resolved idea is appended. Only what the same turn resolved is appended, so
+ * the line never claims something the agent did not receive.
  */
-export function startTurnSummary(instruction: string, spec: TurnSpec): string {
-  if (spec.kind !== "start" || !spec.idea) return instruction;
-  if (instruction.trim() === START_COMMAND) return `${START_COMMAND} ${spec.idea}`;
+export function turnSummary(instruction: string, spec: TurnSpec): string {
+  const bare = instruction.trim();
+  if (spec.kind === "start" && spec.idea && bare === START_COMMAND) return `${START_COMMAND} ${spec.idea}`;
+  if (spec.kind === "flow" && spec.skill === RECREATE_TOKEN && spec.text && bare === `/${RECREATE_TOKEN}`) {
+    return `/${RECREATE_TOKEN} ${spec.text}`;
+  }
   return instruction;
 }
 

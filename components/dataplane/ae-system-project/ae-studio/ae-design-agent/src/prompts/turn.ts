@@ -211,6 +211,10 @@ const COMMAND_FLOWS: Record<string, CommandFlow> = {
   // shares the cached prefix of a `/design` turn. The comments ride the
   // review file, never the line.
   "address-comments": { skill: "design", scope: (_s, facts) => addressCommentsBrief(facts.now) },
+  // The seeded project's first design (ADR-0053). Its text is the owner's
+  // note, what the recreate keeps, drops or changes; the skill says what to
+  // do with it. Bare, it recreates the product as the tree describes it.
+  recreate: { skill: "recreate", scope: (s) => (s ? `The owner's note on the recreate: ${s}` : "") },
   // The plural walks every open dependency; the singular's token IS its skill.
   "resolve-dependencies": {
     skill: "resolve-dependency",

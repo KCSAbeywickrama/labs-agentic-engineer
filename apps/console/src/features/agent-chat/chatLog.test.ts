@@ -318,6 +318,7 @@ describe("userLineText", () => {
 
   it("reads the recreate command as the first design of a product recreated from its code", () => {
     expect(userLineText("/recreate")).toBe("Recreate the product from its specs.");
+    expect(userLineText("/recreate keep the partner roster")).toBe("Recreate the product from its specs: keep the partner roster");
   });
 
   it("reads a prototype command as asking for the prototype", () => {

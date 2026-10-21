@@ -34,7 +34,7 @@ export interface DesignQuestionsNote {
 
 function isDesignRun(text: string): boolean {
   const line = text.trim();
-  return line === ADDRESS_COMMENTS_COMMAND || parseDesignCommand(line) !== null || parseRecreateCommand(line);
+  return line === ADDRESS_COMMENTS_COMMAND || parseDesignCommand(line) !== null || parseRecreateCommand(line) !== null;
 }
 
 export function designQuestionsNote(input: {
