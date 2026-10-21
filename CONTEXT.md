@@ -572,6 +572,36 @@ The spec version whose implementation most recently completed a build run —
 what the platform reports as live in the project's write target.
 _Avoid_: deployed tag (no tag is cut at deploy time today).
 
+## Recreating a product from its code (`code-to-spec`, `seed-project`, `/recreate`)
+
+**Spec bundle**:
+An `.aespecs` archive (`aespecs/1`): `manifest.json` (the producer, the
+product, the source repository and commit) and the `specs/` tree a developer
+skill derived from a product's existing code — the requirements with their
+coverage files, `domain-model.md`, and the upstream **dependency definitions**
+with their contracts and `assumptions.md`. The platform opens it under fixed
+bounds and a path allow-list, holds it to its own readers, and commits it
+whole (`seed-project`); the format's authority is
+`services/aep-api/internal/platform/specbundle`.
+_Avoid_: export, zip of the specs (the manifest and the allow-list are what make it a bundle).
+
+**Seeding**:
+Committing a spec bundle into a project's repository in one commit, together
+with a `[recreate]` table in the project descriptor. A seeded project never
+runs the `/start` kickoff: the descriptor table is what the kickoff reads to
+stay held, and what the status poll surfaces as `spec.recreate`. Seeding again
+before any turn overwrites the seeded files; after a turn it is refused.
+_Avoid_: import (the platform imports nothing it does not validate), migration.
+
+**Recreate**:
+The first design of a product recreated from its code: the `/recreate` flow,
+which walks the `design` lineup with the seeded dependency definitions as
+givens — referenced, never rewritten — and the coverage files as the as-is
+context. The console offers it on the design card while the project is seeded
+and no design has run; afterwards the project iterates with `/design` like any
+other.
+_Avoid_: migrate (a database word), import, brownfield design.
+
 ## Spec collaboration
 
 **Committed truth**:

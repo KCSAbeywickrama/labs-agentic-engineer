@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -57,6 +58,10 @@ type StatusSnapshot struct {
 	// already walks, so it costs nothing extra; the staleness check compares it
 	// against the same value at the last design run's base commit.
 	RequirementsFingerprint string
+	// Recreate is the descriptor's `[recreate]` table at head: the project was
+	// seeded from a spec bundle, and this is where from. Nil for every other
+	// project, and for a descriptor this platform cannot read.
+	Recreate *RecreateProvenance
 }
 
 // StatusSnapshot implements ArtifactService: the status poll's git source
@@ -88,12 +93,30 @@ func (s *artifactService) StatusSnapshot(ctx context.Context, orgID, projectID s
 	}
 
 	snap := &StatusSnapshot{HeadSHA: head}
+	hasDescriptor := false
 	for _, e := range headEntries {
 		if rel, ok := strings.CutPrefix(e.Path, requirementsPrefix); ok && rel != "" && requirementsBundleFilter(rel) {
 			snap.HasSpec = true
 		}
 		if e.Path == designPrefix+DesignRootFile {
 			snap.HasDesign = true
+		}
+		if e.Path == DescriptorPath {
+			hasDescriptor = true
+		}
+	}
+	if hasDescriptor {
+		// One more sha-addressed blob read, cached by the adapter like the
+		// design root's: the descriptor says whether the project was seeded
+		// from a bundle. A descriptor this platform cannot read says nothing.
+		raw, _, err := s.git.ReadFile(ctx, ref, head, DescriptorPath)
+		if err != nil {
+			return nil, fmt.Errorf("read descriptor at head: %w", err)
+		}
+		if d, err := UnmarshalDescriptor(raw); err == nil {
+			snap.Recreate = d.Recreate
+		} else {
+			slog.WarnContext(ctx, "project status: the descriptor does not parse; recreate provenance unknown", "error", err)
 		}
 	}
 	if snap.HasDesign {

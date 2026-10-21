@@ -63,11 +63,42 @@ const DescriptorAPIVersion = "agentic-engineer/v1"
 
 // Descriptor is the parsed descriptor. Identity fields are informational; Idea
 // is the load-bearing one — the user's own words, captured once at creation.
+// Recreate is present only on a project seeded from an `.aespecs` bundle.
 type Descriptor struct {
-	APIVersion string `toml:"apiVersion"`
-	Name       string `toml:"name"`
-	CreatedAt  string `toml:"createdAt"`
-	Idea       string `toml:"idea"`
+	APIVersion string              `toml:"apiVersion"`
+	Name       string              `toml:"name"`
+	CreatedAt  string              `toml:"createdAt"`
+	Idea       string              `toml:"idea"`
+	Recreate   *RecreateProvenance `toml:"recreate,omitempty"`
+}
+
+// RecreateProvenance records that the project's specs were seeded from a
+// bundle a tool derived from the product's existing code, and from where. It
+// is what makes the project a recreate: the kickoff never fires `/start` on
+// it, and the console offers `/recreate` for its first design. The values are
+// the bundle's manifest as validated at seed time — the uploader's claim,
+// kept as such.
+type RecreateProvenance struct {
+	Producer         string `toml:"producer"`
+	ProducerVersion  string `toml:"producerVersion"`
+	SourceRepository string `toml:"sourceRepository"`
+	SourceCommit     string `toml:"sourceCommit"`
+	BundleFormat     string `toml:"bundleFormat"`
+	SeededAt         string `toml:"seededAt"`
+}
+
+// UnmarshalDescriptor parses descriptor bytes. Unknown keys are kept out of
+// the way rather than refused, so a descriptor a later platform wrote still
+// reads; a file without our apiVersion is not a descriptor at all.
+func UnmarshalDescriptor(raw []byte) (Descriptor, error) {
+	var d Descriptor
+	if _, err := toml.Decode(string(raw), &d); err != nil {
+		return Descriptor{}, fmt.Errorf("decode descriptor: %w", err)
+	}
+	if d.APIVersion != DescriptorAPIVersion {
+		return Descriptor{}, fmt.Errorf("not an agentic-engineer descriptor (apiVersion %q)", d.APIVersion)
+	}
+	return d, nil
 }
 
 // NewDescriptor builds a descriptor with the current apiVersion stamped, so no

@@ -73,6 +73,14 @@ func kickoffTurnID(orgID, projectID string) string {
 // upload does not start a second interview.
 var ErrKickoffAlreadyRan = errors.New("project has already run an agent turn")
 
+// ErrProjectSeeded reports that the project's specs were seeded from a
+// bundle (the descriptor carries `[recreate]`), so `/start` is never its
+// first turn: the user starts `/recreate` from the console. Not a failure,
+// for the same reason as ErrKickoffAlreadyRan — every release of a held
+// kickoff (the references upload, the console's "continue without
+// documents") is answered the same way.
+var ErrProjectSeeded = errors.New("project was seeded from a spec bundle")
+
 // KickoffLedger is the finished-turn ledger's newest-turn read.
 // TurnRepository satisfies it.
 type KickoffLedger interface {
@@ -82,13 +90,15 @@ type KickoffLedger interface {
 // KickoffService fires a project's opening `/start` turn in its org's pod.
 type KickoffService struct {
 	turns  aestudiotools.Turns
+	git    sourcecontrol.Git
 	repos  sourcecontrol.ProjectRepoRows
 	ledger KickoffLedger
 }
 
-// NewKickoffService wires the kickoff.
-func NewKickoffService(turns aestudiotools.Turns, repos sourcecontrol.ProjectRepoRows, ledger KickoffLedger) *KickoffService {
-	return &KickoffService{turns: turns, repos: repos, ledger: ledger}
+// NewKickoffService wires the kickoff. git reads the project descriptor, the
+// seeded-project guard; nil skips that guard.
+func NewKickoffService(turns aestudiotools.Turns, git sourcecontrol.Git, repos sourcecontrol.ProjectRepoRows, ledger KickoffLedger) *KickoffService {
+	return &KickoffService{turns: turns, git: git, repos: repos, ledger: ledger}
 }
 
 // Kickoff fires the project's opening `/start` turn and never returns an
@@ -111,6 +121,11 @@ func (k *KickoffService) Kickoff(ctx context.Context, orgID, projectID string) {
 		cancel()
 		if errors.Is(err, ErrKickoffAlreadyRan) {
 			slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
+				"org", orgID, "project", projectID)
+			return
+		}
+		if errors.Is(err, ErrProjectSeeded) {
+			slog.InfoContext(bg, "kickoff skipped: the project was seeded from a spec bundle; its first design is /recreate",
 				"org", orgID, "project", projectID)
 			return
 		}
@@ -144,6 +159,13 @@ func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID stri
 	if err != nil {
 		return "", nil, err
 	}
+	seeded, err := k.seeded(ctx, ref)
+	if err != nil {
+		return "", nil, err
+	}
+	if seeded {
+		return "", nil, ErrProjectSeeded
+	}
 	turnID := kickoffTurnID(orgID, projectID)
 	events, err := k.turns.StartTurn(ctx, ref, aestudiotools.TurnRequest{
 		TurnID:  turnID,
@@ -155,6 +177,33 @@ func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID stri
 		return "", nil, err
 	}
 	return turnID, events, nil
+}
+
+// seeded reads the descriptor at the pod mirror's tip and answers whether it
+// carries `[recreate]`. A local read: the seed commit and the create's
+// descriptor commit both went through the pod, so its mirror is current. No
+// descriptor, or one this platform cannot read, is not seeded — the kickoff
+// then behaves as it always did.
+func (k *KickoffService) seeded(ctx context.Context, ref sourcecontrol.RepoRef) (bool, error) {
+	if k.git == nil {
+		return false, nil
+	}
+	raw, _, err := k.git.ReadFile(ctx, ref, "", DescriptorPath, sourcecontrol.Local())
+	if errors.Is(err, sourcecontrol.ErrPathNotFound) || errors.Is(err, sourcecontrol.ErrRefNotFound) || errors.Is(err, sourcecontrol.ErrRepoNotFound) {
+		// No descriptor, no commits, or a repository the pod does not know:
+		// not seeded. The start that follows answers for the repository as
+		// it always did.
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read descriptor: %w", err)
+	}
+	d, err := UnmarshalDescriptor(raw)
+	if err != nil {
+		slog.WarnContext(ctx, "kickoff: the project descriptor does not parse; treating the project as not seeded", "error", err)
+		return false, nil
+	}
+	return d.Recreate != nil, nil
 }
 
 // followKickoff reads the kickoff's stream until it ends or ctx (the

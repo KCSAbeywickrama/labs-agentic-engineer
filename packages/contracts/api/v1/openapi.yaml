@@ -1852,6 +1852,81 @@ paths:
       summary: Store a project's reference documents
       tags:
       - Projects
+  /projects/{projectName}/seed:
+    post:
+      description: >-
+        Seed a project's repository from a spec bundle: an `.aespecs` archive a developer skill
+        (`code-to-spec`) wrote from a product's existing code, holding `manifest.json` and the
+        `specs/` tree the first design derives from (the requirements with their coverage files,
+        `specs/design/domain-model.md`, and the upstream dependency definitions with their contracts).
+        The platform opens the archive under fixed bounds, admits only the spec paths it knows,
+        validates every file with its own parsers, refuses anything that looks like a credential,
+        then commits the files and the bundle's provenance (a `[recreate]` table in the project
+        descriptor) in ONE commit through the org's AE Studio. A seeded project never runs the
+        `/start` kickoff: its first design is `/recreate`, started from the console. Seeding again
+        before any turn ran overwrites the seeded files; after a turn it is refused.
+      operationId: seed-project
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              bundle:
+                contentType: application/octet-stream
+            schema:
+              properties:
+                bundle:
+                  description: >-
+                    The `.aespecs` archive, at most 5 MiB on the raw bytes. A zip whose root holds
+                    `manifest.json` (`format: aespecs/1`, the producer, the product, the source
+                    repository and commit) and `specs/requirements/**`,
+                    `specs/design/domain-model.md` and `specs/design/dependencies/<name>/` files;
+                    at most 256 entries and 8 MiB unpacked, every file UTF-8 text.
+                  format: binary
+                  type: string
+              required:
+              - bundle
+              type: object
+        required: true
+      responses:
+        '204':
+          description: Seeded — the files and the provenance are committed; the kickoff stays held.
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: >-
+            Rejected (`bundle_rejected`) — the message names the entry and the rule: not a zip,
+            over a bound, a path outside the allowed set, a file that is not UTF-8 text, a
+            manifest field that does not validate, a requirements or dependency file the
+            platform's parsers refuse, or a value that looks like a credential. Nothing is
+            committed.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The project has already run an agent turn (`already_started`); a seed
+            would overwrite work the agent or the user did.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Seed a project's specs from an .aespecs bundle
+      tags:
+      - Projects
   /projects/{projectName}/roles:
     get:
       description: The project's Security panel read. `roles` is the WHOLE directory catalog,
@@ -7843,6 +7918,11 @@ components:
         exists:
           description: Any spec file created; false renders the Generate-spec CTA.
           type: boolean
+        recreate:
+          allOf:
+          - $ref: '#/components/schemas/RecreateProvenance'
+          description: Present only on a project seeded from an `.aespecs` bundle (`seed-project`).
+          x-go-type-skip-optional-pointer: false
         version:
           description: The newest spec version's name; "" if never published.
           type: string
@@ -7853,6 +7933,34 @@ components:
       - design
       - agent
       - availability
+      type: object
+    RecreateProvenance:
+      additionalProperties: false
+      description: >-
+        Present when the project's specs were seeded from an `.aespecs` bundle (`seed-project`):
+        the bundle's provenance as the project descriptor records it. A seeded project never runs
+        the `/start` kickoff; while `exists` is true and `agent` is `never-started`, the console
+        offers `/recreate`, the first design of a product recreated from its code, in place of the
+        ordinary design run. Absent for every other project.
+      properties:
+        producer:
+          description: The tool that wrote the bundle, with its version ("code-to-spec 1.0").
+          type: string
+        sourceRepository:
+          description: The product's repository the specs were derived from, or "local checkout".
+          type: string
+        sourceCommit:
+          description: The commit of that repository the specs were read at (7 to 40 hex).
+          type: string
+        seededAt:
+          description: When the platform committed the bundle (RFC 3339).
+          format: date-time
+          type: string
+      required:
+      - producer
+      - sourceRepository
+      - sourceCommit
+      - seededAt
       type: object
     StatusMsg:
       additionalProperties: false

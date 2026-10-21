@@ -2550,6 +2550,21 @@ type RcaAgentReportList struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
+// RecreateProvenance Present when the project's specs were seeded from an `.aespecs` bundle (`seed-project`): the bundle's provenance as the project descriptor records it. A seeded project never runs the `/start` kickoff; while `exists` is true and `agent` is `never-started`, the console offers `/recreate`, the first design of a product recreated from its code, in place of the ordinary design run. Absent for every other project.
+type RecreateProvenance struct {
+	// Producer The tool that wrote the bundle, with its version ("code-to-spec 1.0").
+	Producer string `json:"producer"`
+
+	// SeededAt When the platform committed the bundle (RFC 3339).
+	SeededAt time.Time `json:"seededAt"`
+
+	// SourceCommit The commit of that repository the specs were read at (7 to 40 hex).
+	SourceCommit string `json:"sourceCommit"`
+
+	// SourceRepository The product's repository the specs were derived from, or "local checkout".
+	SourceRepository string `json:"sourceRepository"`
+}
+
 // RegisterExternalResourceRequest defines model for RegisterExternalResourceRequest.
 type RegisterExternalResourceRequest struct {
 	Config                  []ConfigKeyDTO            `json:"config"`
@@ -3214,6 +3229,9 @@ type SpecStage struct {
 	// Exists Any spec file created; false renders the Generate-spec CTA.
 	Exists bool `json:"exists"`
 
+	// Recreate Present only on a project seeded from an `.aespecs` bundle (`seed-project`).
+	Recreate *RecreateProvenance `json:"recreate,omitempty"`
+
 	// UnavailableReason Why the spec facts are unavailable; present only when `availability` is `unavailable`, and named after the edge's error codes. `github_not_connected` — the org has no GitHub connection (a person connects it in Settings → Credentials); `ae_studio_unavailable` — AE Studio is coming up or rolling and the poll recovers on its own; `ae_studio_misconfigured` — aep-api's own AE Studio client is refused (an operator fixes it).
 	UnavailableReason SpecStageUnavailableReason `json:"unavailableReason,omitempty"`
 
@@ -3692,6 +3710,12 @@ type PutProjectReferencesMultipartBody struct {
 	Files []openapi_types.File `json:"files"`
 }
 
+// SeedProjectMultipartBody defines parameters for SeedProject.
+type SeedProjectMultipartBody struct {
+	// Bundle The `.aespecs` archive, at most 5 MiB on the raw bytes. A zip whose root holds `manifest.json` (`format: aespecs/1`, the producer, the product, the source repository and commit) and `specs/requirements/**`, `specs/design/domain-model.md` and `specs/design/dependencies/<name>/` files; at most 256 entries and 8 MiB unpacked, every file UTF-8 text.
+	Bundle openapi_types.File `json:"bundle"`
+}
+
 // ListTasksParams defines parameters for ListTasks.
 type ListTasksParams struct {
 	// State Which Tasks to return (default open)
@@ -3771,6 +3795,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 
 // PutProjectReferencesMultipartRequestBody defines body for PutProjectReferences for multipart/form-data ContentType.
 type PutProjectReferencesMultipartRequestBody PutProjectReferencesMultipartBody
+
+// SeedProjectMultipartRequestBody defines body for SeedProject for multipart/form-data ContentType.
+type SeedProjectMultipartRequestBody SeedProjectMultipartBody
 
 // PromoteTaskFromIssueJSONRequestBody defines body for PromoteTaskFromIssue for application/json ContentType.
 type PromoteTaskFromIssueJSONRequestBody = PromoteFromIssueRequest

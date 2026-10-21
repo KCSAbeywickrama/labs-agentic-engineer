@@ -28,9 +28,10 @@ flowchart LR
 | `tags` | list the project's spec version tags, newest first by creation time | `GET .../tags` |
 | `skills` | list / create / update / delete / import / sync / get the org Skill library | `/skills...` |
 | `designdeps` | the two writes into an external dependency's directory: provide its contract (a URL the platform fetches, or the document itself), and record the user's authorization to build on the design agent's assumed contract — before the agent writes it (the resolve flow's card) or after (the definition's acceptance box) | `POST .../dependencies/{name}/contract`, `POST .../dependencies/{name}/assumption` |
+| `seed` | seed a project's specs from an `.aespecs` bundle — the tree a developer skill (`code-to-spec`) derived from a product's existing code: the one `bundle` part, read whole under `specbundle.MaxBundleBytes`, handed to the root's `SeedService` | `POST .../seed` |
 
 *Still flat in the domain root (not carved into finer slices): the artifacts store/versioning machinery,
-the kickoff, the finished-turn ledger, and the design / skills services. Agent turns themselves run
+the kickoff, the seed, the finished-turn ledger, and the design / skills services. Agent turns themselves run
 in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-system-project/ae-studio/ae-design-agent/design/turn-runtime.md)); aep-api starts only the kickoff and stores what the pod records.*
 
 ## Ports
@@ -43,7 +44,8 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` / `identity` — design reads, spec-save, status snapshots; `identity` reads `security.json` from the design bundle AT THE TAG being built, never at HEAD |
 | `ConnectionEdges` | offers | `projects` (deploy order) — which siblings a component's workload connects to, and so must have a binding first |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
-| `KickoffService.Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn in the org's AE Studio pod |
+| `KickoffService.Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn in the org's AE Studio pod; refused on a project whose descriptor carries `[recreate]` (read at the pod mirror's tip), so a seeded project is never interviewed |
+| `SeedService.Seed` | offers | `spec/seed` (seed-project) — opens an `.aespecs` bundle (`platform/specbundle`: bounds, path allow-list, UTF-8 text, a credential scan), holds its content to the readers the save gates use (`reqspec.Parse` and its ID problems, the strict dependency parser, the contract file beside each definition, `ValidateOpenAPI`), and commits the files with the descriptor's `[recreate]` table in ONE commit (`CommitRetrying`; a blob already at the tip is not rewritten, the same bundle again commits nothing); refused once the project ran a turn |
 | `aestudiotools.Turns` · `aestudiotools.References` | needs | `clients/aestudiotools` — the org pod's `/internal/v1` turns (kickoff) and reference store (the references upload, a pass-through) |
 | `TurnRepository.Newest` · `CompletedFlows` · `SumUsageByProject` | offers | `projects` — the status poll's `spec.agent` (has the project run a turn, and did the newest fail), its `designOutdated` baseline (the newest design runs, read where each ended), Settings → Usage. Inside this domain the same repository is the artifact service's `DesignLedger` (`DesignRuns`, `ArtifactRevisions`): the build gate's staleness input and the spec state's `designedFrom` and `artifactRevisions` |
 | `TurnRepository.RecordFinished` | offers | `edge` — `record-turn-usage`, the pod's finished turns |
@@ -149,6 +151,15 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
   recovered there as the "could not be read" 400 and logged as `references.office_conversion_panicked`
   with the panic's class only (its value can carry document text). The held kickoff fires only on the pod's
   `2xx`.
+- **A seeded project never runs `/start`** (`seed.go`, `kickoff.go`). A product recreated from existing
+  code arrives as an `.aespecs` bundle the console attaches at create beside the reference documents and
+  sends to `seed-project` first. The seed commits the bundle's files and stamps `[recreate]` into the
+  descriptor; every later release of the held kickoff (the references upload, the console's "continue
+  without documents") reads that table and is refused, and the status poll surfaces it as
+  `spec.recreate` so the console offers `/recreate`, the first design of a recreated product, started
+  from the browser like any typed command. The seed is a raw commit, so it applies the Room's own
+  write rules itself (paths under `specs/`, 5 MiB per file) before anything lands, and nothing lands
+  on any refusal.
 - **Design staleness is derived per feature, never stored** (#575, E1, L30). A feature's design is
   out of date when its basis (`reqspec.Basis`: its file plus the product-wide items that reach it)
   differs between today and the requirements as the run that last designed it LEFT them: the
