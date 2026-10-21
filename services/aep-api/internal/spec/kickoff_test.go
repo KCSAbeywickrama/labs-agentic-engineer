@@ -187,7 +187,7 @@ func TestKickoff_ProjectWithoutARepository(t *testing.T) {
 func TestKickoff_RefusedOnASeededProject(t *testing.T) {
 	svc, f := newKickoff(kickoffLedger{})
 	d := spec.NewDescriptor("greeter", "", "2026-10-21T07:00:00Z")
-	d.Recreate = &spec.RecreateProvenance{Producer: "code-to-spec", ProducerVersion: "1.0", SourceRepository: "local checkout", SourceCommit: "d14b825", BundleFormat: "aespecs/1", SeededAt: "2026-10-21T08:05:00Z"}
+	d.Recreate = &spec.RecreateProvenance{Producer: "code-to-spec", ProducerVersion: "1.0", Product: "Greeter", SourceRepository: "local checkout", SourceCommit: "d14b825", SeededAt: "2026-10-21T08:05:00Z"}
 	raw, err := spec.MarshalDescriptor(d)
 	if err != nil {
 		t.Fatal(err)

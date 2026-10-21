@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -308,7 +307,9 @@ func recreateOf(p *spec.RecreateProvenance) *gen.RecreateProvenance {
 	}
 	seededAt, _ := time.Parse(time.RFC3339, p.SeededAt)
 	return &gen.RecreateProvenance{
-		Producer:         strings.TrimSpace(p.Producer + " " + p.ProducerVersion),
+		Producer:         p.Producer,
+		ProducerVersion:  p.ProducerVersion,
+		Product:          p.Product,
 		SourceRepository: p.SourceRepository,
 		SourceCommit:     p.SourceCommit,
 		SeededAt:         seededAt,

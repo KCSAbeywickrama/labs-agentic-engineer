@@ -170,9 +170,9 @@ func TestWriteDescriptor_TransientFailureIsTheCallers(t *testing.T) {
 func TestDescriptorRoundTripsRecreateProvenance(t *testing.T) {
 	d := NewDescriptor("allocations", "", "2026-10-21T08:00:00Z")
 	d.Recreate = &RecreateProvenance{
-		Producer: "code-to-spec", ProducerVersion: "1.0",
+		Producer: "code-to-spec", ProducerVersion: "1.0", Product: "Allocations",
 		SourceRepository: "https://github.com/acme/allocations.git", SourceCommit: "d14b825",
-		BundleFormat: "aespecs/1", SeededAt: "2026-10-21T08:05:00Z",
+		SeededAt: "2026-10-21T08:05:00Z",
 	}
 	raw, err := MarshalDescriptor(d)
 	if err != nil {

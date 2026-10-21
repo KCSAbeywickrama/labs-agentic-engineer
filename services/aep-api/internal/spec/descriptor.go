@@ -81,9 +81,9 @@ type Descriptor struct {
 type RecreateProvenance struct {
 	Producer         string `toml:"producer"`
 	ProducerVersion  string `toml:"producerVersion"`
+	Product          string `toml:"product"`
 	SourceRepository string `toml:"sourceRepository"`
 	SourceCommit     string `toml:"sourceCommit"`
-	BundleFormat     string `toml:"bundleFormat"`
 	SeededAt         string `toml:"seededAt"`
 }
 

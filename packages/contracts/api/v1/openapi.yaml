@@ -7939,12 +7939,18 @@ components:
       description: >-
         Present when the project's specs were seeded from an `.aespecs` bundle (`seed-project`):
         the bundle's provenance as the project descriptor records it. A seeded project never runs
-        the `/start` kickoff; while `exists` is true and `agent` is `never-started`, the console
-        offers `/recreate`, the first design of a product recreated from its code, in place of the
-        ordinary design run. Absent for every other project.
+        the `/start` kickoff; while it is present and `design` is false (no design exists yet), the
+        console offers `/recreate`, the first design of a product recreated from its code, in place
+        of the ordinary design run. Absent for every other project.
       properties:
         producer:
-          description: The tool that wrote the bundle, with its version ("code-to-spec 1.0").
+          description: The tool that wrote the bundle ("code-to-spec").
+          type: string
+        producerVersion:
+          description: That tool's version as the manifest states it ("1.0").
+          type: string
+        product:
+          description: The product's name as the manifest states it.
           type: string
         sourceRepository:
           description: The product's repository the specs were derived from, or "local checkout".
@@ -7958,6 +7964,8 @@ components:
           type: string
       required:
       - producer
+      - producerVersion
+      - product
       - sourceRepository
       - sourceCommit
       - seededAt

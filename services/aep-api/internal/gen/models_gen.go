@@ -2550,10 +2550,16 @@ type RcaAgentReportList struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
-// RecreateProvenance Present when the project's specs were seeded from an `.aespecs` bundle (`seed-project`): the bundle's provenance as the project descriptor records it. A seeded project never runs the `/start` kickoff; while `exists` is true and `agent` is `never-started`, the console offers `/recreate`, the first design of a product recreated from its code, in place of the ordinary design run. Absent for every other project.
+// RecreateProvenance Present when the project's specs were seeded from an `.aespecs` bundle (`seed-project`): the bundle's provenance as the project descriptor records it. A seeded project never runs the `/start` kickoff; while it is present and `design` is false (no design exists yet), the console offers `/recreate`, the first design of a product recreated from its code, in place of the ordinary design run. Absent for every other project.
 type RecreateProvenance struct {
-	// Producer The tool that wrote the bundle, with its version ("code-to-spec 1.0").
+	// Producer The tool that wrote the bundle ("code-to-spec").
 	Producer string `json:"producer"`
+
+	// ProducerVersion That tool's version as the manifest states it ("1.0").
+	ProducerVersion string `json:"producerVersion"`
+
+	// Product The product's name as the manifest states it.
+	Product string `json:"product"`
 
 	// SeededAt When the platform committed the bundle (RFC 3339).
 	SeededAt time.Time `json:"seededAt"`

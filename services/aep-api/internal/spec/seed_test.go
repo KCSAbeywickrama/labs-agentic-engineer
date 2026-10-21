@@ -137,9 +137,9 @@ func TestSeed_CommitsTheBundleAndTheProvenanceInOneCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := RecreateProvenance{
-		Producer: "code-to-spec", ProducerVersion: "1.0",
+		Producer: "code-to-spec", ProducerVersion: "1.0", Product: "Allocations",
 		SourceRepository: "https://github.com/acme/allocations.git", SourceCommit: "d14b825",
-		BundleFormat: "aespecs/1", SeededAt: "2026-10-21T08:05:00Z",
+		SeededAt: "2026-10-21T08:05:00Z",
 	}
 	if d.Recreate == nil || *d.Recreate != want {
 		t.Errorf("descriptor recreate = %+v, want %+v", d.Recreate, want)

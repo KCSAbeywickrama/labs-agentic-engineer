@@ -105,9 +105,9 @@ func (s *SeedService) Seed(ctx context.Context, orgID, projectID string, archive
 	provenance := RecreateProvenance{
 		Producer:         m.Producer.Name,
 		ProducerVersion:  m.Producer.Version,
+		Product:          m.Product,
 		SourceRepository: m.Source.Repository,
 		SourceCommit:     m.Source.Commit,
-		BundleFormat:     m.Format,
 		SeededAt:         s.now().UTC().Format(time.RFC3339),
 	}
 	paths := slices.Sorted(maps.Keys(b.Files))
@@ -205,7 +205,8 @@ func validateSeedFiles(files map[string][]byte) error {
 	if strings.TrimSpace(reqFiles[requirementsMainFile]) == "" {
 		return seedRejected("%s/%s is missing or blank", RequirementsDir, requirementsMainFile)
 	}
-	for _, p := range reqspec.Parse(reqFiles).Problems() {
+	if problems := reqspec.Parse(reqFiles).Problems(); len(problems) > 0 {
+		p := problems[0]
 		return seedRejected("%s/%s: %s", RequirementsDir, p.Path, p.Message)
 	}
 	if strings.TrimSpace(designFiles[domainModelFile]) == "" {
