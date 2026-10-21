@@ -288,14 +288,14 @@ func parseManifest(raw []byte) (Manifest, error) {
 // The credential rules. The skill that writes a bundle copies configuration
 // key NAMES and never values, so any value-shaped string is a leak to refuse,
 // not a false positive to tolerate. Prose rarely trips them: an assignment
-// must carry a value of at least 16 characters with a digit in it, and a
-// bare token must be long, mixed and dense.
+// must carry one unbroken value of at least 16 characters (a passphrase
+// without a digit is still a credential), and a bare token must be long,
+// mixed and dense.
 var (
 	privateKeyBlock = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 	assignedSecret  = regexp.MustCompile(`(?i)\b(password|passwd|secret|api[_-]?key|access[_-]?key|private[_-]?key|token|client[_-]?secret)\b\s*[:=]\s*["']?([A-Za-z0-9_\-+/=.]{16,})`)
 	credentialInURL = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
 	bareToken       = regexp.MustCompile(`[A-Za-z0-9+/_\-]{32,}`)
-	hasDigit        = regexp.MustCompile(`[0-9]`)
 )
 
 // credentialIn answers the rule a text trips, or "" when it trips none.
@@ -306,10 +306,8 @@ func credentialIn(text []byte) string {
 	if credentialInURL.Match(text) {
 		return "a URL with credentials in it"
 	}
-	for _, m := range assignedSecret.FindAllSubmatch(text, -1) {
-		if hasDigit.Match(m[2]) {
-			return fmt.Sprintf("a value assigned to %q", string(m[1]))
-		}
+	if m := assignedSecret.FindSubmatch(text); m != nil {
+		return fmt.Sprintf("a value assigned to %q", string(m[1]))
 	}
 	for _, tok := range bareToken.FindAll(text, -1) {
 		if looksLikeToken(tok) {

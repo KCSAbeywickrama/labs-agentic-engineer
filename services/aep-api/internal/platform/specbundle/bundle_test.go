@@ -134,6 +134,7 @@ func TestOpen_Refusals(t *testing.T) {
 		"invalid utf-8":         {entries: withEntry(entry{name: "specs/requirements/bad.md", content: "\xff\xfe"}), want: "not UTF-8 text"},
 		"private key":           {entries: withEntry(entry{name: "specs/requirements/key.md", content: "-----BEGIN RSA PRIVATE KEY-----\nabc\n"}), want: "private key block"},
 		"assigned secret":       {entries: withEntry(entry{name: "specs/requirements/cfg.md", content: "client_secret: 8f3a9c2e1b7d4e6f0a1b2c3d\n"}), want: `assigned to "client_secret"`},
+		"assigned passphrase":   {entries: withEntry(entry{name: "specs/requirements/cfg.md", content: "password = correcthorsebatterystaple\n"}), want: `assigned to "password"`},
 		"url credentials":       {entries: withEntry(entry{name: "specs/requirements/url.md", content: "see https://user:pa55word@example.com/x\n"}), want: "URL with credentials"},
 		"high entropy token":    {entries: withEntry(entry{name: "specs/requirements/tok.md", content: "ref AKIAxQ7bL2mN9pR4sT6vW8yZ1aC3eF5gH0jK2lM4nP6\n"}), want: "high-entropy token"},
 	}
