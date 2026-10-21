@@ -51,8 +51,11 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// ErrProjectAlreadyStarted reports that the project has run an agent turn, so
-// a seed would overwrite work the agent or the user did.
+// ErrProjectAlreadyStarted reports that the project has run an agent turn: a
+// seed would overwrite work the agent or the user did, and there is no kickoff
+// left to fire. Not a failure for the kickoff: it is what makes Kickoff safe to
+// call from more than one place, and the reason a retried references upload
+// does not start a second interview.
 var ErrProjectAlreadyStarted = errors.New("project has already run an agent turn")
 
 // SeedRejectedError is a bundle whose spec content the platform's readers

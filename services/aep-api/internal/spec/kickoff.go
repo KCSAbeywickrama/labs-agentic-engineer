@@ -67,16 +67,10 @@ func kickoffTurnID(orgID, projectID string) string {
 	return uuid.NewSHA1(kickoffNamespace, []byte(orgID+"/"+projectID)).String()
 }
 
-// ErrKickoffAlreadyRan reports that the project has already had an agent turn,
-// so there is no kickoff left to fire. Not a failure: it is what makes Kickoff
-// safe to call from more than one place, and the reason a retried references
-// upload does not start a second interview.
-var ErrKickoffAlreadyRan = errors.New("project has already run an agent turn")
-
 // ErrProjectSeeded reports that the project's specs were seeded from a
 // bundle (the descriptor carries `[recreate]`), so `/start` is never its
 // first turn: the user starts `/recreate` from the console. Not a failure,
-// for the same reason as ErrKickoffAlreadyRan — every release of a held
+// for the same reason as ErrProjectAlreadyStarted — every release of a held
 // kickoff (the references upload, the console's "continue without
 // documents") is answered the same way.
 var ErrProjectSeeded = errors.New("project was seeded from a spec bundle")
@@ -119,7 +113,7 @@ func (k *KickoffService) Kickoff(ctx context.Context, orgID, projectID string) {
 	turnID, events, err := k.StartKickoff(bg, orgID, projectID)
 	if err != nil {
 		cancel()
-		if errors.Is(err, ErrKickoffAlreadyRan) {
+		if errors.Is(err, ErrProjectAlreadyStarted) {
 			slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
 				"org", orgID, "project", projectID)
 			return
@@ -144,7 +138,7 @@ func (k *KickoffService) Kickoff(ctx context.Context, orgID, projectID string) {
 // returns its id and stream. The caller must range the stream or cancel ctx:
 // it holds the pod's response open.
 //
-// Refused with ErrKickoffAlreadyRan when the ledger holds a turn of the
+// Refused with ErrProjectAlreadyStarted when the ledger holds a turn of the
 // project: the guard is a turn record rather than a spec file because the
 // whole point is to cover the window BEFORE the first file lands.
 func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID string) (string, iter.Seq2[aestudiotools.TurnEvent, error], error) {
@@ -153,7 +147,7 @@ func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID stri
 		return "", nil, fmt.Errorf("read newest turn: %w", err)
 	}
 	if newest != nil {
-		return "", nil, ErrKickoffAlreadyRan
+		return "", nil, ErrProjectAlreadyStarted
 	}
 	ref, _, err := sourcecontrol.RepoRefFor(ctx, k.repos, orgID, projectID)
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -169,7 +170,7 @@ func TestOpen_Bounds(t *testing.T) {
 	t.Run("too many entries", func(t *testing.T) {
 		entries := valid()
 		for i := 0; len(entries) <= MaxEntries; i++ {
-			entries = append(entries, entry{name: "specs/requirements/sources/m" + strings.Repeat("x", i%3) + string(rune('a'+i%26)) + itoa(i) + ".md", content: "# m\n"})
+			entries = append(entries, entry{name: "specs/requirements/sources/m" + strings.Repeat("x", i%3) + string(rune('a'+i%26)) + strconv.Itoa(i) + ".md", content: "# m\n"})
 		}
 		_, err := Open(zipOf(t, entries))
 		if !errors.Is(err, ErrRejected) || !strings.Contains(Reason(err), "entries") {
@@ -221,16 +222,4 @@ func TestParseManifest_Refusals(t *testing.T) {
 	if m, err := parseManifest([]byte(strings.Replace(manifest, "https://github.com/acme/allocations.git", LocalCheckout, 1))); err != nil || m.Source.Repository != LocalCheckout {
 		t.Fatalf("local checkout refused: %v", err)
 	}
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	return string(b)
 }

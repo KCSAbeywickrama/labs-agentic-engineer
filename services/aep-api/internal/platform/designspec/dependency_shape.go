@@ -99,6 +99,18 @@ func CanonicalContractFile(contractType string) string {
 	return ""
 }
 
+// IsContractFile reports whether name is a file name validateDependencyDesign
+// accepts as a contract document under any type. The spec bundle reader asks
+// it so the bundle admits exactly the contract files the project gate does.
+func IsContractFile(name string) bool {
+	for _, names := range contractFilesByType {
+		if containsString(names, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateDependencyDesign(content, dirName string) *shapeProblem {
 	var parsed any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {

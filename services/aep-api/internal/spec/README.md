@@ -30,7 +30,7 @@ flowchart LR
 | `designdeps` | the two writes into an external dependency's directory: provide its contract (a URL the platform fetches, or the document itself), and record the user's authorization to build on the design agent's assumed contract — before the agent writes it (the resolve flow's card) or after (the definition's acceptance box) | `POST .../dependencies/{name}/contract`, `POST .../dependencies/{name}/assumption` |
 | `seed` | seed a project's specs from an `.aespecs` bundle — the tree a developer skill (`code-to-spec`) derived from a product's existing code: the one `bundle` part, read whole under `specbundle.MaxBundleBytes`, handed to the root's `SeedService` | `POST .../seed` |
 
-*Still flat in the domain root (not carved into finer slices): the artifacts store/versioning machinery,
+*Flat in the domain root, with no slice of their own: the artifacts store/versioning machinery,
 the kickoff, the seed, the finished-turn ledger, and the design / skills services. Agent turns themselves run
 in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-system-project/ae-studio/ae-design-agent/design/turn-runtime.md)); aep-api starts only the kickoff and stores what the pod records.*
 

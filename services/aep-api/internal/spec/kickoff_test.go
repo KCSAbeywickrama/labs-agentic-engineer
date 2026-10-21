@@ -131,8 +131,8 @@ func TestKickoff_TurnIDIsPerProject(t *testing.T) {
 func TestKickoff_RefusedOnceTheProjectRanATurn(t *testing.T) {
 	svc, f := newKickoff(kickoffLedger{newest: &spec.AgentTurn{ID: uuid.NewString()}})
 
-	if _, _, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj); !errors.Is(err, spec.ErrKickoffAlreadyRan) {
-		t.Fatalf("err = %v, want ErrKickoffAlreadyRan", err)
+	if _, _, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj); !errors.Is(err, spec.ErrProjectAlreadyStarted) {
+		t.Fatalf("err = %v, want ErrProjectAlreadyStarted", err)
 	}
 	svc.Kickoff(t.Context(), kickoffOrg, kickoffProj)
 	if n := len(f.TurnCalls()); n != 0 {

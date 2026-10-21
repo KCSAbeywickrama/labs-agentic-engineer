@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 )
 
 // Format is the one bundle format this platform reads; the manifest states it.
@@ -109,12 +111,11 @@ var (
 	kebab           = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 )
 
-// The dependency files a definition directory may hold: the definition, the
-// design's assumptions, and the contract under the write gate's fixed names.
-var dependencyFiles = map[string]bool{
-	"dependency.json": true, "assumptions.md": true,
-	"openapi.yaml": true, "openapi.yml": true, "openapi.json": true,
-	"schema.graphql": true, "schema.graphqls": true, "sdk.json": true,
+// dependencyFile reports whether a definition directory may hold file: the
+// definition, the design's assumptions, or a contract under one of the names
+// the project gate accepts (designspec.IsContractFile), so the two never drift.
+func dependencyFile(file string) bool {
+	return file == "dependency.json" || file == "assumptions.md" || designspec.IsContractFile(file)
 }
 
 const (
@@ -148,7 +149,7 @@ func admitted(p string) (bool, string) {
 		if !kebab.MatchString(dir) {
 			return false, "a dependency directory is kebab-case"
 		}
-		if !dependencyFiles[file] {
+		if !dependencyFile(file) {
 			return false, "not a dependency definition, assumptions or contract file"
 		}
 		return true, ""
