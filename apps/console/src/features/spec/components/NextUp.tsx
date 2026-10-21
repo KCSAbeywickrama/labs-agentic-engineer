@@ -105,7 +105,11 @@ export function NextUp({
   const interview = useStartInterview(projectName);
   const design = useDesignTurns(projectName);
   const build = useBuildAction(projectName);
-  const all = withBuild(items, nextUpBuild(build.offer));
+  // A seeded, undesigned project's first design is the recreate (ADR-0053): the
+  // same action as the design item, under its own name.
+  const all = withBuild(items, nextUpBuild(build.offer)).map((item) =>
+    item.kind === "design" && design.recreate ? { ...item, label: "Recreate" } : item,
+  );
   if (all.length === 0) return null;
   const onTurn = (item: NextUpItem) => {
     // Held as every Build is (buildHold): while the agent works it waits, as a design or interview does.

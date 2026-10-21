@@ -52,7 +52,8 @@ export function SpecActions({ projectName, file }: { projectName: string; file?:
           </Tooltip>
         ) : (
           <Button size="small" variant={view.design.primary ? "contained" : "outlined"} disabled={!design.ready} onClick={design.design}>
-            {view.design.label}
+            {/* A seeded, undesigned project's first design is the recreate (ADR-0053): same action, its own name. */}
+            {design.recreate ? "Recreate" : view.design.label}
           </Button>
         ))}
     </>
