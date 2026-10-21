@@ -22,6 +22,7 @@ import {
   MAX_REFERENCE_FILE_BYTES,
   referenceTypeLabel,
   screenReferenceFiles,
+  splitAttachments,
 } from "./referenceFiles";
 
 function file(name: string, content: string | Uint8Array<ArrayBuffer>, type = ""): File {
@@ -66,6 +67,29 @@ describe("screenReferenceFiles", () => {
     // so accepting one would store bytes no turn can use.
     expect(rejected[0]?.reason).toMatch(/\.pdf/);
     expect(rejected[0]?.reason).toMatch(/\.webp/);
+  });
+
+  // The spec bundle (ADR-0053) rides the same picker but is not a document:
+  // one per project, the same size ceiling, outside the documents' count.
+  it("accepts one spec bundle beside the documents, outside their count", () => {
+    const docs = Array.from({ length: MAX_REFERENCE_FILES }, (_, i) => file(`doc-${i}.md`, "x"));
+    const { accepted, rejected } = screenReferenceFiles([], [...docs, file("allocations.aespecs", "zip")]);
+    expect(accepted.map((f) => f.name)).toContain("allocations.aespecs");
+    expect(accepted).toHaveLength(MAX_REFERENCE_FILES + 1);
+    expect(rejected).toEqual([]);
+    expect(splitAttachments(accepted)).toEqual({ documents: docs, bundle: accepted[MAX_REFERENCE_FILES] });
+  });
+
+  it("rejects a second spec bundle", () => {
+    const first = file("one.aespecs", "zip");
+    const { accepted, rejected } = screenReferenceFiles([first], [file("two.aespecs", "zip")]);
+    expect(accepted).toEqual([]);
+    expect(rejected[0]?.reason).toMatch(/One \.aespecs bundle/);
+  });
+
+  it("rejects a spec bundle over the size cap", () => {
+    const { rejected } = screenReferenceFiles([], [file("big.aespecs", new Uint8Array(MAX_REFERENCE_FILE_BYTES + 1))]);
+    expect(rejected[0]?.reason).toMatch(/5 MB/);
   });
 
   it("rejects a file over the size cap", () => {

@@ -34,9 +34,9 @@ import { ApiRequestError } from "../../../api/errors";
 import { releaseKickoff } from "../../agent-chat/useProjectChat";
 import { BasePage } from "../../shell/components/BasePage";
 import { PHONE } from "../../shell/layout";
-import { useCreateProject, useGithubOrg, useUploadReferences } from "../api/queries";
+import { useCreateProject, useGithubOrg, useSeedProject, useUploadReferences } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../projectName";
-import { referenceTypeLabel } from "../referenceFiles";
+import { referenceTypeLabel, splitAttachments } from "../referenceFiles";
 import { PromptComposer } from "./PromptComposer";
 
 // The examples are the fastest answer a newcomer gets to "what does enough
@@ -125,6 +125,11 @@ export function ProjectCreate() {
   const githubOrg = useGithubOrg();
   const createProject = useCreateProject();
   const uploadReferences = useUploadReferences();
+  const seedProject = useSeedProject();
+  // The project the bundle was seeded into: a retry after a failed upload
+  // never seeds again, and Continue never starts an interview on it.
+  const [seededName, setSeededName] = useState<string | null>(null);
+  const { documents, bundle } = splitAttachments(files);
 
   // An example fills the prompt and hands focus back to it, so it can be
   // edited or sent on with Continue.
@@ -175,24 +180,50 @@ export function ProjectCreate() {
   };
 
   const uploadFor = (projectName: string) => {
-    uploadReferences.mutate({ projectName, files }, { onSuccess: () => goToProject(projectName) });
+    if (documents.length === 0) {
+      goToProject(projectName);
+      return;
+    }
+    uploadReferences.mutate({ projectName, files: documents }, { onSuccess: () => goToProject(projectName) });
+  };
+
+  // The bundle goes first (ADR-0053): the platform seeds the repository from
+  // it and holds the kickoff for good; the documents, if any, follow as the
+  // first design's attachments. A project already seeded is not seeded again
+  // when a later step is retried.
+  const seedThenUpload = (projectName: string) => {
+    if (bundle && seededName !== projectName) {
+      seedProject.mutate(
+        { projectName, bundle },
+        {
+          onSuccess: () => {
+            setSeededName(projectName);
+            uploadFor(projectName);
+          },
+        },
+      );
+      return;
+    }
+    uploadFor(projectName);
   };
 
   // Going on without the documents after their upload failed. The create said
   // documents were coming, so the platform HELD the kickoff for an upload that
   // is now never coming, and nothing else releases it: the project would sit
   // un-started. The chat sends `/start` once it sees the conversation is still
-  // empty (guarded, so a kickoff that ran after all is not started twice).
+  // empty (guarded, so a kickoff that ran after all is not started twice). A
+  // seeded project is the exception: its first design is `/recreate`, from
+  // its design card, and the platform refuses `/start` on it anyway.
   const continueWithoutDocuments = (projectName: string) => {
-    releaseKickoff(projectName);
+    if (seededName !== projectName) releaseKickoff(projectName);
     goToProject(projectName);
   };
 
   const create = () => {
-    // The project already exists and only the reference upload failed, so the
-    // primary action retries just that.
+    // The project already exists and only the seed or the reference upload
+    // failed, so the primary action retries from there.
     if (createdName) {
-      uploadFor(createdName);
+      seedThenUpload(createdName);
       return;
     }
     createProject.mutate(
@@ -215,13 +246,14 @@ export function ProjectCreate() {
             return;
           }
           setCreatedName(project.name);
-          uploadFor(project.name);
+          seedThenUpload(project.name);
         },
       },
     );
   };
 
-  const pending = createProject.isPending || uploadReferences.isPending;
+  const pending = createProject.isPending || seedProject.isPending || uploadReferences.isPending;
+  const seedFailed = createdName !== null && seedProject.isError;
   const uploadFailed = createdName !== null && uploadReferences.isError;
 
   if (step === "prompt") {
@@ -351,6 +383,11 @@ export function ProjectCreate() {
               retryDisabled={pending}
             />
           )}
+          {seedFailed && (
+            <Alert severity="error">
+              The project was created, but seeding its specs from the bundle failed: {seedProject.error.message}
+            </Alert>
+          )}
           {uploadFailed && (
             <Alert severity="error">
               The project was created, but uploading the reference documents failed:{" "}
@@ -367,11 +404,12 @@ export function ProjectCreate() {
               {/* Most specific first: the project exists and only the upload
                   failed (#383), the create is in flight (#561), or nothing
                   has happened yet. */}
-              {createdName ? "Retry upload" : pending ? "Creating your project…" : "Create project"}
+              {createdName ? (seedFailed ? "Retry seed" : "Retry upload") : pending ? "Creating your project…" : "Create project"}
             </Button>
-            {uploadFailed ? (
+            {uploadFailed || seedFailed ? (
               // The explicit escape: go to the project without the documents,
-              // releasing the kickoff the platform held for them.
+              // releasing the kickoff the platform held for them (unless the
+              // bundle was seeded, which holds it for good).
               <Button variant="outlined" onClick={() => continueWithoutDocuments(createdName)} disabled={pending}>
                 Continue without documents
               </Button>

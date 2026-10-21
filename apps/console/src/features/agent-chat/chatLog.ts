@@ -30,7 +30,13 @@ import {
   type Op,
   type QuestionAnswer,
 } from "@aep/agent-stream";
-import { parseDesignCommand, parseInterviewCommand, parsePrototypeCommand, START_COMMAND } from "@aep/contracts/commands";
+import {
+  parseDesignCommand,
+  parseInterviewCommand,
+  parsePrototypeCommand,
+  parseRecreateCommand,
+  START_COMMAND,
+} from "@aep/contracts/commands";
 import type { ConversationMessage } from "./api/conversation";
 import { wireScope, type WireScope } from "./turnScope";
 import { parseQuestionsInput } from "./questionCards";
@@ -353,6 +359,7 @@ export function userLineText(text: string): string {
   if (interview) return `Interview ${interview.featureId}.`;
   const design = parseDesignCommand(trimmed);
   if (design) return design.featureIds.length > 0 ? `Design ${design.featureIds.join(", ")}.` : "Design the features.";
+  if (parseRecreateCommand(trimmed)) return "Recreate the product from its specs.";
   const prototype = parsePrototypeCommand(trimmed);
   if (prototype) return prototype.component ? `Prototype ${prototype.component}.` : "Make the prototypes.";
   return text;

@@ -125,7 +125,8 @@ export function DesignWorkspace({ projectName, art, review }: { projectName: str
   const model = design.data;
   const features = spec.data.features;
   const featureName = (id: string) => features.find((f) => f.id === id)?.name ?? id;
-  const label = workspace.design.label;
+  // A seeded, undesigned project's first design is the recreate (ADR-0053).
+  const label = turns.recreate ? "Recreate" : workspace.design.label;
 
   if (card.items.length === 0) {
     return (

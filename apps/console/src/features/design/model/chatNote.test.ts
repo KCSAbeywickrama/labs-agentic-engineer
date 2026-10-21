@@ -26,7 +26,7 @@ const run = (command: string) => [user("u1", command), agent("a1", "1 question f
 
 describe("the chat's pointer to the design's questions", () => {
   it("offers Answer N questions after a design run while questions wait and the Design card is closed", () => {
-    for (const command of ["/design F1 F2", "/address-comments"]) {
+    for (const command of ["/design F1 F2", "/address-comments", "/recreate"]) {
       expect(designQuestionsNote({ items: run(command), running: false, questions: 2, designCardOpen: false })).toEqual({
         afterId: "a1",
         actions: [{ kind: "open-design", label: "Answer 2 questions" }],

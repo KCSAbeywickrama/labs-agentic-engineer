@@ -104,6 +104,16 @@ what it is about (the comment and its file, or the feature), the agent's
 options as buttons for a feature's question, and a text box. An answered
 question leaves the panel; the last one closes it.
 
+## A product recreated from its code
+
+A project seeded from an `.aespecs` bundle (ADR-0053; the status's
+`spec.recreate`) has its requirements, data model and dependency definitions
+before any design. Its first design is `/recreate`: while the project is
+seeded and no design exists, the card's primary reads **Recreate** and
+`useDesignTurns` sends that command instead of `/design F1 F2`. The run
+shows as a design of every feature (`runOf`, `isDesignRun`), and from the
+next run on the card sends `/design` as for any project.
+
 ## The Overview
 
 `DesignOverview`: For business review, For technical review (each row: the

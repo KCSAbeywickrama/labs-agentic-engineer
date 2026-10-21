@@ -48,9 +48,19 @@ const uploadReferences = {
   error: null as Error | null,
 };
 
+// The seed (ADR-0053) succeeds instantly unless a test says otherwise.
+const seedProject = {
+  mutate: vi.fn((_body: { projectName: string; bundle: File }, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.()),
+  reset: vi.fn(),
+  isPending: false,
+  isError: false,
+  error: null as Error | null,
+};
+
 vi.mock("../api/queries", () => ({
   useCreateProject: () => createProject,
   useGithubOrg: () => "acme",
+  useSeedProject: () => seedProject,
   useUploadReferences: () => uploadReferences,
 }));
 
@@ -168,6 +178,66 @@ describe("ProjectCreate reference documents (#383)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue without documents" }));
     expect(navigate).toHaveBeenCalled();
     expect(releaseKickoff).toHaveBeenCalledWith("todo");
+  });
+});
+
+// A product recreated from its code (ADR-0053): the `.aespecs` bundle seeds
+// the project before the documents go up, and a seeded project is never
+// started with `/start`.
+describe("ProjectCreate: seeding from a spec bundle (ADR-0053)", () => {
+  beforeEach(() => {
+    seedProject.mutate.mockClear();
+    seedProject.mutate.mockImplementation((_body, opts) => opts?.onSuccess?.());
+    seedProject.isError = false;
+    seedProject.error = null;
+    uploadReferences.isError = false;
+    uploadReferences.error = null;
+  });
+
+  it("seeds from the bundle first, then uploads only the documents", () => {
+    render(<ProjectCreate />);
+    attachAll(["allocations.aespecs", "prd.md"]);
+    typePrompt();
+    toDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(createProject.mutate).toHaveBeenCalledWith(expect.objectContaining({ referencesPending: true }), expect.anything());
+    expect(seedProject.mutate).toHaveBeenCalledTimes(1);
+    expect(seedProject.mutate.mock.calls[0]?.[0]).toMatchObject({ projectName: "todo" });
+    expect(seedProject.mutate.mock.calls[0]?.[0].bundle.name).toBe("allocations.aespecs");
+    expect(uploadReferences.mutate).toHaveBeenCalledTimes(1);
+    expect(uploadReferences.mutate.mock.calls[0]?.[0].files.map((f: File) => f.name)).toEqual(["prd.md"]);
+    expect(seedProject.mutate.mock.invocationCallOrder[0]).toBeLessThan(uploadReferences.mutate.mock.invocationCallOrder[0]!);
+  });
+
+  it("a bundle alone seeds and lands on the project with no upload and no kickoff", () => {
+    render(<ProjectCreate />);
+    attach("allocations.aespecs");
+    typePrompt();
+    toDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(seedProject.mutate).toHaveBeenCalledTimes(1);
+    expect(uploadReferences.mutate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/projects/$projectName" }));
+    expect(releaseKickoff).not.toHaveBeenCalled();
+  });
+
+  it("a failed seed offers Retry seed and retries only the seed", () => {
+    seedProject.mutate.mockImplementation(() => {});
+    seedProject.isError = true;
+    seedProject.error = new Error("manifest.json: format \"aespecs/2\" is not \"aespecs/1\"");
+    render(<ProjectCreate />);
+    attachAll(["allocations.aespecs", "prd.md"]);
+    typePrompt();
+    toDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(screen.getByText(/seeding its specs from the bundle failed/i)).toBeTruthy();
+    expect(uploadReferences.mutate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry seed" }));
+    expect(seedProject.mutate).toHaveBeenCalledTimes(2);
+    expect(createProject.mutate).toHaveBeenCalledTimes(1);
   });
 });
 

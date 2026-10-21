@@ -49,12 +49,33 @@ const TEXT_EXTENSIONS = [
  */
 const OFFICE_EXTENSIONS = ["docx", "xlsx", "pptx"] as const;
 
+/**
+ * A spec bundle (ADR-0053): the `.aespecs` archive `code-to-spec` wrote from
+ * a product's existing code. Not a document the agents read: the platform
+ * seeds the project's repository from it (`seed-project`) before the
+ * documents are uploaded, and holds the kickoff for good. One per project.
+ */
+export const BUNDLE_EXTENSION = "aespecs";
+
 /** The file input's `accept`, so the picker and the screening agree. */
-export const REFERENCE_ACCEPT = [...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS, ...OFFICE_EXTENSIONS]
+export const REFERENCE_ACCEPT = [...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS, ...OFFICE_EXTENSIONS, BUNDLE_EXTENSION]
   .map((e) => `.${e}`)
   .join(",");
 
 const ACCEPTED_EXTENSIONS = new Set<string>([...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS, ...OFFICE_EXTENSIONS]);
+
+/** Whether an attachment is the spec bundle rather than a document. */
+export function isSpecBundle(file: File): boolean {
+  return extensionOf(file.name) === BUNDLE_EXTENSION;
+}
+
+/** The attachments as the create flow sends them: the documents, and the bundle if one is attached. */
+export function splitAttachments(files: File[]): { documents: File[]; bundle: File | null } {
+  return {
+    documents: files.filter((f) => !isSpecBundle(f)),
+    bundle: files.find(isSpecBundle) ?? null,
+  };
+}
 
 /** The per-file ceiling on raw bytes; the server enforces the same. */
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;
@@ -90,9 +111,23 @@ export function screenReferenceFiles(
   const rejected: RejectedFile[] = [];
   const names = new Set(attached.map((f) => f.name));
   const paths = new Set(attached.map((f) => referencePathOf(f.name)));
-  let count = attached.length;
+  let bundle = attached.some(isSpecBundle);
+  let count = attached.length - (bundle ? 1 : 0);
   for (const file of incoming) {
     const path = referencePathOf(file.name);
+    if (isSpecBundle(file)) {
+      // The bundle is screened apart: one per project, the same size ceiling,
+      // and outside the documents' count, since it never becomes a document.
+      if (file.size > MAX_REFERENCE_FILE_BYTES) {
+        rejected.push({ name: file.name, reason: "Larger than 5 MB" });
+      } else if (bundle) {
+        rejected.push({ name: file.name, reason: `One .${BUNDLE_EXTENSION} bundle per project` });
+      } else {
+        accepted.push(file);
+        bundle = true;
+      }
+      continue;
+    }
     if (!ACCEPTED_EXTENSIONS.has(extensionOf(file.name))) {
       rejected.push({
         name: file.name,

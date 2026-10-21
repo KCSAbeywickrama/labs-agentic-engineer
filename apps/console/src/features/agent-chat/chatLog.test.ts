@@ -316,6 +316,10 @@ describe("userLineText", () => {
     expect(userLineText("/start")).toBe("Start the project from the brief.");
   });
 
+  it("reads the recreate command as the first design of a product recreated from its code", () => {
+    expect(userLineText("/recreate")).toBe("Recreate the product from its specs.");
+  });
+
   it("reads a prototype command as asking for the prototype", () => {
     expect(userLineText("/prototype expense-web")).toBe("Prototype expense-web.");
     expect(userLineText("/prototype")).toBe("Make the prototypes.");

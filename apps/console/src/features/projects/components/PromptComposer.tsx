@@ -154,7 +154,7 @@ export function PromptComposer({
                 // No extension list: the picker already filters by `accept`,
                 // and an unsupported file answers with a notice naming the
                 // accepted set, at the point where it matters.
-                `A PRD, notes, an API spec, a mockup. Agents read them when deriving your requirements. Up to ${MAX_REFERENCE_FILES} files, 5 MB each.`
+                `A PRD, notes, an API spec, a mockup. Agents read them when deriving your requirements. Up to ${MAX_REFERENCE_FILES} files, 5 MB each. Recreating an existing app? Attach the .aespecs bundle code-to-spec wrote.`
               }
             >
               <Button component="label" size="small" variant="outlined" startIcon={<Paperclip size={14} />}>
