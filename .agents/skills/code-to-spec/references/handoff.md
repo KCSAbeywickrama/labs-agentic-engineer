@@ -1,49 +1,31 @@
 # Getting the specs into an AEP project
 
 The tree `code-to-spec` writes is the state an AEP project reaches after `/start` and every
-`/interview`, plus the domain model. The platform has no import path, so it enters a project
-through git, which is the project's durable truth: the spec room reseeds from git on every load,
-and while a spec tab is open the room's live document wins over git for the files it holds.
-Creating a project also fires `/start` on the server. The order below respects both.
+`/interview`, plus the domain model and the upstream dependency definitions. It enters a project
+as the `.aespecs` bundle the skill wrote (`references/bundle-format.md`): the create dialog takes
+it beside the reference documents, the platform seeds the project's repository from it in one
+commit, and the project's first design is `/recreate`. Nothing is interviewed, pushed by hand or
+registered beforehand.
 
-1. **Create the project** in the console with the product's name and a one-line idea. Let the
-   kickoff interview run; answer or dismiss its question form. The content does not matter, the
-   push replaces it.
-2. **Wait for the flush.** The room commits about a minute after the last edit; the spec view
-   shows the kickoff's `prd.md` committed. The kickoff may flush more than once.
-3. **Close every spec tab** for the project, in every browser, so the room unloads.
-4. **Push the generated files** to the project repository's default branch, on top of whatever is
-   there at that moment: replace `specs/requirements/` and add `specs/design/domain-model.md`.
-   Leave `specs/.agentic-engineer.toml` and `.claude/` as the platform wrote them. Push only the
-   requirements and the domain model; the rest of the design is `/design`'s to derive with the
-   organization's catalog.
+1. **Create the project** in the console with the product's name and a one-line idea, and attach
+   `<out>/<product>.aespecs` as a document. Attach the product's README or any brief too if you
+   want the first design to read them. Create.
+2. **The platform seeds the project.** It opens the bundle under its bounds, holds every file to its
+   own readers, commits the files with the bundle's provenance, and uploads the documents. A
+   refused bundle is named with the file and the rule on the create page; fix the output and press
+   Retry seed. The kickoff interview never runs on a seeded project.
+3. **Review** the requirements in the spec view: the `*assumed*` lines are the skill's inferences and
+   the Open Questions are what only the team knows. Settle what you can; they hold nothing up. A
+   feature with a `*blocking*` question stays undesigned until it is answered.
+4. **Press Recreate** on the design card. It walks the design lineup for every feature with the
+   dependency definitions as givens: they come up referenced by the components, never rewritten; a
+   rewritten or duplicated one is a platform defect to report. From the second design on, the
+   project iterates with `/design` like any other.
+5. **Configure the upstreams.** After the design, each definition waits for its values: the Deploy
+   page's Configure card lists every key per environment. Type them there. The build does not wait
+   for them; the deploy does. To share a definition with other projects, open it on the Resources
+   page, choose Promote to organization, and paste the brief's consumption instructions from
+   `registrations/<name>.md`; values typed for the project carry over.
 
-   ```bash
-   git clone <project repo url> recreate && cd recreate
-   rm -rf specs/requirements && cp -R <out>/specs/requirements specs/requirements
-   mkdir -p specs/design && cp <out>/specs/design/domain-model.md specs/design/
-   git add specs && git commit -m "Requirements and domain model from the existing codebase" && git push
-   ```
-5. **Reopen the spec view.** The room reseeds from git and shows the generated requirements. A
-   tab left open at step 3 would have reverted the push on its next flush. Expect one more commit
-   from the room a couple of minutes later: it writes the files back in its own markdown escaping,
-   so `[tag]` becomes `\[tag\]` and the diff is one line out for one line in. Nothing is lost; the
-   platform's reader unescapes it. A diff that deletes feature files is the revert to watch for.
-6. **Settle the assumed lines and answer the open questions** in the console, or leave them; they
-   hold nothing up. A feature with a `*blocking*` question stays undesigned until it is answered.
-7. **Register the upstreams.** An org admin opens Resources → New resource in the console and
-   enters each `registrations/<name>.md` field for field: the name, provider, description, the
-   keys with their secret flags, the consumption instructions; uploads the derived contract file
-   as the contract document; types the values per environment; saves. The Marketplace chat flow
-   takes a contract by URL only, so a derived file goes in through the form. Do this before the
-   first `/design`: the design agent reads the registry only when it first writes a dependency,
-   and a need already written as a suggestion cannot be switched to a registered name later. If
-   `/design` already ran, regenerate: remove `specs/design/` except `domain-model.md` by the same
-   git path as step 4, reopen, then `/design` again; safe while nothing is built.
-8. **Run `/design`.** It converges the domain model, derives the cell and components, and mints
-   the acceptance criteria. The registered upstreams come up as reused copies of the
-   organization's records; anything unregistered comes up as a need to settle. From here the
-   project is an ordinary AEP project.
-
-With a checkout of the platform repository, the same `/design` can be tried locally first by
-pointing the playground at the output directory and running its design phase.
+With a checkout of the platform repository, the first design can be tried locally first: copy the
+output into the playground's projects directory and run `pnpm play <absolute path> chat "/recreate"`.

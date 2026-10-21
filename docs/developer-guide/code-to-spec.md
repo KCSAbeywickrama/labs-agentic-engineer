@@ -13,11 +13,13 @@ the design agent cannot run it.
 specs/requirements/prd.md, product-wide.md, features/F<n>-<slug>.md   per the bundled prd-contract
 specs/requirements/sources/<module>.md                                 one coverage file per module and document
 specs/design/domain-model.md                                           one erDiagram from the code's types
-registrations/<name>.md (+ <name>.graphql | <name>.openapi.yaml)       one registration brief per upstream, for an org admin
+specs/design/dependencies/<name>/{dependency.json, schema.graphql|openapi.yaml, assumptions.md}   one definition per upstream
+<product>.aespecs                                                      the bundle the platform seeds the project from
+registrations/<name>.md                                                the consumption instructions and context a definition cannot hold
 .inventory/*.md                                                        working notes, not part of the spec
 ```
 
-It deliberately writes nothing else under `specs/design/`. The cell, the
+It deliberately writes nothing else under `specs/design/` but the dependency definitions. The cell, the
 components, roles, flows, contracts and acceptance criteria are derived by
 `/design` from the requirements with the org catalog and the write gates,
 so the recreate gets the platform's architecture rather than a translation
@@ -61,29 +63,32 @@ processes. Keep them in gitignored or private locations and never commit them
 to this repository as fixtures or examples. The skill copies configuration
 key names only, never values; check its output all the same.
 
-## Registering the upstreams
+## Defining the upstreams
 
-`/design` settles a system the product calls only when a requirements
-decision names a product, or when the organization has registered it as an
-external resource. An in-house service named in words is neither, so the
-design writes it as an open need with suggestions and every feature its
-component serves blocks on it. The skill therefore writes one registration
-brief per upstream the recreate keeps calling, under `registrations/`: the
-registration form's fields, filled from the client code, with the values left
-to the person who holds them, and a contract derived from the client code
-beside it where the code supports one (only the operations the product uses,
-labelled as such). An org admin enters each brief at Resources → New resource
-before the first `/design`; the design agent then reuses the record instead
-of inventing a need. The briefs stay outside `specs/` and are never pushed.
+The first design settles a system the product calls only when a definition
+of it already exists. So the skill writes one definition per upstream the
+recreate keeps calling, under `specs/design/dependencies/<name>/`, in the
+platform's own shape: the name, provider, description, config keys with
+secret flags, a contract derived from the client code where the code supports
+one (only the operations the product uses), and an `assumptions.md` saying
+so. The `/recreate` flow (`skills/recreate`, ADR-0053) treats them as givens:
+referenced by the components, never rewritten. Values are never written:
+after the design, the Deploy page collects them per environment from whoever
+holds them, and the deploy waits until they arrive. A short brief under
+`registrations/` carries what a definition cannot, the consumption
+instructions, for the moment the organization promotes the resource.
 
 ## Getting the tree into an AEP project
 
-The handoff travels with the skill: `.agents/skills/code-to-spec/references/handoff.md`
-has the ordered steps. In short, create the project, let the kickoff `/start`
-flush, close every spec tab so the room unloads, push the requirements and the
-domain model to the project repository, reopen, then run `/design`. The room
-writes the files back once in its own markdown escaping; that one-for-one diff
-is normal.
+The skill packs the `specs/` tree as an `.aespecs` bundle
+(`.agents/skills/code-to-spec/references/bundle-format.md`;
+`services/aep-api/internal/platform/specbundle` is the reader). The create
+dialog takes it beside the reference documents and sends it to `seed-project`
+first: the platform validates and commits it in one commit, records the
+provenance in the project descriptor, and never runs the `/start` kickoff on
+the project. The design card then offers Recreate. The ordered steps, from the
+create to the Deploy page's values, are in
+`.agents/skills/code-to-spec/references/handoff.md`.
 
 ## Keeping the bundled contracts current
 
@@ -106,5 +111,6 @@ being standalone.
   create and a run that clones it are later work, if the skill proves out.
 - Not a change to `prd-contract`, `start` or `design`. The skill carries
   copies; the platform's skills stay the single source of the file shapes.
-- Not an API client. It never registers a resource, never holds a token and
-  never reads a configuration value; registering is an org admin's act.
+- Not an API client. It never seeds, registers or uploads anything, never
+  holds a token and never reads a configuration value; the console does the
+  upload with the person's own session, and registering is an org admin's act.
