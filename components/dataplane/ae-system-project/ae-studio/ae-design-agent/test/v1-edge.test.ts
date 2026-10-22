@@ -385,7 +385,7 @@ test("a design run records the commit its saved Room work ended at; every turn r
       { kind: "toolCall", toolCallId: "w3", toolName: "addFile", input: { path: "specs/design/kept.md", content: "same\n" } },
       { kind: "text", text: "done" },
     ]);
-  await withEdge({ models: [writes(), writes(), writes(), writes()], room }, async (edge) => {
+  await withEdge({ models: [writes(), writes(), writes(), writes(), writes()], room }, async (edge) => {
     tools = edge.tools;
     const tok = await edge.token();
     const run = async (instruction: string): Promise<void> => {
@@ -396,21 +396,24 @@ test("a design run records the commit its saved Room work ended at; every turn r
     await run("/design F1");
     assert.deepEqual(order, ["flush", "leave"], "saved before it leaves");
     await run("/address-comments");
+    // The first design of a product recreated from its code is a design run too.
+    await run("/recreate");
     await run("/refine F1");
     landed = false;
     await run("/design");
-    await until(() => edge.tools.usage.length === 4, "four usage records");
+    await until(() => edge.tools.usage.length === 5, "five usage records");
     assert.deepEqual(
       edge.tools.usage.map((r) => [r.flow, r.baseRef, r.endRef, r.changedPaths]),
       [
         ["design", HEAD, SAVED, ["specs/design/new.md"]],
         ["address-comments", HEAD, SAVED, ["specs/design/new.md"]],
+        ["recreate", HEAD, SAVED, ["specs/design/new.md"]],
         ["refine", HEAD, undefined, ["specs/design/new.md"]],
         ["design", HEAD, undefined, ["specs/design/new.md"]],
       ],
       "a file put back as it was is not a change; a save that did not land names no end",
     );
-    assert.equal(order.filter((o) => o === "flush").length, 3, "only design runs save");
+    assert.equal(order.filter((o) => o === "flush").length, 4, "only design runs save");
   });
 });
 

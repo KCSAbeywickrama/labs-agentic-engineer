@@ -181,7 +181,7 @@ names its thread, whose chat the book knows. Only the main chat rotates.
   `<AE_SNAPSHOTS_DIR>/skills/<skillsSha>` from the lookup's shas (project a
   DNS label, sha full hex, dir stat-checked); a marketplace turn reads only
   the skills snapshot. `turns/start-spec.ts` (`turnSpecFor`) classifies the raw instruction: `/<token>
-  [text]` is a flow, `/start` takes the idea typed inline, else the lookup's
+  [text]` is a flow, `/start`, and `/recreate` as the owner's note, take the idea typed inline, else the lookup's
   `idea`; `/start` and flow turns list the lookup's references.
 - **Conversations**: `conversations/thread-book.ts` (one current thread per
   project chat) and `conversations/marketplace-book.ts` (per-user marketplace

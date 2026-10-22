@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
@@ -296,6 +297,25 @@ func specAgentState(newest *spec.AgentTurn) string {
 	}
 }
 
+// recreateOf projects the descriptor's provenance onto the contract: the
+// producer with its version in one field, as the console names it. A seededAt
+// the descriptor holds in another form reads as the zero time rather than
+// hiding the fact that the project was seeded.
+func recreateOf(p *spec.RecreateProvenance) *gen.RecreateProvenance {
+	if p == nil {
+		return nil
+	}
+	seededAt, _ := time.Parse(time.RFC3339, p.SeededAt)
+	return &gen.RecreateProvenance{
+		Producer:         p.Producer,
+		ProducerVersion:  p.ProducerVersion,
+		Product:          p.Product,
+		SourceRepository: p.SourceRepository,
+		SourceCommit:     p.SourceCommit,
+		SeededAt:         seededAt,
+	}
+}
+
 // populateStages fills the three nested aggregates plus the flat artifact
 // fields from four concurrently-read sources — strict join: any source
 // failing fails the whole read (the console's poller keeps last-good data
@@ -431,6 +451,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 			Agent:          agent,
 			DesignOutdated: outdated,
 			Availability:   gen.SpecStageAvailabilityAvailable,
+			Recreate:       recreateOf(snap.Recreate),
 		}
 		applyFlatArtifactFields(status, snap)
 	}

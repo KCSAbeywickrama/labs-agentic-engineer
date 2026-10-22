@@ -67,11 +67,13 @@ func kickoffTurnID(orgID, projectID string) string {
 	return uuid.NewSHA1(kickoffNamespace, []byte(orgID+"/"+projectID)).String()
 }
 
-// ErrKickoffAlreadyRan reports that the project has already had an agent turn,
-// so there is no kickoff left to fire. Not a failure: it is what makes Kickoff
-// safe to call from more than one place, and the reason a retried references
-// upload does not start a second interview.
-var ErrKickoffAlreadyRan = errors.New("project has already run an agent turn")
+// ErrProjectSeeded reports that the project's specs were seeded from a
+// bundle (the descriptor carries `[recreate]`), so `/start` is never its
+// first turn: the user starts `/recreate` from the console. Not a failure,
+// for the same reason as ErrProjectAlreadyStarted — every release of a held
+// kickoff (the references upload, the console's "continue without
+// documents") is answered the same way.
+var ErrProjectSeeded = errors.New("project was seeded from a spec bundle")
 
 // KickoffLedger is the finished-turn ledger's newest-turn read.
 // TurnRepository satisfies it.
@@ -82,13 +84,15 @@ type KickoffLedger interface {
 // KickoffService fires a project's opening `/start` turn in its org's pod.
 type KickoffService struct {
 	turns  aestudiotools.Turns
+	git    sourcecontrol.Git
 	repos  sourcecontrol.ProjectRepoRows
 	ledger KickoffLedger
 }
 
-// NewKickoffService wires the kickoff.
-func NewKickoffService(turns aestudiotools.Turns, repos sourcecontrol.ProjectRepoRows, ledger KickoffLedger) *KickoffService {
-	return &KickoffService{turns: turns, repos: repos, ledger: ledger}
+// NewKickoffService wires the kickoff. git reads the project descriptor, the
+// seeded-project guard; nil skips that guard.
+func NewKickoffService(turns aestudiotools.Turns, git sourcecontrol.Git, repos sourcecontrol.ProjectRepoRows, ledger KickoffLedger) *KickoffService {
+	return &KickoffService{turns: turns, git: git, repos: repos, ledger: ledger}
 }
 
 // Kickoff fires the project's opening `/start` turn and never returns an
@@ -109,8 +113,13 @@ func (k *KickoffService) Kickoff(ctx context.Context, orgID, projectID string) {
 	turnID, events, err := k.StartKickoff(bg, orgID, projectID)
 	if err != nil {
 		cancel()
-		if errors.Is(err, ErrKickoffAlreadyRan) {
+		if errors.Is(err, ErrProjectAlreadyStarted) {
 			slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
+				"org", orgID, "project", projectID)
+			return
+		}
+		if errors.Is(err, ErrProjectSeeded) {
+			slog.InfoContext(bg, "kickoff skipped: the project was seeded from a spec bundle; its first design is /recreate",
 				"org", orgID, "project", projectID)
 			return
 		}
@@ -129,7 +138,7 @@ func (k *KickoffService) Kickoff(ctx context.Context, orgID, projectID string) {
 // returns its id and stream. The caller must range the stream or cancel ctx:
 // it holds the pod's response open.
 //
-// Refused with ErrKickoffAlreadyRan when the ledger holds a turn of the
+// Refused with ErrProjectAlreadyStarted when the ledger holds a turn of the
 // project: the guard is a turn record rather than a spec file because the
 // whole point is to cover the window BEFORE the first file lands.
 func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID string) (string, iter.Seq2[aestudiotools.TurnEvent, error], error) {
@@ -138,11 +147,18 @@ func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID stri
 		return "", nil, fmt.Errorf("read newest turn: %w", err)
 	}
 	if newest != nil {
-		return "", nil, ErrKickoffAlreadyRan
+		return "", nil, ErrProjectAlreadyStarted
 	}
 	ref, _, err := sourcecontrol.RepoRefFor(ctx, k.repos, orgID, projectID)
 	if err != nil {
 		return "", nil, err
+	}
+	seeded, err := k.seeded(ctx, ref)
+	if err != nil {
+		return "", nil, err
+	}
+	if seeded {
+		return "", nil, ErrProjectSeeded
 	}
 	turnID := kickoffTurnID(orgID, projectID)
 	events, err := k.turns.StartTurn(ctx, ref, aestudiotools.TurnRequest{
@@ -155,6 +171,33 @@ func (k *KickoffService) StartKickoff(ctx context.Context, orgID, projectID stri
 		return "", nil, err
 	}
 	return turnID, events, nil
+}
+
+// seeded reads the descriptor at the pod mirror's tip and answers whether it
+// carries `[recreate]`. A local read: the seed commit and the create's
+// descriptor commit both went through the pod, so its mirror is current. No
+// descriptor, or one this platform cannot read, is not seeded — the kickoff
+// then behaves as it always did.
+func (k *KickoffService) seeded(ctx context.Context, ref sourcecontrol.RepoRef) (bool, error) {
+	if k.git == nil {
+		return false, nil
+	}
+	raw, _, err := k.git.ReadFile(ctx, ref, "", DescriptorPath, sourcecontrol.Local())
+	if errors.Is(err, sourcecontrol.ErrPathNotFound) || errors.Is(err, sourcecontrol.ErrRefNotFound) || errors.Is(err, sourcecontrol.ErrRepoNotFound) {
+		// No descriptor, no commits, or a repository the pod does not know:
+		// not seeded. The start that follows answers for the repository as
+		// it always did.
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read descriptor: %w", err)
+	}
+	d, err := UnmarshalDescriptor(raw)
+	if err != nil {
+		slog.WarnContext(ctx, "kickoff: the project descriptor does not parse; treating the project as not seeded", "error", err)
+		return false, nil
+	}
+	return d.Recreate != nil, nil
 }
 
 // followKickoff reads the kickoff's stream until it ends or ctx (the

@@ -18,7 +18,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand } from "@aep/contracts/commands";
+import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand, parseRecreateCommand } from "@aep/contracts/commands";
 import { env } from "../../config/env";
 import { buildPreflightQuery } from "../builds/api/preflight";
 import { useProjectChat } from "../agent-chat/useProjectChat";
@@ -41,6 +41,8 @@ const DESIGN_FILES = ["specs/design/", "specs/validation/acceptance/"] as const;
 function runOf(instruction: string | undefined): DesignRun | null {
   if (!instruction) return null;
   if (instruction.trim() === ADDRESS_COMMENTS_COMMAND) return { kind: "address", features: [] };
+  // A recreate is a design run over every feature; the card shows it as one.
+  if (parseRecreateCommand(instruction) !== null) return { kind: "design", features: [] };
   const design = parseDesignCommand(instruction);
   return design ? { kind: "design", features: design.featureIds } : null;
 }

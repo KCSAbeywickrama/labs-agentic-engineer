@@ -90,6 +90,27 @@ export function parseDesignCommand(line: string): { featureIds: string[] } | nul
 }
 
 /**
+ * `/recreate` — the first design of a product recreated from its code (the
+ * `recreate` skill): the project was seeded from an `.aespecs` bundle, so the
+ * requirements, the domain model and the upstream dependency definitions are
+ * already there, and the run designs every feature with the definitions as
+ * givens. Always bare. The console offers it on the design card while the
+ * project is seeded and no design has run; afterwards the card sends `/design`.
+ */
+export const RECREATE_COMMAND = "/recreate";
+
+/**
+ * The recreate command, bare or with the owner's note after it (what the
+ * recreate keeps, drops or changes); null for any other line. The console
+ * sends it bare and the pod appends the project's idea as the note, the way
+ * it appends the idea to `/start`, so a journal line may carry one.
+ */
+export function parseRecreateCommand(line: string): { note: string } | null {
+  const m = /^\/recreate(?:\s+([\s\S]+))?$/.exec(line.trim());
+  return m ? { note: (m[1] ?? "").trim() } : null;
+}
+
+/**
  * `/address-comments` — the design review's Address comments: the agent acts
  * on every comment waiting in `specs/design/review.json` (`DesignReview` in
  * `@aep/agent-stream`) and regenerates the design from the earliest artifact

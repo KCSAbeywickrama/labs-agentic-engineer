@@ -166,3 +166,41 @@ func TestWriteDescriptor_TransientFailureIsTheCallers(t *testing.T) {
 		t.Fatalf("commits = %d, want 1", n)
 	}
 }
+
+func TestDescriptorRoundTripsRecreateProvenance(t *testing.T) {
+	d := NewDescriptor("allocations", "", "2026-10-21T08:00:00Z")
+	d.Recreate = &RecreateProvenance{
+		Producer: "code-to-spec", ProducerVersion: "1.0", Product: "Allocations",
+		SourceRepository: "https://github.com/acme/allocations.git", SourceCommit: "d14b825",
+		SeededAt: "2026-10-21T08:05:00Z",
+	}
+	raw, err := MarshalDescriptor(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "[recreate]") {
+		t.Fatalf("descriptor lacks the [recreate] table:\n%s", raw)
+	}
+	back, err := UnmarshalDescriptor(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Recreate == nil || *back.Recreate != *d.Recreate || back.Name != "allocations" {
+		t.Errorf("round trip = %+v, want %+v", back, d)
+	}
+
+	// A plain descriptor has no table at all, and reads back with no provenance.
+	plain, err := MarshalDescriptor(NewDescriptor("p", "an idea", "2026-10-21T08:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "recreate") {
+		t.Errorf("a plain descriptor must carry no recreate table:\n%s", plain)
+	}
+	if back, err := UnmarshalDescriptor(plain); err != nil || back.Recreate != nil || back.Idea != "an idea" {
+		t.Errorf("plain round trip = %+v, %v", back, err)
+	}
+	if _, err := UnmarshalDescriptor([]byte("apiVersion = \"other/v1\"\n")); err == nil {
+		t.Error("a foreign apiVersion must not read as a descriptor")
+	}
+}

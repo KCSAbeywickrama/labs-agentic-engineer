@@ -18,8 +18,9 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { ADDRESS_COMMENTS_COMMAND, designCommand } from "@aep/contracts/commands";
+import { ADDRESS_COMMENTS_COMMAND, designCommand, RECREATE_COMMAND } from "@aep/contracts/commands";
 import { canSend, chatStore, useProjectChat } from "../agent-chat/useProjectChat";
+import { useProjectStatus } from "../deploy/api/deploy";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useChatPanel } from "../shell/chatPanel";
 import { designKey } from "./api/designModel";
@@ -38,17 +39,26 @@ import type { DesignReviewActions } from "./useDesignReview";
  * Should the turn not start, the comments are put back as they were.
  */
 export function useDesignTurns(projectName: string): {
-  /** Send the design turn for the features that need it: `/design F1 F2`. */
+  /** Send the design turn for the features that need it: `/design F1 F2`, or `/recreate` (below). */
   design: () => void;
   addressComments: (review: DesignReviewActions) => Promise<void>;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
+  /**
+   * The design action is the first design of a product recreated from its
+   * code (ADR-0053): the project was seeded from a spec bundle and nothing is
+   * designed yet, so the action sends `/recreate` and reads "Recreate". Once a
+   * design exists the project iterates with `/design` like any other.
+   */
+  recreate: boolean;
 } {
   const chat = useProjectChat(projectName);
   const panel = useChatPanel();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toDesign = useSpecWorkspace(projectName).workspace?.design.toDesign ?? [];
+  const status = useProjectStatus(projectName).data?.spec;
+  const recreate = Boolean(status?.recreate) && !status?.design;
 
   const send = async (text: string): Promise<boolean> => {
     panel.open();
@@ -60,9 +70,10 @@ export function useDesignTurns(projectName: string): {
 
   return {
     ready: canSend(chat),
+    recreate,
     design: () => {
       void navigate({ to: "/projects/$projectName/design", params: { projectName } });
-      void send(designCommand(toDesign));
+      void send(recreate ? RECREATE_COMMAND : designCommand(toDesign));
     },
     addressComments: async (review) => {
       if (!canSend(chat)) return;

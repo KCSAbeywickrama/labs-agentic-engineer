@@ -131,8 +131,28 @@ const CONSUMED_SPEC_RE = /^specs\/design\/components\/[^/]*\/dependencies\/[^/]*
  */
 const PROTOTYPE_FILE_RE = /^specs\/design\/components\/[^/]*\/prototype\.(?:json|tsx)$/;
 
+/**
+ * An external dependency's definition and the documents beside it, directly
+ * under `specs/design/dependencies/<name>/`: `dependency.json` and
+ * `sdk.json` (`DEPENDENCY_DESIGN_JSON_RE`, `SDK_MANIFEST_JSON_RE`), the
+ * contract under the gate's names (`CONTRACT_FILES_BY_TYPE`) or under the
+ * organization's record's name when the platform copied it from the registry
+ * (`<name>.graphql`, `<name>.openapi.yaml`); `assumptions.md` is admitted as
+ * markdown already. A Room turn sees them regardless; this keeps a Room-less
+ * runner — the playground, a Plan turn — in step, which the first design of a
+ * product recreated from its code depends on (ADR-0053): its definitions are
+ * seeded before any design runs, and the design must see them to reference
+ * rather than reinvent them. One level only, never a nested path.
+ */
+const DEPENDENCY_FILE_RE = /^specs\/design\/dependencies\/[^/]+\/[^/]+\.(?:json|yaml|yml|graphql|graphqls)$/;
+
 function isAdmittedSpecPath(path: string): boolean {
-  return PRODUCED_SPEC_RE.test(path) || CONSUMED_SPEC_RE.test(path) || PROTOTYPE_FILE_RE.test(path);
+  return (
+    PRODUCED_SPEC_RE.test(path) ||
+    CONSUMED_SPEC_RE.test(path) ||
+    PROTOTYPE_FILE_RE.test(path) ||
+    DEPENDENCY_FILE_RE.test(path)
+  );
 }
 
 /**

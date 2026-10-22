@@ -25,8 +25,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { catalogTurn, designOrRoomTurn } from "../src/turns/turn-spec.js";
 
-test("web search: the design flow, or any turn writing through the Room", () => {
+test("web search: the design flows, or any turn writing through the Room", () => {
   assert.equal(designOrRoomTurn({ flow: "design", roomScoped: false }), true);
+  // The first design of a product recreated from its code designs like /design does.
+  assert.equal(designOrRoomTurn({ flow: "recreate", roomScoped: false }), true);
   assert.equal(designOrRoomTurn({ flow: "", roomScoped: true }), true);
   assert.equal(designOrRoomTurn({ flow: "start", roomScoped: false }), false);
   assert.equal(designOrRoomTurn({ flow: "", roomScoped: false }), false);
@@ -38,6 +40,7 @@ test("MCP catalog: every web-search turn plus the requirements flows anywhere", 
     assert.equal(catalogTurn({ flow, roomScoped: false }), true, flow);
   }
   assert.equal(catalogTurn({ flow: "design", roomScoped: false }), true);
+  assert.equal(catalogTurn({ flow: "recreate", roomScoped: false }), true);
   assert.equal(catalogTurn({ flow: "", roomScoped: true }), true);
   assert.equal(catalogTurn({ flow: "", roomScoped: false }), false);
   assert.equal(catalogTurn({ flow: "prototype", roomScoped: false }), false);

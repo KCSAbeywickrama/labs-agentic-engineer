@@ -41,8 +41,13 @@ const FlowDesign = "design"
 // a design run for the features its own requirement edits reached (DesignRun).
 const FlowAddressComments = "address-comments"
 
+// FlowRecreate is the flow of the first design of a product recreated from
+// its code (ADR-0053): the `design` lineup over a seeded tree, every feature
+// at once. It counts as a design run for every feature, like a bare /design.
+const FlowRecreate = "recreate"
+
 // DesignRunFlows are the flows whose completed runs are design runs.
-var DesignRunFlows = []string{FlowDesign, FlowAddressComments}
+var DesignRunFlows = []string{FlowDesign, FlowAddressComments, FlowRecreate}
 
 // designFeatureID matches one feature ID inside a stored Summary.
 var designFeatureID = regexp.MustCompile(`\bF[0-9]+\b`)

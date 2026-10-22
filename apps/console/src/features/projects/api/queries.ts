@@ -186,6 +186,30 @@ export function useUploadReferences() {
   });
 }
 
+/**
+ * Seed a project's specs from the `.aespecs` bundle attached on New project
+ * (ADR-0053): the platform validates it and commits its files with the
+ * bundle's provenance in one commit, and the kickoff stays held for good. Not
+ * part of useCreateProject for the reason the reference upload is not: a
+ * failed seed leaves the created project intact, and the details step offers
+ * Retry seed.
+ */
+export function useSeedProject() {
+  return useMutation({
+    mutationFn: async ({ projectName, bundle }: { projectName: string; bundle: File }) => {
+      const formData = new FormData();
+      formData.append("bundle", bundle);
+      const { error } = await client.POST("/projects/{projectName}/seed", {
+        params: { path: { projectName } },
+        body: formData as unknown as { bundle: string },
+      });
+      if (error) {
+        throw new Error(apiErrorMessage(error, "Failed to seed the project's specs"));
+      }
+    },
+  });
+}
+
 /** The GitHub organization new repositories are created in, from the org's config. */
 export function useGithubOrg(): string | null {
   const { data } = useConfig();

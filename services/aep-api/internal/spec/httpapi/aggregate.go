@@ -20,6 +20,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/designdeps"
 	"github.com/wso2/aep/aep-api/internal/spec/files"
+	"github.com/wso2/aep/aep-api/internal/spec/seed"
 	"github.com/wso2/aep/aep-api/internal/spec/skills"
 	"github.com/wso2/aep/aep-api/internal/spec/tags"
 )
@@ -31,6 +32,7 @@ type (
 	tagsHandler       = tags.Handler
 	skillsHandler     = skills.Handler
 	designdepsHandler = designdeps.Handler
+	seedHandler       = seed.Handler
 )
 
 // Handlers is the spec domain's slice handlers, embedded so Go promotes each
@@ -40,6 +42,7 @@ type Handlers struct {
 	*tagsHandler
 	*skillsHandler
 	*designdepsHandler
+	*seedHandler
 }
 
 // New assembles the domain: pure wiring, constructor injection only.
@@ -65,5 +68,8 @@ func New(d spec.Deps) (*Handlers, error) {
 		// assumption) — the one slice that touches a dependency's directory
 		// on the user's behalf rather than the agent's.
 		designdepsHandler: designdeps.New(d.Design),
+		// A project recreated from existing code: its specs arrive as a bundle
+		// and are committed whole, with the kickoff held for good.
+		seedHandler: seed.New(d.Seed),
 	}, nil
 }

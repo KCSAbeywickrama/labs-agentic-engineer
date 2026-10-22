@@ -30,5 +30,15 @@
   "specs/design/components/web/prototype.ts": false,
   "specs/design/components/web/prototype.jsx": false,
   "specs/design/components/web/prototype.json.bak": false,
-  "prototype.tsx": false
+  "prototype.tsx": false,
+  "specs/design/dependencies/sales-entity-service/dependency.json": true,
+  "specs/design/dependencies/sales-entity-service/schema.graphql": true,
+  "specs/design/dependencies/sales-entity-service/sales-entity-service.graphql": true,
+  "specs/design/dependencies/email-service/openapi.yaml": true,
+  "specs/design/dependencies/email-service/email-service.openapi.yaml": true,
+  "specs/design/dependencies/payment-service/sdk.json": true,
+  "specs/design/dependencies/payment-service/notes.txt": false,
+  "specs/design/dependencies/payment-service/nested/openapi.yaml": false,
+  "specs/design/dependencies/dependency.json": false,
+  "dependency.json": false
 }

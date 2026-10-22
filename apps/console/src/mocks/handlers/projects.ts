@@ -93,6 +93,9 @@ export const projectsHandlers = [
   // server stores the bytes off-git (ADR-0017), so the mock only checks the
   // request shape. The details step's Retry upload / Continue without
   // documents state: localStorage.setItem('aep:mock:project:references', 'error').
+  // The spec bundle attached at create (ADR-0053) is seeded before the
+  // documents go up; the mock accepts it, so the create flow can be walked.
+  http.post("*/api/v1/projects/:projectName/seed", () => new HttpResponse(null, { status: 204 })),
   http.post("*/api/v1/projects/:projectName/references", async ({ params, request }) => {
     if (localStorage.getItem("aep:mock:project:references") === "error") {
       return HttpResponse.json(

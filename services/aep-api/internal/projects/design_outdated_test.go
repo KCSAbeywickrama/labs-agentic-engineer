@@ -125,7 +125,7 @@ func TestDesignOutdated(t *testing.T) {
 		if _, err := svc.designOutdated(context.Background(), "acme", "proj", "same"); err != nil {
 			t.Fatalf("designOutdated: %v", err)
 		}
-		if fmt.Sprint(turns.askedFlows) != "[design address-comments]" {
+		if fmt.Sprint(turns.askedFlows) != "[design address-comments recreate]" {
 			t.Fatalf("looked up flows %v, want the design runs", turns.askedFlows)
 		}
 	})
@@ -142,6 +142,20 @@ func TestDesignOutdated(t *testing.T) {
 		}
 		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "later"); err != nil || !got {
 			t.Fatalf("an edit after the run: designOutdated = (%v, %v), want (true, nil)", got, err)
+		}
+	})
+
+	// The first design of a product recreated from its code (ADR-0053) is a
+	// design run like any other: where it left the requirements is the baseline.
+	t.Run("a recreate run is a design run", func(t *testing.T) {
+		t.Parallel()
+		runs := []spec.AgentTurn{{Flow: spec.FlowRecreate, BaseRef: "seeded", EndRef: "recreated"}}
+		svc := svcAt(&stubDesignTurns{runs: runs}, map[string]string{"seeded": "A", "recreated": "A"})
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "A"); err != nil || got {
+			t.Fatalf("designOutdated = (%v, %v), want (false, nil)", got, err)
+		}
+		if got, err := svc.designOutdated(context.Background(), "acme", "proj", "B"); err != nil || !got {
+			t.Fatalf("an edit after the recreate: designOutdated = (%v, %v), want (true, nil)", got, err)
 		}
 	})
 

@@ -60,7 +60,7 @@ func (l kickoffLedger) Newest(context.Context, string, string) (*spec.AgentTurn,
 func newKickoff(ledger kickoffLedger) (*spec.KickoffService, *aestudiotest.Fake) {
 	f := aestudiotest.New()
 	row := &sourcecontrol.GitRepository{OrgID: kickoffOrg, ProjectID: kickoffProj, RepoURL: "https://github.com/acme/greeter"}
-	return spec.NewKickoffService(f, kickoffRepos{row: row}, ledger), f
+	return spec.NewKickoffService(f, f, kickoffRepos{row: row}, ledger), f
 }
 
 // drain reads a started kickoff's stream to its end, as Kickoff does.
@@ -109,7 +109,7 @@ func TestKickoff_EveryAttemptCarriesTheSameTurnID(t *testing.T) {
 func TestKickoff_TurnIDIsPerProject(t *testing.T) {
 	svc, f := newKickoff(kickoffLedger{})
 	other := &sourcecontrol.GitRepository{OrgID: kickoffOrg, ProjectID: "q", RepoURL: "https://github.com/acme/other"}
-	svc2 := spec.NewKickoffService(f, kickoffRepos{row: other}, kickoffLedger{})
+	svc2 := spec.NewKickoffService(f, f, kickoffRepos{row: other}, kickoffLedger{})
 
 	a, ev, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj)
 	if err != nil {
@@ -131,8 +131,8 @@ func TestKickoff_TurnIDIsPerProject(t *testing.T) {
 func TestKickoff_RefusedOnceTheProjectRanATurn(t *testing.T) {
 	svc, f := newKickoff(kickoffLedger{newest: &spec.AgentTurn{ID: uuid.NewString()}})
 
-	if _, _, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj); !errors.Is(err, spec.ErrKickoffAlreadyRan) {
-		t.Fatalf("err = %v, want ErrKickoffAlreadyRan", err)
+	if _, _, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj); !errors.Is(err, spec.ErrProjectAlreadyStarted) {
+		t.Fatalf("err = %v, want ErrProjectAlreadyStarted", err)
 	}
 	svc.Kickoff(t.Context(), kickoffOrg, kickoffProj)
 	if n := len(f.TurnCalls()); n != 0 {
@@ -178,5 +178,46 @@ func TestKickoff_ProjectWithoutARepository(t *testing.T) {
 	}
 	if n := len(f.TurnCalls()); n != 0 {
 		t.Fatalf("pod saw %d turn starts, want none", n)
+	}
+}
+
+// A project seeded from a spec bundle (the descriptor carries [recreate]) is
+// never interviewed: every release of the held kickoff is refused, and the
+// pod sees no turn start.
+func TestKickoff_RefusedOnASeededProject(t *testing.T) {
+	svc, f := newKickoff(kickoffLedger{})
+	d := spec.NewDescriptor("greeter", "", "2026-10-21T07:00:00Z")
+	d.Recreate = &spec.RecreateProvenance{Producer: "code-to-spec", ProducerVersion: "1.0", Product: "Greeter", SourceRepository: "local checkout", SourceCommit: "d14b825", SeededAt: "2026-10-21T08:05:00Z"}
+	raw, err := spec.MarshalDescriptor(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.SeedRepo(sourcecontrol.RepoRef{Org: kickoffOrg, Owner: "acme", Repo: "greeter"}, map[string]string{spec.DescriptorPath: string(raw)})
+
+	if _, _, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj); !errors.Is(err, spec.ErrProjectSeeded) {
+		t.Fatalf("err = %v, want ErrProjectSeeded", err)
+	}
+	svc.Kickoff(t.Context(), kickoffOrg, kickoffProj)
+	if n := len(f.TurnCalls()); n != 0 {
+		t.Fatalf("pod saw %d turn starts, want none", n)
+	}
+}
+
+// A plain descriptor, the create's, holds nothing back.
+func TestKickoff_APlainDescriptorDoesNotHoldIt(t *testing.T) {
+	svc, f := newKickoff(kickoffLedger{})
+	raw, err := spec.MarshalDescriptor(spec.NewDescriptor("greeter", "an idea", "2026-10-21T07:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.SeedRepo(sourcecontrol.RepoRef{Org: kickoffOrg, Owner: "acme", Repo: "greeter"}, map[string]string{spec.DescriptorPath: string(raw)})
+
+	_, events, err := svc.StartKickoff(t.Context(), kickoffOrg, kickoffProj)
+	if err != nil {
+		t.Fatalf("StartKickoff: %v", err)
+	}
+	drain(t, events)
+	if n := len(f.TurnCalls()); n != 1 {
+		t.Fatalf("pod saw %d turn starts, want one", n)
 	}
 }

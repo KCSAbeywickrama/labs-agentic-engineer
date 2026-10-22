@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand } from "@aep/contracts/commands";
+import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand, parseRecreateCommand } from "@aep/contracts/commands";
 import type { ChatItem, NoteAction } from "../../agent-chat/chatLog";
 
 // The chat's pointer after a design run (L26, D07 rule 2): the chat reports
@@ -34,7 +34,7 @@ export interface DesignQuestionsNote {
 
 function isDesignRun(text: string): boolean {
   const line = text.trim();
-  return line === ADDRESS_COMMENTS_COMMAND || parseDesignCommand(line) !== null;
+  return line === ADDRESS_COMMENTS_COMMAND || parseDesignCommand(line) !== null || parseRecreateCommand(line) !== null;
 }
 
 export function designQuestionsNote(input: {

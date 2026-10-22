@@ -37,6 +37,8 @@ type Deps struct {
 	// Kickoff fires the kickoff a create held for its reference documents.
 	// Nil: an upload fires none.
 	Kickoff *KickoffService
+	// Seed commits a project's specs from an `.aespecs` bundle (seed-project).
+	Seed *SeedService
 	// Artifacts is the spec-version tag reader (list-project-tags).
 	Artifacts ArtifactService
 	// Skills is the org-scoped skills catalogue reader (list / get / updates / sync).

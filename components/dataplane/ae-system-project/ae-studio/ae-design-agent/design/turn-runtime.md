@@ -131,8 +131,8 @@ turn's record has no `project`. A `design` turn's record carries
 never the line; `start-spec.ts` `designFeaturesOf`); a bare `/design` sends
 none, which `aep-api` reads as every feature.
 
-- **A design run records where it ended** (L30). A `design` or
-  `address-comments` turn (`savesItsEnd`) asks the Room for a forced save
+- **A design run records where it ended** (L30). A `design`,
+  `address-comments` or `recreate` turn (`savesItsEnd`) asks the Room for a forced save
   before it leaves (`RoomPeer.flush`: the `{type:"flush", id}` the console's
   flush-before-build sends, answered `flushed` or `flush-error`), then reads
   the project's head through the tools socket's lookup and sends it as

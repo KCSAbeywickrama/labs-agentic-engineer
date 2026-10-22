@@ -26,7 +26,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { designFeaturesOf, startTurnSummary, turnSpecFor } from "../src/turns/start-spec.js";
+import { designFeaturesOf, turnSpecFor, turnSummary } from "../src/turns/start-spec.js";
 
 const REFS = { references: ["z-notes.md", "brief.pdf"] };
 const PATHS = ["specs/requirements/references/brief.pdf", "specs/requirements/references/z-notes.md"];
@@ -54,6 +54,18 @@ test("/start with no idea anywhere carries none (the start skill asks)", () => {
   assert.deepEqual(turnSpecFor("/start", { idea: "   ", references: [] }), { spec: { kind: "start" }, flow: "start" });
 });
 
+test("/recreate takes the idea from the lookup reply as its text, unless a note was typed", () => {
+  assert.deepEqual(turnSpecFor("/recreate", { idea: "Keep the partner roster", ...REFS }), {
+    spec: { kind: "flow", skill: "recreate", text: "Keep the partner roster", references: PATHS },
+    flow: "recreate",
+  });
+  assert.deepEqual(turnSpecFor("/recreate  drop F9 ", { idea: "the descriptor idea", references: [] }), {
+    spec: { kind: "flow", skill: "recreate", text: "drop F9" },
+    flow: "recreate",
+  });
+  assert.deepEqual(turnSpecFor("/recreate", { idea: "  ", references: [] }), { spec: { kind: "flow", skill: "recreate" }, flow: "recreate" });
+});
+
 test("/design brief → flow design, with the references as snapshot paths", () => {
   assert.deepEqual(turnSpecFor("/design brief", REFS), {
     spec: { kind: "flow", skill: "design", text: "brief", references: PATHS },
@@ -78,13 +90,16 @@ test("only a narrow command shape is a command; everything else is chat", () => 
   }
 });
 
-test("startTurnSummary appends the resolved idea to a bare /start only", () => {
-  assert.equal(startTurnSummary("/start", { kind: "start", idea: "A greeter" }), "/start A greeter");
-  assert.equal(startTurnSummary("  /start ", { kind: "start", idea: "A greeter" }), "/start A greeter");
-  assert.equal(startTurnSummary("/start typed idea", { kind: "start", idea: "typed idea" }), "/start typed idea");
-  assert.equal(startTurnSummary("/start", { kind: "start" }), "/start");
-  assert.equal(startTurnSummary("/design x", { kind: "flow", skill: "design", text: "x" }), "/design x");
-  assert.equal(startTurnSummary("hi", { kind: "chat", text: "hi" }), "hi");
+test("turnSummary appends the resolved idea to a bare /start or /recreate only", () => {
+  assert.equal(turnSummary("/start", { kind: "start", idea: "A greeter" }), "/start A greeter");
+  assert.equal(turnSummary("  /start ", { kind: "start", idea: "A greeter" }), "/start A greeter");
+  assert.equal(turnSummary("/start typed idea", { kind: "start", idea: "typed idea" }), "/start typed idea");
+  assert.equal(turnSummary("/start", { kind: "start" }), "/start");
+  assert.equal(turnSummary("/recreate", { kind: "flow", skill: "recreate", text: "Keep the roster" }), "/recreate Keep the roster");
+  assert.equal(turnSummary("/recreate", { kind: "flow", skill: "recreate" }), "/recreate");
+  assert.equal(turnSummary("/recreate drop F9", { kind: "flow", skill: "recreate", text: "drop F9" }), "/recreate drop F9");
+  assert.equal(turnSummary("/design x", { kind: "flow", skill: "design", text: "x" }), "/design x");
+  assert.equal(turnSummary("hi", { kind: "chat", text: "hi" }), "hi");
 });
 
 test("/interview F<n> (main's interview command shape) is the interview flow with the feature as its text", () => {

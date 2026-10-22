@@ -57,7 +57,7 @@ func TestKickoff_FollowStopsAtTheBudgetAndClosesTheStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		pod := &endlessTurn{}
 		row := &sourcecontrol.GitRepository{OrgID: kickoffOrg, ProjectID: kickoffProj, RepoURL: "https://github.com/acme/greeter"}
-		svc := spec.NewKickoffService(pod, kickoffRepos{row: row}, kickoffLedger{})
+		svc := spec.NewKickoffService(pod, nil, kickoffRepos{row: row}, kickoffLedger{})
 
 		svc.Kickoff(context.Background(), kickoffOrg, kickoffProj)
 

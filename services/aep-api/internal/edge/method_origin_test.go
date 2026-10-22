@@ -129,6 +129,7 @@ var opOwner = map[string]string{
 	"PromoteTaskFromIssue":          embedDelivery,
 	"ProvisionPlatformResource":     embedDependencies,
 	"PutProjectReferences":          embedSpec,
+	"SeedProject":                   embedSpec,
 	"PromoteExternalResource":       embedDependencies,
 	"RegisterExternalResource":      embedDependencies,
 	"RequestOrgServiceAccess":       embedDependencies,

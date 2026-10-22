@@ -24,6 +24,7 @@ import {
   REFERENCE_ACCEPT,
   referenceTypeLabel,
   screenReferenceFiles,
+  splitAttachments,
   type RejectedFile,
 } from "../referenceFiles";
 
@@ -101,6 +102,9 @@ export function PromptComposer({
     setDragOver(false);
     addFiles(e.dataTransfer.files);
   };
+  // A spec bundle IS the brief (ADR-0053): with one attached the prompt is an
+  // optional note for the first design, what the recreate keeps, drops or changes.
+  const { bundle } = splitAttachments(files);
 
   return (
     <Stack spacing={1}>
@@ -128,7 +132,11 @@ export function PromptComposer({
         <InputBase
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
-          placeholder="e.g. A service desk where employees raise IT requests and the team tracks them through to resolution"
+          placeholder={
+            bundle
+              ? "Optional: anything the recreate should keep, drop or change. The bundle already describes the product."
+              : "e.g. A service desk where employees raise IT requests and the team tracks them through to resolution"
+          }
           multiline
           minRows={4}
           autoFocus
@@ -154,7 +162,7 @@ export function PromptComposer({
                 // No extension list: the picker already filters by `accept`,
                 // and an unsupported file answers with a notice naming the
                 // accepted set, at the point where it matters.
-                `A PRD, notes, an API spec, a mockup. Agents read them when deriving your requirements. Up to ${MAX_REFERENCE_FILES} files, 5 MB each.`
+                `A PRD, notes, an API spec, a mockup. Agents read them when deriving your requirements. Up to ${MAX_REFERENCE_FILES} files, 5 MB each. Recreating an existing app? Attach the .aespecs bundle code-to-spec wrote.`
               }
             >
               <Button component="label" size="small" variant="outlined" startIcon={<Paperclip size={14} />}>
@@ -174,8 +182,9 @@ export function PromptComposer({
             </Tooltip>
           </Box>
           {/* Attaching is optional and documents alone are not a brief: the
-              typed idea stays the anchor, so only a prompt enables this. */}
-          <Button variant="contained" disabled={!prompt.trim()} onClick={onSubmit} sx={{ ml: "auto" }}>
+              typed idea stays the anchor, so only a prompt enables this. A
+              bundle is a brief on its own. */}
+          <Button variant="contained" disabled={!prompt.trim() && !bundle} onClick={onSubmit} sx={{ ml: "auto" }}>
             Continue
           </Button>
         </Box>

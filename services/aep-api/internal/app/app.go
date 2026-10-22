@@ -454,8 +454,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// a button. Wired after the descriptor writer above because that is the
 	// order the create path runs them in — the turn reads the idea from the
 	// file that write commits. The finished-turn ledger is its guard.
-	kickoff := spec.NewKickoffService(studioTools, repoRepo, turnRepo)
+	kickoff := spec.NewKickoffService(studioTools, studioTools, repoRepo, turnRepo)
 	projectService.SetKickoffStarter(kickoff)
+	// A project recreated from existing code is seeded from a spec bundle
+	// instead of interviewed: the seed commits the bundle through the pod and
+	// stamps `[recreate]` into the descriptor, which is what the kickoff above
+	// reads to stay held.
+	seed := spec.NewSeedService(studioTools, repoRepo, turnRepo)
 	// …and the status poll reports whether it is still running, which is the
 	// one thing the git-derived spec fields cannot say.
 	projectService.SetSpecTurnSource(turnRepo)
@@ -1023,6 +1028,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		References:  studioTools,
 		Repos:       repoRepo,
 		Kickoff:     kickoff,
+		Seed:        seed,
 		Artifacts:   artifactSvcGit,
 		Skills:      skillSvc,
 		SkillMut:    skillMutationSvc,
